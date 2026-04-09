@@ -1,0 +1,57 @@
+{
+  "system": "TSS — Triangulation Signal System",
+  "version": "1.0",
+  "author": "Apex-Engine",
+
+  "bankroll": {
+    "total": 1000,
+    "tss_allocation_pct": 0.30,
+    "apex_allocation_pct": 0.70,
+    "max_single_stake_pct": 0.025,
+    "max_exposure_match_pct": 0.03
+  },
+
+  "gates": {
+    "delta_min": 0.08,
+    "ic_min": 0.85,
+    "ev_min": 0.05,
+    "sdt_min": 0.60,
+    "delta_max_suspect": 0.18
+  },
+
+  "triangulation": {
+    "weights": {
+      "module_A": 0.40,
+      "module_B": 0.40,
+      "module_C": 0.20
+    },
+    "dixon_coles_rho": -0.13,
+    "max_goals_matrix": 7
+  },
+
+  "sdt_levels": {
+    "maximal": {"sdt_min": 0.85, "kelly_fraction": 0.75, "stake_cap": 0.025},
+    "strong":  {"sdt_min": 0.70, "kelly_fraction": 0.50, "stake_cap": 0.015},
+    "moderate":{"sdt_min": 0.60, "kelly_fraction": 0.25, "stake_cap": 0.0075},
+    "weak":    {"sdt_min": 0.50, "kelly_fraction": 0.125,"stake_cap": 0.0025}
+  },
+
+  "line_movement": {
+    "warning_threshold": 0.10,
+    "critical_threshold": 0.15,
+    "snapshot_labels": ["H-24", "H-3", "H-1"]
+  },
+
+  "telegram": {
+    "bot_token": "",
+    "chat_id": "",
+    "send_no_bet": false
+  },
+
+  "supported_markets": ["btts", "over25", "over15"],
+
+  "supported_leagues": [
+    "serie_a", "la_liga", "bundesliga", "premier_league",
+    "ligue_1", "champions_league", "europa_league"
+  ]
+}
