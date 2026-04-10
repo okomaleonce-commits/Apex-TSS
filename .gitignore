@@ -4,4 +4,6 @@ __pycache__/
 .env
 data/*.jsonl
 logs/*.log
-*.csv
+reports/*.csv
+reports/*.md
+# NE PAS ignorer fbref_cache.db — il est commité pour Render
