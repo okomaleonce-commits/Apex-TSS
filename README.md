@@ -106,3 +106,53 @@ Apex-TSS/
 
 Ce système est un outil d'analyse probabiliste.
 Les performances passées ne garantissent pas les performances futures.
+
+---
+
+## v2.0 — Walk-Forward Backtesting Engine
+
+### New modules
+
+| File | Role |
+|------|------|
+| `tss/fbref_scraper.py` | FBref scraper + SQLite cache (10 leagues) |
+| `tss/backtest_engine.py` | Dixon-Coles + Walk-Forward splitter + TSS gates |
+| `tss/results_analyzer.py` | ROI / gate calibration / market heatmap |
+| `tss/odds_loader.py` | football-data.co.uk CSV downloader + Shin demarg merger |
+| `tss/alternative_odds_loader.py` | Brazil / A-League / AFC CL (OddsPortal + manual import + synthetic fallback) |
+| `tss/pdf_report.py` | 6-page PDF report (equity curve, heatmap, gate grid, distributions) |
+| `oddsportal_scraper.py` | Standalone Selenium scraper for alternative leagues |
+| `backtesting.py` | Unified CLI orchestrator — all pipelines |
+| `requirements_backtest.txt` | Python dependencies for backtest stack |
+
+### Quick start
+
+```bash
+pip install -r requirements_backtest.txt
+
+# Smoke test (synthetic data, ~2 min)
+python backtesting.py --smoke-test
+
+# Full pipeline: 7 FDCO leagues + 3 alternative leagues
+python backtesting.py --all --seasons 2022-2023 2023-2024 2024-2025
+
+# Calibrate gates on existing signals
+python backtesting.py --calibrate
+
+# Generate PDF report from existing signals CSV
+python tss/pdf_report.py --signals reports/signals_<ts>.csv
+```
+
+### Architecture
+
+```
+FBref xG data + football-data.co.uk odds + OddsPortal (alt leagues)
+                          ↓
+                 Unified dataset (10 leagues)
+                          ↓
+          Dixon-Coles Walk-Forward (season splits)
+          Gate-0 DCS → Gate-1 EV → Gate-2 Edge → Gate-3 Odds
+          Kelly fractional staking
+                          ↓
+           PDF Report: ROI / Drawdown / Heatmap / Gate grid
+```

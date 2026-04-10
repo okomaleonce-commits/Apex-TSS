@@ -1,0 +1,28 @@
+[
+  {
+    "date": "2023-04-10",
+    "home": "Flamengo",
+    "away": "Palmeiras",
+    "home_goals": 2,
+    "away_goals": 1,
+    "odds_H": 2.1,
+    "odds_D": 3.5,
+    "odds_A": 3.8,
+    "odds_over2.5": 1.9,
+    "odds_under2.5": 1.95,
+    "season": "2023"
+  },
+  {
+    "date": "2023-04-17",
+    "home": "Atletico Mineiro",
+    "away": "Corinthians",
+    "home_goals": 0,
+    "away_goals": 0,
+    "odds_H": 1.85,
+    "odds_D": 3.4,
+    "odds_A": 4.5,
+    "odds_over2.5": 2.1,
+    "odds_under2.5": 1.75,
+    "season": "2023"
+  }
+]
