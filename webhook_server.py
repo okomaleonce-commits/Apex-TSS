@@ -43,7 +43,7 @@ def _is_match_text(text: str) -> bool:
 
 
 # ── Config depuis variables d'environnement ───────────────────────────────────
-BOT_TOKEN   = os.environ.get("BOT_TOKEN",   "8798739431:AAH4BhkUL9f1O7GpdKBPm7UZreuuLVd4H9s")
+BOT_TOKEN   = os.environ.get("BOT_TOKEN",   "8317486741:AAGvBTv-Id5Qr48JBaq-RXyUAGZQfw7Z5dE")
 CHAT_ID     = os.environ.get("CHAT_ID",     "5484281251")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")   # set on Render dashboard
 PORT        = int(os.environ.get("PORT",    10000))
@@ -324,6 +324,14 @@ def _once():
     app.before_request_funcs[None].remove(_once)
     if WEBHOOK_URL:
         register_webhook(WEBHOOK_URL)
+        # Send startup notification
+        tg_send(CHAT_ID,
+            "🟢 <b>APEX-TSS Bot — Redémarrage OK</b>\n"
+            f"📅 {datetime.utcnow().strftime('%d/%m/%Y %H:%M UTC')}\n"
+            "✅ Webhook actif · Dixon-Coles chargé\n\n"
+            "💡 Envoie un match pour l'analyser:\n"
+            "<code>/analyse 11/04 PL Arsenal Bournemouth</code>"
+        )
     else:
         log.warning("WEBHOOK_URL not set — webhook not registered. "
                     "Set it in Render environment variables.")

@@ -47,7 +47,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [TG-BOT] %(message)s
 log = logging.getLogger("telegram_bot")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-BOT_TOKEN = "8798739431:AAH4BhkUL9f1O7GpdKBPm7UZreuuLVd4H9s"
+BOT_TOKEN = "8317486741:AAGvBTv-Id5Qr48JBaq-RXyUAGZQfw7Z5dE"
 TG_API    = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 CONFIG_PATH = Path("config.json")

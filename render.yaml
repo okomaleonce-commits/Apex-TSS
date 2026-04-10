@@ -7,7 +7,7 @@ services:
     plan: free
     envVars:
       - key: BOT_TOKEN
-        value: 8798739431:AAH4BhkUL9f1O7GpdKBPm7UZreuuLVd4H9s
+        value: 8317486741:AAGvBTv-Id5Qr48JBaq-RXyUAGZQfw7Z5dE
       - key: CHAT_ID
         value: "5484281251"
       - key: WEBHOOK_URL
