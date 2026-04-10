@@ -57,7 +57,8 @@
     ]
   },
   "telegram": {
-    "chat_id": "5484281251"
+    "chat_id": "5484281251",
+    "webhook_url": "https://apex-tss.onrender.com"
   },
   "supported_markets": [
     "btts",
@@ -72,5 +73,9 @@
     "ligue_1",
     "champions_league",
     "europa_league"
-  ]
+  ],
+  "render": {
+    "url": "https://apex-tss.onrender.com",
+    "plan": "free"
+  }
 }

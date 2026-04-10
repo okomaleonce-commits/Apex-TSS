@@ -11,7 +11,7 @@ services:
       - key: CHAT_ID
         value: "5484281251"
       - key: WEBHOOK_URL
-        sync: false   # Set manually after first deploy (your Render URL)
+        value: "https://apex-tss.onrender.com"
       - key: PORT
         value: "10000"
     healthCheckPath: /health
