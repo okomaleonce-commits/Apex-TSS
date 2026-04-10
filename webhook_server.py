@@ -292,7 +292,8 @@ def webhook():
     elif cmd == "/report":   cmd_report(chat_id)
     elif cmd == "/backtest": cmd_backtest(chat_id)
     elif cmd == "/gates":    cmd_gates(chat_id)
-    elif cmd == "/analyze":  cmd_analyze(chat_id, text)
+    elif cmd in ("/analyze", "/analyse", "/match", "/tss"):
+        cmd_analyze(chat_id, text)
     elif _is_match_text(text): cmd_analyze(chat_id, text)
     else:
         tg_send(chat_id,

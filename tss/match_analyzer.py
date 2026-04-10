@@ -199,23 +199,50 @@ MONTHS_FR = {
 def parse_match_text(text: str) -> Tuple[str, str, Optional[datetime], Optional[str]]:
     """
     Parse free text → (home, away, date, league_hint)
-    Examples:
+    Handles multiple formats:
       "PSG vs Lyon 15/04"
-      "Naples - Lazio"
-      "Arsenal contre Chelsea 2026-04-20 EPL"
-      "Real Madrid vs Atletico 13 avril"
+      "11/04 11:30 PL Arsenal Bournemouth"
+      "/analyze Arsenal vs Bournemouth 11/04"
+      "Arsenal contre Chelsea 20/04/2026 EPL"
     """
     text = text.strip()
 
-    # Extract explicit league hint
+    # Strip command prefix
+    text = re.sub(r"^/(analys[ei]|analyze|match|tss)\s*", "", text, flags=re.IGNORECASE).strip()
+
+    # ── League hint ───────────────────────────────────────────────────────────
+    LEAGUE_ALIASES = {
+        "pl": "EPL", "epl": "EPL", "premier league": "EPL", "premier": "EPL",
+        "serie a": "Serie A", "seriea": "Serie A", "italy": "Serie A",
+        "la liga": "La Liga", "laliga": "La Liga", "spain": "La Liga",
+        "bundesliga": "Bundesliga", "germany": "Bundesliga", "buli": "Bundesliga",
+        "ligue 1": "Ligue 1", "ligue1": "Ligue 1", "france": "Ligue 1",
+        "eredivisie": "Eredivisie", "netherlands": "Eredivisie",
+        "belgian pro": "Belgian Pro", "belgium": "Belgian Pro",
+        "brazil": "Brazil Serie A", "brasileirao": "Brazil Serie A",
+        "a-league": "A-League", "aleague": "A-League", "australia": "A-League",
+        "afc": "AFC CL", "afc cl": "AFC CL",
+        "ucl": "EPL",  # Champions League — fallback to top league
+    }
+
     league_hint = None
+    for alias, lg in sorted(LEAGUE_ALIASES.items(), key=lambda x: -len(x[0])):
+        if re.search(rf"\b{re.escape(alias)}\b", text, re.IGNORECASE):
+            league_hint = lg
+            text = re.sub(rf"\b{re.escape(alias)}\b", "", text, flags=re.IGNORECASE).strip()
+            break
+
     for lg in ["Serie A","EPL","La Liga","Bundesliga","Ligue 1",
                "Eredivisie","Belgian Pro","Brazil Serie A","A-League","AFC CL"]:
-        if lg.lower() in text.lower():
+        if re.search(re.escape(lg), text, re.IGNORECASE):
             league_hint = lg
             text = re.sub(re.escape(lg), "", text, flags=re.IGNORECASE).strip()
+            break
 
-    # Extract date
+    # ── Time (HH:MM) — strip it, not used for prediction ─────────────────────
+    text = re.sub(r"\b\d{1,2}:\d{2}\b", "", text).strip()
+
+    # ── Date ──────────────────────────────────────────────────────────────────
     match_date = None
     for pattern, fmt in DATE_PATTERNS:
         m = pattern.search(text)
@@ -247,22 +274,53 @@ def parse_match_text(text: str) -> Tuple[str, str, Optional[datetime], Optional[
                 except ValueError:
                     pass
 
-    # Split teams
-    parts = SEPARATORS.split(text.strip())
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # ── Split teams ───────────────────────────────────────────────────────────
+    # Try explicit separators first
+    parts = SEPARATORS.split(text)
     if len(parts) >= 2:
         home_raw = parts[0].strip()
         away_raw = parts[1].strip()
     else:
-        words = text.strip().split()
-        mid   = len(words) // 2
-        home_raw = " ".join(words[:mid])
-        away_raw = " ".join(words[mid:])
+        # No separator — try matching known team names from left and right
+        home_raw, away_raw = _split_by_team_names(text)
 
-    # Clean team names
+    # Clean
     home_raw = re.sub(r"\s+", " ", home_raw).strip(" -–")
     away_raw = re.sub(r"\s+", " ", away_raw).strip(" -–")
 
     return home_raw, away_raw, match_date, league_hint
+
+
+def _split_by_team_names(text: str) -> Tuple[str, str]:
+    """
+    When no separator (vs/v/-) found, try to split by identifying
+    two consecutive known team names.
+    Example: "Arsenal Bournemouth" → "Arsenal" / "Bournemouth"
+    """
+    words = text.split()
+    all_teams = list(TEAM_LEAGUE_MAP.keys()) + list(TEAM_ALIASES.keys())
+
+    # Try all split points
+    best = (0.0, "", "")
+    for i in range(1, len(words)):
+        left  = " ".join(words[:i])
+        right = " ".join(words[i:])
+        sl    = max((SequenceMatcher(None, _normalise(left),  _normalise(t)).ratio()
+                     for t in all_teams), default=0)
+        sr    = max((SequenceMatcher(None, _normalise(right), _normalise(t)).ratio()
+                     for t in all_teams), default=0)
+        score = sl + sr
+        if score > best[0]:
+            best = (score, left, right)
+
+    if best[1] and best[2]:
+        return best[1], best[2]
+
+    # Fallback: split in half
+    mid = len(words) // 2
+    return " ".join(words[:mid]), " ".join(words[mid:])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
