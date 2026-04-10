@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: apex-tss-bot
+    runtime: python
+    buildCommand: pip install -r requirements_render.txt
+    startCommand: python webhook_server.py
+    plan: free
+    envVars:
+      - key: BOT_TOKEN
+        value: 8798739431:AAH4BhkUL9f1O7GpdKBPm7UZreuuLVd4H9s
+      - key: CHAT_ID
+        value: "5484281251"
+      - key: WEBHOOK_URL
+        sync: false   # Set manually after first deploy (your Render URL)
+      - key: PORT
+        value: "10000"
+    healthCheckPath: /health
+    autoDeploy: true   # Auto-deploy on every GitHub push
