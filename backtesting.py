@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from tss.fbref_scraper  import FBrefScraper, FBrefCache, LEAGUES, SEASONS
 from tss.backtest_engine import BacktestRunner, GateCalibrator
 from tss.results_analyzer import generate_full_report, compute_roi_metrics
+from tss.telegram_bot import hook_into_pipeline
 
 logging.basicConfig(
     level=logging.INFO,
@@ -280,7 +281,8 @@ def run_with_real_odds(leagues: list, seasons: list, config: dict, force_dl: boo
     for k, v in metrics.items():
         log.info(f"  {k:30s}: {v}")
 
-    generate_full_report(results, config)
+    pdf = generate_full_report(results, config)
+    hook_into_pipeline(results, config, pdf_path=pdf)
     log.info("\n✅ Real-odds backtest complete. Reports in ./reports/")
 
 
@@ -352,4 +354,6 @@ def run_complete_pipeline(seasons: list, config: dict, force_dl: bool = False):
 
     # Step 5: Report
     generate_full_report(results, config)
+    pdf = list(sorted(__import__('pathlib').Path('reports').glob('*.pdf')))[-1] if list(__import__('pathlib').Path('reports').glob('*.pdf')) else None
+    hook_into_pipeline(results, config, pdf_path=str(pdf) if pdf else None)
     log.info("\n✅ Complete pipeline finished. Reports in ./reports/")
