@@ -17,6 +17,7 @@ Variables d'environnement requises sur Render:
   WEBHOOK_URL   — URL publique Render (ex: https://apex-tss.onrender.com)
 """
 
+import re
 import os
 import json
 import logging
@@ -27,11 +28,19 @@ from datetime import datetime
 
 import requests
 from flask import Flask, request, jsonify
+from tss.match_analyzer import analyze_match_text
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [SERVER] %(message)s")
 log = logging.getLogger("webhook_server")
 
-app = Flask(__name__)
+def _is_match_text(text: str) -> bool:
+    """Detect if a free-text message looks like a match (contains vs/v/-/contre)."""
+    return bool(re.search(
+        r"\s+vs\.?\s+|\s+v\.?\s+|\s+contre\s+|\s*[-–—]\s*\w",
+        text, re.IGNORECASE
+    ))
+
+
 
 # ── Config depuis variables d'environnement ───────────────────────────────────
 BOT_TOKEN   = os.environ.get("BOT_TOKEN",   "8798739431:AAH4BhkUL9f1O7GpdKBPm7UZreuuLVd4H9s")
@@ -108,7 +117,12 @@ def cmd_help(chat_id: str):
         "/report — Envoyer dernier rapport (texte)\n"
         "/backtest — Smoke-test backtest (2 min)\n"
         "/gates — Afficher gates actives\n"
+        "/analyze &lt;match&gt; — Analyser un match\n"
         "/help — Ce message\n\n"
+        "💡 <b>Analyse rapide (texte libre):</b>\n"
+        "<code>PSG vs Lyon</code>\n"
+        "<code>Naples - Lazio 15/04</code>\n"
+        "<code>Arsenal contre Chelsea 20/04</code>\n\n"
         "<i>Le bot envoie automatiquement un rapport après chaque backtest complet.</i>"
     )
     tg_send(chat_id, msg)
@@ -205,7 +219,26 @@ def cmd_gates(chat_id: str):
     tg_send(chat_id, msg)
 
 
-def cmd_backtest(chat_id: str):
+def cmd_analyze(chat_id: str, text: str):
+    """Analyse un match envoyé en texte libre."""
+    # Strip la commande /analyze si présente
+    match_text = re.sub(r"^/analyze\s*", "", text, flags=re.IGNORECASE).strip()
+    if not match_text:
+        tg_send(chat_id,
+            "⚽ <b>Envoie-moi un match à analyser !</b>\n\n"
+            "Exemples:\n"
+            "  <code>PSG vs Lyon</code>\n"
+            "  <code>Naples - Lazio 15/04</code>\n"
+            "  <code>Arsenal contre Chelsea 20/04</code>\n"
+            "  <code>/analyze Real Madrid vs Barcelona</code>"
+        )
+        return
+
+    tg_send(chat_id, "⏳ Analyse TSS en cours...")
+    msg = analyze_match_text(match_text)
+    tg_send(chat_id, msg)
+
+
     tg_send(chat_id, "⏳ <b>Backtest smoke-test lancé...</b>\nRésultat dans ~2 minutes.")
 
     def run():
@@ -259,9 +292,13 @@ def webhook():
     elif cmd == "/report":   cmd_report(chat_id)
     elif cmd == "/backtest": cmd_backtest(chat_id)
     elif cmd == "/gates":    cmd_gates(chat_id)
+    elif cmd == "/analyze":  cmd_analyze(chat_id, text)
+    elif _is_match_text(text): cmd_analyze(chat_id, text)
     else:
         tg_send(chat_id,
-                "❓ Commande inconnue. Envoie /help pour la liste des commandes.")
+                "❓ Commande inconnue. Envoie /help pour la liste des commandes.\n\n"
+                "💡 Tu peux aussi envoyer directement un match:\n"
+                "<code>PSG vs Lyon</code>")
 
     return jsonify({"ok": True})
 
