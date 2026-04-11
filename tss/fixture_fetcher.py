@@ -81,14 +81,15 @@ FDORG_BASE  = "https://api.football-data.org/v4"
 TSDB_BASE   = "https://www.thesportsdb.com/api/v1/json/3"
 
 # TheSportsDB league IDs
+# Only leagues with verified TheSportsDB IDs returning correct clubs
 TSDB_LEAGUES = {
-    "EPL":        4328,
-    "Serie A":    4332,
-    "La Liga":    4335,
-    "Bundesliga": 4331,
-    "Ligue 1":    4334,
-    "Eredivisie": 4337,   # Dutch Eredivisie
-    "Belgian Pro":4397,   # Belgian First Division A (corrected)
+    "EPL":        4328,   # ✅ Verified
+    "Serie A":    4332,   # ✅ Verified
+    "La Liga":    4335,   # ✅ Verified
+    "Bundesliga": 4331,   # ✅ Verified
+    "Ligue 1":    4334,   # ✅ Verified
+    # Eredivisie/Belgian Pro removed — IDs 4337/4397 return English clubs (wrong)
+    # Will be re-added when correct IDs are confirmed
 }
 
 # football-data.org competition codes (backup)
@@ -102,7 +103,7 @@ FDORG_LEAGUES = {
     "Belgian Pro":"BSA",
 }
 
-CACHED_LEAGUES = list(TSDB_LEAGUES.keys())
+CACHED_LEAGUES = list(TSDB_LEAGUES.keys())  # 5 verified leagues only
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -146,7 +147,7 @@ def _fetch_tsdb_league(league: str, date_from: date, date_to: date) -> List[Dict
                 continue
             # Filter by league
             ev_league = ev.get("strLeague", "")
-            log.debug(f"  TSDB event: {ev.get('strHomeTeam')} vs {ev.get('strAwayTeam')} | strLeague={ev_league!r}")
+            log.info(f"  TSDB event: {ev.get('strHomeTeam')} vs {ev.get('strAwayTeam')} | strLeague={ev_league!r}")
             if not _league_matches(ev_league, league):
                 continue
             home = ev.get("strHomeTeam", "")
@@ -188,9 +189,12 @@ def _fetch_tsdb_league(league: str, date_from: date, date_to: date) -> List[Dict
                         continue
                     home = ev.get("strHomeTeam", "")
                     away = ev.get("strAwayTeam", "")
+                    ev_str_league = ev.get("strLeague", "?")
+                    log.info(f"  FALLBACK event: {home} vs {away} | strLeague={ev_str_league!r}")
                     if not home or not away:
                         continue
                     if not (_is_valid_club(home, league) and _is_valid_club(away, league)):
+                        log.info(f"    → SKIP: clubs not in {league} whitelist")
                         continue
                     time_str = (ev.get("strTime") or "")[:5]
                     ev_id = str(ev.get("idEvent", ""))
