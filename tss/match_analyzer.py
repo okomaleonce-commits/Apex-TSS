@@ -629,7 +629,8 @@ def format_analysis_message(
         lines.append("  <i>Raisons principales:</i>")
         # Show why best market failed
         for s in signals[:3]:
-            lines.append(f"  • {s['label']}: {' | '.join(s['fails'])}")
+            fail_str = ' | '.join(s['fails']).replace('<', '&lt;').replace('>', '&gt;')
+            lines.append(f"  • {s['label']}: {fail_str}")
         lines.append("")  # blank line before footer
 
     # NO BET summary (top 3 closest to passing)
