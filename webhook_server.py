@@ -327,13 +327,15 @@ def cmd_setgates(cid, text):
         tg_send(cid, "\u274c Aucun param\u00e8tre valide.")
         return
 
-    # Apply
+    # Apply to config.json + runtime override file
     try:
         cfg = json.loads(Path("config.json").read_text())
         if "backtest" not in cfg:
             cfg["backtest"] = {}
         cfg["backtest"].update(updates)
         Path("config.json").write_text(json.dumps(cfg, indent=2))
+        # Also write to override file (survives within session)
+        Path("data/gates_override.json").write_text(json.dumps(updates))
         lines = ["\u2705 <b>Gates mises \u00e0 jour</b>\n"]
         for k, v in updates.items():
             default = DEFAULTS.get(k, "?")

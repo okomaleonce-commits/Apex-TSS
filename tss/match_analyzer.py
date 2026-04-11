@@ -35,20 +35,26 @@ MODEL_DIR.mkdir(parents=True, exist_ok=True)
 def _load_gates() -> Dict:
     try:
         cfg = json.loads(Path("config.json").read_text())
-        return {
-            "ev_min":         cfg.get("backtest", cfg.get("gates", {})).get("ev_min",   0.03),
-            "edge_min":       cfg.get("backtest", cfg.get("gates", {})).get("edge_min", 0.05),
-            "odds_min":       cfg.get("backtest", {}).get("odds_min",       1.40),
-            "odds_max":       cfg.get("backtest", {}).get("odds_max",       4.50),
-            "kelly_fraction": cfg.get("backtest", {}).get("kelly_fraction", 0.25),
-            "max_stake_pct":  cfg.get("backtest", {}).get("max_stake_pct",  0.030),
-            "dcs_min":        cfg.get("backtest", {}).get("dcs_min",        0.60),
+        base = {
+            "ev_min":         cfg.get("backtest", cfg.get("gates", {})).get("ev_min",   0.01),
+            "edge_min":       cfg.get("backtest", cfg.get("gates", {})).get("edge_min", 0.02),
+            "odds_min":       cfg.get("backtest", {}).get("odds_min",       1.30),
+            "odds_max":       cfg.get("backtest", {}).get("odds_max",       5.50),
+            "kelly_fraction": cfg.get("backtest", {}).get("kelly_fraction", 0.20),
+            "max_stake_pct":  cfg.get("backtest", {}).get("max_stake_pct",  0.025),
+            "dcs_min":        cfg.get("backtest", {}).get("dcs_min",        0.50),
             "book_margin":    cfg.get("backtest", {}).get("book_margin",    0.055),
         }
+        # Runtime override (from /setgates command)
+        override_path = Path("data/gates_override.json")
+        if override_path.exists():
+            overrides = json.loads(override_path.read_text())
+            base.update(overrides)
+        return base
     except Exception:
         return {
-            "ev_min": 0.03, "edge_min": 0.05, "odds_min": 1.40, "odds_max": 4.50,
-            "kelly_fraction": 0.25, "max_stake_pct": 0.030, "dcs_min": 0.60,
+            "ev_min": 0.01, "edge_min": 0.02, "odds_min": 1.30, "odds_max": 5.50,
+            "kelly_fraction": 0.20, "max_stake_pct": 0.025, "dcs_min": 0.50,
             "book_margin": 0.055,
         }
 
