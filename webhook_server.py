@@ -116,6 +116,7 @@ def cmd_help(cid):
         "/gates — Gates actives\n"
         "/analyse [match] — Analyser un match\n"
         "/scan [fenêtre] — Scanner tous les matchs\n"
+        "/setgates [params] — Modifier les gates\n"
         "/help — Ce message\n\n"
         "💡 <b>Exemples /scan:</b>\n"
         "<code>/scan today</code>\n"
@@ -178,6 +179,93 @@ def cmd_gates(cid):
         )
     except Exception as e:
         tg_send(cid, f"❌ config.json: {e}")
+
+def cmd_setgates(cid, text):
+    import json
+    from pathlib import Path
+    DEFAULTS = {
+        "ev_min": 0.03, "edge_min": 0.05, "odds_min": 1.40, "odds_max": 4.50,
+        "kelly_fraction": 0.25, "max_stake_pct": 0.03, "dcs_min": 0.60,
+        "book_margin": 0.055,
+    }
+    ALLOWED = set(DEFAULTS.keys())
+    raw = re.sub(r"^/setgates\s*", "", text, flags=re.IGNORECASE).strip()
+
+    # Reset
+    if raw.lower() in ("reset", "default", "defaults", "restaurer"):
+        try:
+            cfg = json.loads(Path("config.json").read_text())
+            cfg["backtest"] = {**cfg.get("backtest", {}), **DEFAULTS}
+            Path("config.json").write_text(json.dumps(cfg, indent=2))
+            tg_send(cid,
+                "\u2705 <b>Gates restaur\u00e9es aux valeurs par d\u00e9faut</b>\n\n"
+                f"ev_min=<code>{DEFAULTS['ev_min']}</code>  "
+                f"edge_min=<code>{DEFAULTS['edge_min']}</code>\n"
+                f"odds=[<code>{DEFAULTS['odds_min']}</code>"
+                f"\u2013<code>{DEFAULTS['odds_max']}</code>]  "
+                f"kelly=<code>{DEFAULTS['kelly_fraction']}</code>"
+            )
+        except Exception as e:
+            tg_send(cid, f"\u274c Erreur reset: <code>{e}</code>")
+        return
+
+    # Help
+    if not raw:
+        tg_send(cid,
+            "\u2699\ufe0f <b>Usage /setgates:</b>\n\n"
+            "<code>/setgates ev_min=0.01 edge_min=0.01</code>\n"
+            "<code>/setgates odds_min=1.30 odds_max=5.00</code>\n"
+            "<code>/setgates kelly_fraction=0.15</code>\n"
+            "<code>/setgates reset</code> \u2014 valeurs par d\u00e9faut\n\n"
+            "Param\u00e8tres: ev_min | edge_min | odds_min | odds_max\n"
+            "kelly_fraction | max_stake_pct | dcs_min | book_margin"
+        )
+        return
+
+    # Parse key=value
+    updates, errors = {}, []
+    for token in raw.split():
+        if "=" not in token:
+            errors.append(f"Format invalide: <code>{token}</code>")
+            continue
+        k, v = token.split("=", 1)
+        k = k.strip().lower()
+        if k not in ALLOWED:
+            errors.append(f"Cl\u00e9 inconnue: <code>{k}</code>")
+            continue
+        try:
+            updates[k] = float(v)
+        except ValueError:
+            errors.append(f"Valeur invalide: <code>{v}</code> pour {k}")
+
+    if errors:
+        tg_send(cid, "\u274c Erreurs:\n" + "\n".join(errors))
+        return
+    if not updates:
+        tg_send(cid, "\u274c Aucun param\u00e8tre valide.")
+        return
+
+    # Apply
+    try:
+        cfg = json.loads(Path("config.json").read_text())
+        if "backtest" not in cfg:
+            cfg["backtest"] = {}
+        cfg["backtest"].update(updates)
+        Path("config.json").write_text(json.dumps(cfg, indent=2))
+        lines = ["\u2705 <b>Gates mises \u00e0 jour</b>\n"]
+        for k, v in updates.items():
+            default = DEFAULTS.get(k, "?")
+            arrow   = "\U0001f4c9" if v < default else ("\U0001f4c8" if v > default else "\u27a1\ufe0f")
+            lines.append(f"  {arrow} {k} = <code>{v}</code>  (d\u00e9faut: {default})")
+        ev  = cfg["backtest"].get("ev_min", 0.03)
+        ed  = cfg["backtest"].get("edge_min", 0.05)
+        if ev < 0.02 or ed < 0.02:
+            lines.append("\n\u26a0\ufe0f <b>Gates basses \u2014 mode diagnostic</b>")
+            lines.append("Utilise <code>/setgates reset</code> apr\u00e8s validation.")
+        tg_send(cid, "\n".join(lines))
+    except Exception as e:
+        tg_send(cid, f"\u274c Erreur: <code>{e}</code>")
+
 
 def cmd_backtest(cid):
     tg_send(cid, "⏳ <b>Backtest lancé (~2 min)...</b>")
@@ -352,6 +440,7 @@ def _handle_message(cid: str, text: str):
     elif cmd == "/backtest": cmd_backtest(cid)
     elif cmd == "/gates":    cmd_gates(cid)
     elif cmd == "/scan":     cmd_scan(cid, text)
+    elif cmd in ("/setgates", "/gates_set", "/set"): cmd_setgates(cid, text)
     elif cmd in ("/analyze", "/analyse", "/match", "/tss"):
         cmd_analyze(cid, text)
     elif _is_match(text):
