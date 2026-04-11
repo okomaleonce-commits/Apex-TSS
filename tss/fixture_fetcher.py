@@ -110,108 +110,66 @@ CACHED_LEAGUES = list(TSDB_LEAGUES.keys())  # 5 verified leagues only
 # THESPORTSDB (primary — free, no auth)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _fetch_tsdb_day(target_date: date) -> List[Dict]:
-    """
-    Fetch ALL soccer matches on a specific date using TheSportsDB /eventsday.php.
-    This is date-accurate (unlike /eventsnextleague which ignores date filters).
-    """
-    url  = f"{TSDB_BASE}/eventsday.php?d={target_date}&s=Soccer"
-    try:
-        r = requests.get(url, timeout=15)
-        if r.status_code != 200:
-            return []
-        return r.json().get("events") or []
-    except Exception as e:
-        log.error(f"TheSportsDB day fetch error [{target_date}]: {e}")
-        return []
-
-
 def _fetch_tsdb_league(league: str, date_from: date, date_to: date) -> List[Dict]:
     """
-    Fetch fixtures for a league in a date range.
-    Strategy:
-      1. Try /eventsday.php per day (accurate date filter)
-      2. Fallback: /eventsnextleague.php (less accurate but broader)
+    Fetch upcoming fixtures using /eventsnextleague.php.
+    /eventsday.php is unreliable for future dates (TheSportsDB data lag).
+    Club whitelist ensures only correct-division teams pass through.
     """
     league_id = TSDB_LEAGUES.get(league)
-    matches   = []
-    seen_ids  = set()
+    if not league_id:
+        return []
 
-    # Strategy 1: day-by-day fetch (date-accurate)
-    current = date_from
-    while current <= date_to:
-        day_events = _fetch_tsdb_day(current)
-        for ev in day_events:
-            ev_id   = str(ev.get("idEvent", ""))
-            if ev_id in seen_ids:
+    matches = []
+    try:
+        url = f"{TSDB_BASE}/eventsnextleague.php?id={league_id}"
+        r   = requests.get(url, timeout=15)
+        if r.status_code != 200:
+            log.warning(f"TheSportsDB {r.status_code} for {league}")
+            return []
+
+        events = r.json().get("events") or []
+        log.info(f"  {league} ({league_id}): {len(events)} raw events from TSDB")
+
+        for ev in events:
+            ev_date_str = ev.get("dateEvent", "")
+            home        = ev.get("strHomeTeam", "")
+            away        = ev.get("strAwayTeam", "")
+            ev_league   = ev.get("strLeague", "?")
+
+            log.info(f"    → {home} vs {away} | {ev_date_str} | strLeague={ev_league!r}")
+
+            if not ev_date_str or not home or not away:
                 continue
-            # Filter by league
-            ev_league = ev.get("strLeague", "")
-            log.info(f"  TSDB event: {ev.get('strHomeTeam')} vs {ev.get('strAwayTeam')} | strLeague={ev_league!r}")
-            if not _league_matches(ev_league, league):
+
+            try:
+                ev_date = datetime.strptime(ev_date_str, "%Y-%m-%d").date()
+            except Exception:
                 continue
-            home = ev.get("strHomeTeam", "")
-            away = ev.get("strAwayTeam", "")
-            if not home or not away:
+
+            if not (date_from <= ev_date <= date_to):
+                log.info(f"    SKIP date out of range: {ev_date} not in [{date_from},{date_to}]")
                 continue
+
+            # Strict club whitelist — blocks wrong-division clubs
             if not (_is_valid_club(home, league) and _is_valid_club(away, league)):
+                log.info(f"    SKIP whitelist: {home} vs {away} not in {league}")
                 continue
-            seen_ids.add(ev_id)
+
             time_str = (ev.get("strTime") or "")[:5]
             matches.append({
                 "league":   league,
                 "home":     home,
                 "away":     away,
-                "date":     str(current),
+                "date":     ev_date_str,
                 "time":     time_str,
                 "status":   "SCHEDULED",
-                "match_id": ev_id,
-                "source":   "TheSportsDB-day",
+                "match_id": str(ev.get("idEvent", "")),
+                "source":   "TheSportsDB",
             })
-        current += timedelta(days=1)
 
-    # Strategy 2: fallback to next-league endpoint if day fetch returned nothing
-    if not matches and league_id:
-        log.info(f"  {league}: day-fetch returned 0 → trying nextleague fallback")
-        try:
-            url = f"{TSDB_BASE}/eventsnextleague.php?id={league_id}"
-            r   = requests.get(url, timeout=15)
-            if r.status_code == 200:
-                for ev in (r.json().get("events") or []):
-                    ev_date_str = ev.get("dateEvent", "")
-                    if not ev_date_str:
-                        continue
-                    try:
-                        ev_date = datetime.strptime(ev_date_str, "%Y-%m-%d").date()
-                    except Exception:
-                        continue
-                    if not (date_from <= ev_date <= date_to):
-                        continue
-                    home = ev.get("strHomeTeam", "")
-                    away = ev.get("strAwayTeam", "")
-                    ev_str_league = ev.get("strLeague", "?")
-                    log.info(f"  FALLBACK event: {home} vs {away} | strLeague={ev_str_league!r}")
-                    if not home or not away:
-                        continue
-                    if not (_is_valid_club(home, league) and _is_valid_club(away, league)):
-                        log.info(f"    → SKIP: clubs not in {league} whitelist")
-                        continue
-                    time_str = (ev.get("strTime") or "")[:5]
-                    ev_id = str(ev.get("idEvent", ""))
-                    if ev_id not in seen_ids:
-                        seen_ids.add(ev_id)
-                        matches.append({
-                            "league":   league,
-                            "home":     home,
-                            "away":     away,
-                            "date":     ev_date_str,
-                            "time":     time_str,
-                            "status":   "SCHEDULED",
-                            "match_id": ev_id,
-                            "source":   "TheSportsDB-next",
-                        })
-        except Exception as e:
-            log.debug(f"Fallback error [{league}]: {e}")
+    except Exception as e:
+        log.error(f"TheSportsDB error [{league}]: {e}")
 
     return matches
 
