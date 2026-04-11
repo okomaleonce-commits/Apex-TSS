@@ -1,20 +1,5 @@
 """
-APEX-TSS — Telegram Webhook Server
-====================================
-Déployé sur Render.com en mode web service permanent.
-
-Commandes disponibles via Telegram:
-  /start        — Message de bienvenue
-  /status       — Statut du bot + derniers signaux
-  /report       — Envoie le dernier rapport backtest disponible
-  /backtest     — Lance un backtest smoke-test rapide
-  /gates        — Affiche la config des gates actuelle
-  /help         — Liste des commandes
-
-Variables d'environnement requises sur Render:
-  BOT_TOKEN     — Token Telegram bot
-  CHAT_ID       — Ton chat_id Telegram
-  WEBHOOK_URL   — URL publique Render (ex: https://apex-tss.onrender.com)
+APEX-TSS — Telegram Webhook Server (Render.com)
 """
 
 import re
@@ -28,319 +13,230 @@ from datetime import datetime
 
 import requests
 from flask import Flask, request, jsonify
-from tss.match_analyzer import analyze_match_text
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [SERVER] %(message)s")
 log = logging.getLogger("webhook_server")
 
-def _is_match_text(text: str) -> bool:
-    """Detect if a free-text message looks like a match (contains vs/v/-/contre)."""
-    return bool(re.search(
-        r"\s+vs\.?\s+|\s+v\.?\s+|\s+contre\s+|\s*[-–—]\s*\w",
-        text, re.IGNORECASE
-    ))
-
-
-
-# ── Config depuis variables d'environnement ───────────────────────────────────
+# ── Config ─────────────────────────────────────────────────────────────────────
 BOT_TOKEN   = os.environ.get("BOT_TOKEN",   "8317486741:AAGvBTv-Id5Qr48JBaq-RXyUAGZQfw7Z5dE")
 CHAT_ID     = os.environ.get("CHAT_ID",     "5484281251")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")   # set on Render dashboard
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://apex-tss.onrender.com")
 PORT        = int(os.environ.get("PORT",    10000))
 TG_API      = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 REPORTS_DIR = Path("reports")
 REPORTS_DIR.mkdir(exist_ok=True)
 
+# ── Flask app — MUST be before any @app.route ──────────────────────────────────
+app = Flask(__name__)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TELEGRAM HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def tg_send(chat_id: str, text: str, parse_mode: str = "HTML") -> bool:
+def tg_send(chat_id, text, parse_mode="HTML"):
     try:
         r = requests.post(f"{TG_API}/sendMessage", json={
             "chat_id": chat_id, "text": text,
-            "parse_mode": parse_mode,
-            "disable_web_page_preview": True
+            "parse_mode": parse_mode, "disable_web_page_preview": True
         }, timeout=10)
         return r.status_code == 200 and r.json().get("ok")
     except Exception as e:
-        log.error(f"tg_send error: {e}")
+        log.error(f"tg_send: {e}")
         return False
 
-
-def tg_send_doc(chat_id: str, file_path: str, caption: str = "") -> bool:
+def tg_send_doc(chat_id, file_path, caption=""):
     try:
         with open(file_path, "rb") as f:
-            r = requests.post(f"{TG_API}/sendDocument", data={
-                "chat_id": chat_id, "caption": caption, "parse_mode": "HTML"
-            }, files={"document": f}, timeout=60)
+            r = requests.post(f"{TG_API}/sendDocument",
+                data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
+                files={"document": f}, timeout=60)
         return r.status_code == 200 and r.json().get("ok")
     except Exception as e:
-        log.error(f"tg_send_doc error: {e}")
+        log.error(f"tg_send_doc: {e}")
         return False
 
+def register_webhook():
+    url = f"{WEBHOOK_URL}/webhook/{BOT_TOKEN}"
+    try:
+        r = requests.post(f"{TG_API}/setWebhook", json={"url": url}, timeout=10)
+        ok = r.status_code == 200 and r.json().get("ok")
+        log.info(f"Webhook {'OK' if ok else 'FAIL'}: {url}")
+        return ok
+    except Exception as e:
+        log.error(f"register_webhook: {e}")
+        return False
 
-def register_webhook(url: str) -> bool:
-    webhook_url = f"{url}/webhook/{BOT_TOKEN}"
-    r = requests.post(f"{TG_API}/setWebhook", json={"url": webhook_url}, timeout=10)
-    ok = r.status_code == 200 and r.json().get("ok")
-    log.info(f"Webhook {'✅ registered' if ok else '❌ failed'}: {webhook_url}")
-    return ok
+def _is_match(text):
+    return bool(re.search(
+        r"\s+vs\.?\s+|\s+v\.?\s+|\s+contre\s+|\w\s*[-]\s*\w",
+        text, re.IGNORECASE
+    ))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND HANDLERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def cmd_start(chat_id: str):
-    msg = (
+def cmd_start(cid):
+    tg_send(cid,
         "🤖 <b>APEX-TSS Bot actif</b>\n\n"
-        "Walk-Forward Backtesting Engine en ligne.\n\n"
-        "<b>Commandes disponibles:</b>\n"
+        "Envoie un match pour l'analyser:\n"
+        "<code>PSG vs Lyon</code>\n"
+        "<code>/analyse 11/04 PL Arsenal Bournemouth</code>\n\n"
+        "/help pour toutes les commandes"
+    )
+
+def cmd_help(cid):
+    tg_send(cid,
+        "📖 <b>APEX-TSS — Commandes</b>\n\n"
+        "/start — Démarrer\n"
+        "/status — Statut système\n"
         "/report — Dernier rapport backtest\n"
         "/backtest — Lancer un backtest rapide\n"
-        "/gates — Config des gates actuelle\n"
-        "/status — Statut système\n"
-        "/help — Aide complète\n\n"
-        f"<i>Serveur actif depuis {datetime.utcnow().strftime('%d/%m/%Y %H:%M UTC')}</i>"
-    )
-    tg_send(chat_id, msg)
-
-
-def cmd_help(chat_id: str):
-    msg = (
-        "📖 <b>APEX-TSS — Commandes</b>\n\n"
-        "/start — Démarrer le bot\n"
-        "/status — Statut + dernières stats\n"
-        "/report — Envoyer dernier rapport (texte)\n"
-        "/backtest — Smoke-test backtest (2 min)\n"
-        "/gates — Afficher gates actives\n"
-        "/analyze &lt;match&gt; — Analyser un match\n"
+        "/gates — Gates actives\n"
+        "/analyse [match] — Analyser un match\n"
         "/help — Ce message\n\n"
-        "💡 <b>Analyse rapide (texte libre):</b>\n"
+        "💡 <b>Formats acceptés:</b>\n"
         "<code>PSG vs Lyon</code>\n"
-        "<code>Naples - Lazio 15/04</code>\n"
-        "<code>Arsenal contre Chelsea 20/04</code>\n\n"
-        "<i>Le bot envoie automatiquement un rapport après chaque backtest complet.</i>"
+        "<code>/analyse 11/04 11:30 PL Arsenal Bournemouth</code>\n"
+        "<code>20/04 20:45 Serie A Napoli Lazio</code>"
     )
-    tg_send(chat_id, msg)
 
-
-def cmd_status(chat_id: str):
-    # Find latest signals CSV
+def cmd_status(cid):
     csvs = sorted(REPORTS_DIR.glob("signals_*.csv"))
-    pdfs = sorted(REPORTS_DIR.glob("*.pdf"))
-
     if csvs:
-        latest = csvs[-1]
-        mtime  = datetime.utcfromtimestamp(latest.stat().st_mtime)
-        age    = (datetime.utcnow() - mtime).total_seconds() / 3600
-
-        try:
-            import pandas as pd
-            df   = pd.read_csv(latest)
-            bets = df[df["decision"] == "BET"] if "decision" in df.columns else df
-            n_b  = len(bets)
-            n_t  = len(df)
-            leagues = ", ".join(sorted(df["league"].unique())) if "league" in df.columns else "—"
-        except Exception:
-            n_b, n_t, leagues = "?", "?", "—"
-
-        status = (
-            f"⚡ <b>APEX-TSS — Statut système</b>\n\n"
-            f"🟢 Bot: <b>En ligne</b>\n"
-            f"📊 Dernier backtest: <b>{mtime.strftime('%d/%m/%Y %H:%M')}</b> "
-            f"({age:.1f}h ago)\n"
-            f"🎲 Signaux: <b>{n_t}</b> total | <b>{n_b}</b> BETs\n"
-            f"🌍 Ligues: {leagues}\n"
-            f"📄 Rapports PDF: <b>{len(pdfs)}</b> disponibles\n\n"
-            f"<i>Serveur: render.com | {datetime.utcnow().strftime('%H:%M UTC')}</i>"
-        )
-    else:
-        status = (
-            "⚡ <b>APEX-TSS — Statut système</b>\n\n"
-            "🟢 Bot: <b>En ligne</b>\n"
-            "📊 Aucun backtest effectué encore.\n"
-            "→ Envoie /backtest pour lancer un test.\n\n"
+        mtime = datetime.utcfromtimestamp(csvs[-1].stat().st_mtime)
+        age   = (datetime.utcnow() - mtime).total_seconds() / 3600
+        tg_send(cid,
+            f"⚡ <b>Statut APEX-TSS</b>\n\n"
+            f"🟢 En ligne\n"
+            f"📊 Dernier backtest: {mtime.strftime('%d/%m/%Y %H:%M')} ({age:.1f}h)\n"
+            f"📄 Rapports PDF: {len(list(REPORTS_DIR.glob('*.pdf')))}\n\n"
             f"<i>{datetime.utcnow().strftime('%d/%m/%Y %H:%M UTC')}</i>"
         )
-    tg_send(chat_id, status)
+    else:
+        tg_send(cid, "🟢 En ligne — Aucun backtest encore. Envoie /backtest")
 
-
-def cmd_report(chat_id: str):
+def cmd_report(cid):
     csvs = sorted(REPORTS_DIR.glob("signals_*.csv"))
     if not csvs:
-        tg_send(chat_id, "❌ Aucun rapport disponible. Lance /backtest d'abord.")
+        tg_send(cid, "❌ Aucun rapport. Lance /backtest d'abord.")
         return
-
     try:
         import pandas as pd
         from tss.results_analyzer import compute_roi_metrics
         from tss.telegram_bot import build_report_message
-
-        df      = pd.read_csv(str(csvs[-1]))
+        df = pd.read_csv(str(csvs[-1]))
         df["date"] = pd.to_datetime(df["date"], errors="coerce")
         metrics = compute_roi_metrics(df)
-        msg     = build_report_message(df, metrics)
-        tg_send(chat_id, msg)
-
-        # Send PDF if available
+        tg_send(cid, build_report_message(df, metrics))
         pdfs = sorted(REPORTS_DIR.glob("*.pdf"))
         if pdfs:
-            roi = metrics.get("roi_pct", 0)
-            tg_send_doc(chat_id, str(pdfs[-1]),
-                        caption=f"📄 APEX-TSS Rapport | ROI: {roi:+.2f}%")
+            tg_send_doc(cid, str(pdfs[-1]),
+                        caption=f"📄 ROI: {metrics.get('roi_pct',0):+.2f}%")
     except Exception as e:
-        tg_send(chat_id, f"❌ Erreur rapport: {e}")
-        log.error(f"cmd_report error: {e}")
+        tg_send(cid, f"❌ Erreur: {e}")
 
-
-def cmd_gates(chat_id: str):
+def cmd_gates(cid):
     try:
         cfg = json.loads(Path("config.json").read_text())
-        g   = cfg.get("gates", cfg)
-        bk  = cfg.get("backtest", {})
-
-        msg = (
-            "⚙️ <b>APEX-TSS — Gates actives</b>\n\n"
-            f"<b>Gate-0 DCS:</b> <code>{bk.get('dcs_min', cfg.get('dcs_min','—'))}</code>\n"
-            f"<b>Gate-1 EV min:</b> <code>{bk.get('ev_min', g.get('ev_min','—'))}</code>\n"
-            f"<b>Gate-2 Edge min:</b> <code>{bk.get('edge_min', g.get('edge_min','—'))}</code>\n"
-            f"<b>Gate-3 Odds:</b> <code>[{bk.get('odds_min',1.40)} – {bk.get('odds_max',4.50)}]</code>\n\n"
-            f"<b>Kelly fraction:</b> <code>{bk.get('kelly_fraction',0.25)}</code>\n"
-            f"<b>Max stake:</b> <code>{bk.get('max_stake_pct',0.03)*100:.1f}%</code>\n"
-            f"<b>Book margin:</b> <code>{bk.get('book_margin',0.055)*100:.1f}%</code>\n"
-            f"<b>Demarg method:</b> <code>{bk.get('demarg_method','shin')}</code>\n"
+        bk  = cfg.get("backtest", cfg.get("gates", {}))
+        tg_send(cid,
+            "⚙️ <b>Gates actives</b>\n\n"
+            f"Gate-0 DCS:  <code>{bk.get('dcs_min', 0.60)}</code>\n"
+            f"Gate-1 EV:   <code>{bk.get('ev_min',  0.03)}</code>\n"
+            f"Gate-2 Edge: <code>{bk.get('edge_min',0.05)}</code>\n"
+            f"Gate-3 Odds: <code>[{bk.get('odds_min',1.40)} – {bk.get('odds_max',4.50)}]</code>\n\n"
+            f"Kelly:     <code>{bk.get('kelly_fraction',0.25)}</code>\n"
+            f"Max stake: <code>{bk.get('max_stake_pct',0.03)*100:.1f}%</code>"
         )
     except Exception as e:
-        msg = f"❌ Impossible de lire config.json: {e}"
-    tg_send(chat_id, msg)
+        tg_send(cid, f"❌ config.json: {e}")
 
-
-def cmd_analyze(chat_id: str, text: str):
-    """Analyse un match envoyé en texte libre."""
-    # Strip la commande /analyze si présente
-    match_text = re.sub(r"^/analyze\s*", "", text, flags=re.IGNORECASE).strip()
-    if not match_text:
-        tg_send(chat_id,
-            "⚽ <b>Envoie-moi un match à analyser !</b>\n\n"
-            "Exemples:\n"
-            "  <code>PSG vs Lyon</code>\n"
-            "  <code>Naples - Lazio 15/04</code>\n"
-            "  <code>Arsenal contre Chelsea 20/04</code>\n"
-            "  <code>/analyze Real Madrid vs Barcelona</code>"
-        )
-        return
-
-    tg_send(chat_id, "⏳ Analyse TSS en cours...")
-    msg = analyze_match_text(match_text)
-    tg_send(chat_id, msg)
-
-
-    tg_send(chat_id, "⏳ <b>Backtest smoke-test lancé...</b>\nRésultat dans ~2 minutes.")
-
+def cmd_backtest(cid):
+    tg_send(cid, "⏳ <b>Backtest lancé (~2 min)...</b>")
     def run():
         try:
-            result = subprocess.run(
-                ["python", "backtesting.py", "--smoke-test"],
-                capture_output=True, text=True, timeout=300
-            )
-            if result.returncode == 0:
-                tg_send(chat_id, "✅ <b>Backtest terminé.</b> Rapport envoyé ci-dessus.")
-            else:
-                tg_send(chat_id,
-                        f"❌ <b>Backtest échoué:</b>\n<code>{result.stderr[-500:]}</code>")
-        except subprocess.TimeoutExpired:
-            tg_send(chat_id, "⏱ Timeout — backtest trop long pour le mode smoke-test.")
+            res = subprocess.run(["python","backtesting.py","--smoke-test"],
+                                 capture_output=True, text=True, timeout=300)
+            tg_send(cid, "✅ Backtest terminé." if res.returncode==0
+                    else f"❌ Erreur:\n<code>{res.stderr[-400:]}</code>")
         except Exception as e:
-            tg_send(chat_id, f"❌ Erreur: {e}")
-
+            tg_send(cid, f"❌ {e}")
     threading.Thread(target=run, daemon=True).start()
 
+def cmd_analyze(cid, text):
+    match_text = re.sub(
+        r"^/(analys[ei]|analyze|match|tss)\s*", "", text, flags=re.IGNORECASE
+    ).strip()
+    if not match_text:
+        tg_send(cid, "⚽ Exemple: <code>/analyse 11/04 PL Arsenal Bournemouth</code>")
+        return
+    tg_send(cid, "⏳ Analyse TSS en cours...")
+    try:
+        from tss.match_analyzer import analyze_match_text
+        tg_send(cid, analyze_match_text(match_text))
+    except Exception as e:
+        tg_send(cid, f"❌ Erreur analyse: {e}")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# WEBHOOK ROUTE
+# FLASK ROUTES
 # ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/", methods=["GET"])
+def health():
+    return jsonify({"status": "online", "service": "APEX-TSS",
+                    "timestamp": datetime.utcnow().isoformat()})
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    return jsonify({"ok": True})
 
 @app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
 def webhook():
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"ok": False}), 400
-
     msg = data.get("message") or data.get("edited_message")
     if not msg:
         return jsonify({"ok": True})
-
-    chat_id = str(msg["chat"]["id"])
-    text    = msg.get("text", "").strip()
-
-    # Security: only respond to authorised chat
-    if chat_id != CHAT_ID:
-        log.warning(f"Unauthorized access from chat_id: {chat_id}")
-        tg_send(chat_id, "⛔ Accès non autorisé.")
+    cid  = str(msg["chat"]["id"])
+    text = msg.get("text", "").strip()
+    if cid != CHAT_ID:
+        tg_send(cid, "⛔ Accès non autorisé.")
         return jsonify({"ok": True})
-
-    log.info(f"Command received: {text}")
-
+    log.info(f"CMD: {text!r}")
     cmd = text.split()[0].lower().split("@")[0] if text else ""
-    if   cmd == "/start":    cmd_start(chat_id)
-    elif cmd == "/help":     cmd_help(chat_id)
-    elif cmd == "/status":   cmd_status(chat_id)
-    elif cmd == "/report":   cmd_report(chat_id)
-    elif cmd == "/backtest": cmd_backtest(chat_id)
-    elif cmd == "/gates":    cmd_gates(chat_id)
+    if   cmd == "/start":    cmd_start(cid)
+    elif cmd == "/help":     cmd_help(cid)
+    elif cmd == "/status":   cmd_status(cid)
+    elif cmd == "/report":   cmd_report(cid)
+    elif cmd == "/backtest": cmd_backtest(cid)
+    elif cmd == "/gates":    cmd_gates(cid)
     elif cmd in ("/analyze", "/analyse", "/match", "/tss"):
-        cmd_analyze(chat_id, text)
-    elif _is_match_text(text): cmd_analyze(chat_id, text)
+        cmd_analyze(cid, text)
+    elif _is_match(text):
+        cmd_analyze(cid, text)
     else:
-        tg_send(chat_id,
-                "❓ Commande inconnue. Envoie /help pour la liste des commandes.\n\n"
-                "💡 Tu peux aussi envoyer directement un match:\n"
-                "<code>PSG vs Lyon</code>")
-
+        tg_send(cid, "❓ /help pour la liste. Ou envoie: <code>PSG vs Lyon</code>")
     return jsonify({"ok": True})
-
-
-# ── Health check (Render ping) ─────────────────────────────────────────────────
-@app.route("/", methods=["GET"])
-def health():
-    return jsonify({
-        "status": "online",
-        "service": "APEX-TSS Telegram Bot",
-        "timestamp": datetime.utcnow().isoformat()
-    })
-
-@app.route("/health", methods=["GET"])
-def health_check():
-    return jsonify({"ok": True})
-
-
-# ── Set webhook on startup ─────────────────────────────────────────────────────
-@app.before_request
-def _once():
-    app.before_request_funcs[None].remove(_once)
-    if WEBHOOK_URL:
-        register_webhook(WEBHOOK_URL)
-        # Send startup notification
-        tg_send(CHAT_ID,
-            "🟢 <b>APEX-TSS Bot — Redémarrage OK</b>\n"
-            f"📅 {datetime.utcnow().strftime('%d/%m/%Y %H:%M UTC')}\n"
-            "✅ Webhook actif · Dixon-Coles chargé\n\n"
-            "💡 Envoie un match pour l'analyser:\n"
-            "<code>/analyse 11/04 PL Arsenal Bournemouth</code>"
-        )
-    else:
-        log.warning("WEBHOOK_URL not set — webhook not registered. "
-                    "Set it in Render environment variables.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ENTRY POINT
+# STARTUP
 # ═══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    log.info(f"Starting APEX-TSS webhook server on port {PORT}")
+    log.info(f"Starting APEX-TSS on port {PORT}")
+    if WEBHOOK_URL:
+        if register_webhook():
+            tg_send(CHAT_ID,
+                "🟢 <b>APEX-TSS — Redémarrage OK</b>\n"
+                f"📅 {datetime.utcnow().strftime('%d/%m/%Y %H:%M UTC')}\n"
+                "✅ Webhook actif · Dixon-Coles chargé\n\n"
+                "💡 Test:\n<code>/analyse 11/04 PL Arsenal Bournemouth</code>"
+            )
     app.run(host="0.0.0.0", port=PORT, debug=False)
