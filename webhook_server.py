@@ -99,9 +99,10 @@ def _is_match(text):
 def cmd_start(cid):
     tg_send(cid,
         "🤖 <b>APEX-TSS Bot actif</b>\n\n"
-        "Envoie un match pour l'analyser:\n"
-        "<code>PSG vs Lyon</code>\n"
-        "<code>/analyse 11/04 PL Arsenal Bournemouth</code>\n\n"
+        "Analyse un match ou scanne une journée:\n"
+        "<code>/analyse 11/04 PL Arsenal Bournemouth</code>\n"
+        "<code>/scan today</code> — scanner les matchs du jour\n"
+        "<code>/scan 48h</code> — prochaines 48h\n\n"
         "/help pour toutes les commandes"
     )
 
@@ -114,11 +115,17 @@ def cmd_help(cid):
         "/backtest — Lancer un backtest rapide\n"
         "/gates — Gates actives\n"
         "/analyse [match] — Analyser un match\n"
+        "/scan [fenêtre] — Scanner tous les matchs\n"
         "/help — Ce message\n\n"
-        "💡 <b>Formats acceptés:</b>\n"
+        "💡 <b>Exemples /scan:</b>\n"
+        "<code>/scan today</code>\n"
+        "<code>/scan 48h</code>\n"
+        "<code>/scan week</code>\n"
+        "<code>/scan 12/04</code>\n"
+        "<code>/scan 12/04-14/04</code>\n\n"
+        "💡 <b>Analyse directe:</b>\n"
         "<code>PSG vs Lyon</code>\n"
-        "<code>/analyse 11/04 11:30 PL Arsenal Bournemouth</code>\n"
-        "<code>20/04 20:45 Serie A Napoli Lazio</code>"
+        "<code>/analyse 11/04 PL Arsenal Bournemouth</code>"
     )
 
 def cmd_status(cid):
@@ -184,7 +191,80 @@ def cmd_backtest(cid):
             tg_send(cid, f"❌ {e}")
     threading.Thread(target=run, daemon=True).start()
 
-def cmd_analyze(cid, text):
+def cmd_scan(cid, text):
+    """Scan upcoming fixtures through TSS gates."""
+    # Parse window from command: /scan today | /scan 48h | /scan 12/04
+    window_text = text.strip()
+    window_text = re.sub(r"^/(scan)\s*", "", window_text, flags=re.IGNORECASE).strip()
+    if not window_text:
+        tg_send(cid,
+            "🔭 <b>Usage /scan:</b>\n\n"
+            "<code>/scan today</code> — matchs du jour\n"
+            "<code>/scan 48h</code> — prochaines 48h\n"
+            "<code>/scan week</code> — cette semaine\n"
+            "<code>/scan 12/04</code> — date spécifique\n"
+            "<code>/scan 12/04-14/04</code> — plage de dates"
+        )
+        return
+
+    tg_send(cid, f"🔭 <b>Scan en cours...</b> (<code>{window_text}</code>)\n⏳ Récupération des fixtures...")
+
+    try:
+        from tss.fixture_fetcher import get_fixtures
+        from tss.scanner import scan_fixtures, format_scan_message
+
+        # 1. Fetch fixtures
+        fixtures, label = get_fixtures(window_text)
+        total = len(fixtures)
+
+        if total == 0:
+            tg_send(cid,
+                f"🔭 <b>Scan {label}</b>\n\n"
+                f"📭 Aucun match trouvé pour cette période.\n"
+                f"Vérifie la fenêtre ou réessaie plus tard."
+            )
+            return
+
+        tg_send(cid, f"⏳ {total} matchs trouvés — analyse TSS en cours...")
+
+        # 2. Scan through TSS
+        results = scan_fixtures(fixtures, min_stars=2, min_ev=0.03)
+
+        # 3. Send results (split if > 4000 chars)
+        msg = format_scan_message(results, label, total)
+
+        if len(msg) <= 4000:
+            tg_send(cid, msg)
+        else:
+            # Split into chunks of max 4000 chars at match boundaries
+            chunks = _split_scan_message(msg)
+            for chunk in chunks:
+                tg_send(cid, chunk)
+
+    except Exception as e:
+        log.error(f"cmd_scan error: {e}", exc_info=True)
+        tg_send(cid, f"❌ Erreur scan: <code>{str(e)[:200]}</code>")
+
+
+def _split_scan_message(msg: str, max_len: int = 3800) -> list:
+    """Split long scan message at match boundaries (═══ separator)."""
+    parts   = msg.split("═" * 25)
+    chunks  = []
+    current = parts[0]  # header
+
+    for part in parts[1:]:
+        block = "═" * 25 + part
+        if len(current) + len(block) <= max_len:
+            current += block
+        else:
+            chunks.append(current)
+            current = block
+
+    if current:
+        chunks.append(current)
+    return chunks
+
+
     match_text = re.sub(
         r"^/(analys[ei]|analyze|match|tss)\s*", "", text, flags=re.IGNORECASE
     ).strip()
@@ -271,6 +351,7 @@ def _handle_message(cid: str, text: str):
     elif cmd == "/report":   cmd_report(cid)
     elif cmd == "/backtest": cmd_backtest(cid)
     elif cmd == "/gates":    cmd_gates(cid)
+    elif cmd == "/scan":     cmd_scan(cid, text)
     elif cmd in ("/analyze", "/analyse", "/match", "/tss"):
         cmd_analyze(cid, text)
     elif _is_match(text):

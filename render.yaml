@@ -14,5 +14,7 @@ services:
         value: "https://apex-tss.onrender.com"
       - key: PORT
         value: "10000"
+      - key: FDORG_TOKEN
+        value: b8b980d46849a1fc55c8bd271bcad18c
     healthCheckPath: /health
     autoDeploy: true   # Auto-deploy on every GitHub push
