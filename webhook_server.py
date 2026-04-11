@@ -27,6 +27,9 @@ TG_API      = f"https://api.telegram.org/bot{BOT_TOKEN}"
 REPORTS_DIR = Path("reports")
 REPORTS_DIR.mkdir(exist_ok=True)
 
+# ── Deduplication: track processed update_ids ──────────────────────────────────
+_processed_updates = set()
+
 # ── Flask app — MUST be before any @app.route ──────────────────────────────────
 app = Flask(__name__)
 
@@ -199,17 +202,43 @@ def health_check():
 def webhook():
     data = request.get_json(silent=True)
     if not data:
-        return jsonify({"ok": False}), 400
+        return jsonify({"ok": True})
+
+    # ── Return 200 IMMEDIATELY — prevents Telegram retry loop ─────────────────
+    update_id = data.get("update_id")
+    if update_id in _processed_updates:
+        return jsonify({"ok": True})   # duplicate — ignore silently
+    _processed_updates.add(update_id)
+    # Keep set small
+    if len(_processed_updates) > 500:
+        _processed_updates.clear()
+
     msg = data.get("message") or data.get("edited_message")
     if not msg:
         return jsonify({"ok": True})
+
     cid  = str(msg["chat"]["id"])
     text = msg.get("text", "").strip()
+
+    # Process in background so we return 200 before Telegram's 5s timeout
+    threading.Thread(
+        target=_handle_message,
+        args=(cid, text),
+        daemon=True
+    ).start()
+
+    return jsonify({"ok": True})  # Immediate 200
+
+
+def _handle_message(cid: str, text: str):
+    """Process message in background thread."""
     if cid != CHAT_ID:
         tg_send(cid, "⛔ Accès non autorisé.")
-        return jsonify({"ok": True})
+        return
+
     log.info(f"CMD: {text!r}")
     cmd = text.split()[0].lower().split("@")[0] if text else ""
+
     if   cmd == "/start":    cmd_start(cid)
     elif cmd == "/help":     cmd_help(cid)
     elif cmd == "/status":   cmd_status(cid)
@@ -222,7 +251,6 @@ def webhook():
         cmd_analyze(cid, text)
     else:
         tg_send(cid, "❓ /help pour la liste. Ou envoie: <code>PSG vs Lyon</code>")
-    return jsonify({"ok": True})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
