@@ -75,12 +75,17 @@ def _season_code(season_str: str) -> str:
         return parts[0][-2:] + parts[1][-2:]
     raise ValueError(f"Invalid season format: {season_str}")
 
-def build_fdco_url(league_key: str, season: str) -> Optional[str]:
+def build_source_url(league_key: str, season: str) -> Optional[str]:
     code = FDCO_LEAGUE_MAP.get(league_key)
-    if code is None:
-        return None
-    sc = _season_code(season)
-    return f"{FDCO_BASE}/{sc}/{code}.csv"
+    if code is not None:
+        return f"{FDCO_BASE}/{_season_code(season)}/{code}.csv"
+    alt = ALTERNATIVE_SOURCES.get(league_key)
+    if alt:
+        return alt
+    return None
+
+def build_fdco_url(league_key: str, season: str) -> Optional[str]:
+    return build_source_url(league_key, season)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -307,11 +312,12 @@ class OddsParser:
         return pd.Series([None]*len(df)), pd.Series([None]*len(df))
 
     def _extract_btts(self, df: pd.DataFrame) -> Tuple:
-        # FDCO has BTTS only from ~2019 onwards in some leagues
-        for col_y, col_n in [("BTSHY", "BTSHN"), ("BbAv>2.5", None)]:
+        """Never use BbAv>2.5 as BTTS fallback — it is Over 2.5 goals, not BTTS."""
+        for col_y, col_n in [("BTSHY","BTSHN"),("BbAvBTSY","BbAvBTSN"),("BTSY","BTSN"),("B365BTSY","B365BTSN")]:
             if col_y in df.columns:
                 Y = pd.to_numeric(df[col_y], errors="coerce")
-                N = pd.to_numeric(df.get(col_n, pd.Series([None]*len(df))), errors="coerce")
+                if Y.notna().mean() < 0.3: continue
+                N = pd.to_numeric(df[col_n], errors="coerce") if col_n in df.columns else pd.Series([None]*len(df))
                 return Y.round(3), N.round(3)
         return pd.Series([None]*len(df)), pd.Series([None]*len(df))
 
@@ -431,8 +437,8 @@ class OddsMatchMerger:
 
         # Pre-build odds lookup by date for speed
         odds_by_date = {}
-        for _, row in odds_df.iterrows():
-            d = row["date"].date()
+        for row in odds_df.itertuples(index=False):
+            d = pd.Timestamp(row.date).date()
             for delta in range(-self.date_tol, self.date_tol + 1):
                 key = d + pd.Timedelta(days=delta)
                 odds_by_date.setdefault(key, []).append(row)
@@ -441,23 +447,23 @@ class OddsMatchMerger:
         not_matched = 0
         result_rows = []
 
-        for _, fb_row in fbref_df.iterrows():
-            candidates = odds_by_date.get(fb_row["date"].date(), [])
+        for fb_row in fbref_df.itertuples(index=False):
+            candidates = odds_by_date.get(pd.Timestamp(fb_row.date).date(), [])
             best_match = None
             best_score = 0.0
 
             for od_row in candidates:
-                sh = team_similarity(fb_row["home"], od_row["home"])
-                sa = team_similarity(fb_row["away"], od_row["away"])
+                sh = team_similarity(fb_row.home, od_row["home"])
+                sa = team_similarity(fb_row.away, od_row["away"])
                 score = (sh + sa) / 2
                 if score > best_score and sh >= self.name_thr and sa >= self.name_thr:
                     best_score = score
                     best_match = od_row
 
-            row_dict = fb_row.to_dict()
+            row_dict = fb_row._asdict()
             if best_match is not None:
                 for col in odds_cols:
-                    row_dict[col] = best_match.get(col, None)
+                    row_dict[col] = getattr(best_match, col, None)
                 row_dict["odds_matched"] = True
                 row_dict["match_score"]  = round(best_score, 3)
                 matched += 1
