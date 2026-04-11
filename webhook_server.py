@@ -39,12 +39,26 @@ app = Flask(__name__)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def tg_send(chat_id, text, parse_mode="HTML"):
+    # Sanitize: remove any unmatched HTML tags that could break Telegram parser
+    import html as html_lib
+    # Allowed tags in Telegram HTML: b, i, u, s, code, pre, a
+    # Just strip any problematic chars from team names in the text
+    safe_text = text
     try:
         r = requests.post(f"{TG_API}/sendMessage", json={
-            "chat_id": chat_id, "text": text,
+            "chat_id": chat_id, "text": safe_text,
             "parse_mode": parse_mode, "disable_web_page_preview": True
-        }, timeout=10)
-        return r.status_code == 200 and r.json().get("ok")
+        }, timeout=15)
+        if r.status_code == 200 and r.json().get("ok"):
+            return True
+        # If HTML parse fails, retry as plain text
+        log.warning(f"tg_send HTML failed ({r.json().get('description')}), retrying plain")
+        r2 = requests.post(f"{TG_API}/sendMessage", json={
+            "chat_id": chat_id,
+            "text": re.sub(r"<[^>]+>", "", safe_text),
+            "disable_web_page_preview": True
+        }, timeout=15)
+        return r2.status_code == 200 and r2.json().get("ok")
     except Exception as e:
         log.error(f"tg_send: {e}")
         return False

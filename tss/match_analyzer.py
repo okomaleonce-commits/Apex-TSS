@@ -118,6 +118,36 @@ TEAM_LEAGUE_MAP = {
     "Sydney FC":"A-League","Western Sydney":"A-League",
     "Brisbane Roar":"A-League","Adelaide United":"A-League",
     "Perth Glory":"A-League","Wellington Phoenix":"A-League",
+
+    # Eliteserien (Norway)
+    "Bodø/Glimt":"Eliteserien","Bodo/Glimt":"Eliteserien","Glimt":"Eliteserien",
+    "Viking FK":"Eliteserien","Viking":"Eliteserien",
+    "Molde":"Eliteserien","Rosenborg":"Eliteserien","Brann":"Eliteserien",
+    "Tromsø":"Eliteserien","Tromso":"Eliteserien","Vålerenga":"Eliteserien",
+    "Valerenga":"Eliteserien","Fredrikstad":"Eliteserien","Lillestrøm":"Eliteserien",
+    "Lillestrom":"Eliteserien","Odd":"Eliteserien","Sandefjord":"Eliteserien",
+    "Haugesund":"Eliteserien","Aalesund":"Eliteserien","Stabæk":"Eliteserien",
+    "HamKam":"Eliteserien","Sarpsborg":"Eliteserien","Kristiansund":"Eliteserien",
+
+    # Allsvenskan (Sweden)
+    "Malmö FF":"Allsvenskan","Malmo":"Allsvenskan","AIK":"Allsvenskan",
+    "Djurgården":"Allsvenskan","Djurgarden":"Allsvenskan",
+    "Hammarby":"Allsvenskan","IFK Göteborg":"Allsvenskan","Göteborg":"Allsvenskan",
+    "Helsingborg":"Allsvenskan","BK Häcken":"Allsvenskan","Hacken":"Allsvenskan",
+    "Elfsborg":"Allsvenskan","Kalmar":"Allsvenskan","Sirius":"Allsvenskan",
+
+    # Superligaen (Denmark)
+    "FC Copenhagen":"Superligaen","Copenhagen":"Superligaen",
+    "Brøndby":"Superligaen","Brondby":"Superligaen",
+    "FC Midtjylland":"Superligaen","Midtjylland":"Superligaen",
+    "AGF":"Superligaen","Silkeborg":"Superligaen","Randers":"Superligaen",
+    "Viborg":"Superligaen","OB":"Superligaen","Lyngby":"Superligaen",
+
+    # Primeira Liga (Portugal)
+    "Benfica":"Primeira Liga","Porto":"Primeira Liga","Sporting CP":"Primeira Liga",
+    "Braga":"Primeira Liga","Vitória SC":"Primeira Liga","Guimarães":"Primeira Liga",
+    "Rio Ave":"Primeira Liga","Famalicão":"Primeira Liga","Estoril":"Primeira Liga",
+    "Moreirense":"Primeira Liga","Boavista":"Primeira Liga","Casa Pia":"Primeira Liga",
 }
 
 # Aliases pour le parsing libre
@@ -222,7 +252,11 @@ def parse_match_text(text: str) -> Tuple[str, str, Optional[datetime], Optional[
         "brazil": "Brazil Serie A", "brasileirao": "Brazil Serie A",
         "a-league": "A-League", "aleague": "A-League", "australia": "A-League",
         "afc": "AFC CL", "afc cl": "AFC CL",
-        "ucl": "EPL",  # Champions League — fallback to top league
+        "eliteserien": "Eliteserien", "norway": "Eliteserien", "norvège": "Eliteserien",
+        "allsvenskan": "Allsvenskan", "sweden": "Allsvenskan", "suède": "Allsvenskan",
+        "superligaen": "Superligaen", "denmark": "Superligaen", "danemark": "Superligaen",
+        "primeira liga": "Primeira Liga", "portugal": "Primeira Liga",
+        "ucl": "EPL",
     }
 
     league_hint = None
