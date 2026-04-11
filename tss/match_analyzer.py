@@ -610,6 +610,7 @@ def format_analysis_message(
         # Show why best market failed
         for s in signals[:3]:
             lines.append(f"  • {s['label']}: {' | '.join(s['fails'])}")
+        lines.append("")  # blank line before footer
 
     # NO BET summary (top 3 closest to passing)
     if bets and nobets:
@@ -628,10 +629,6 @@ def format_analysis_message(
     ]
 
     return "\n".join(l for l in lines if l is not None)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 6. MAIN ENTRY POINT
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def analyze_match_text(text: str) -> str:
