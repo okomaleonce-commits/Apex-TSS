@@ -16,5 +16,7 @@ services:
         value: "10000"
       - key: FDORG_TOKEN
         value: b8b980d46849a1fc55c8bd271bcad18c
+      - key: ODDS_API_KEY
+        value: 4556cbebcaea0e8301f1c176bdb64e31
     healthCheckPath: /health
     autoDeploy: true   # Auto-deploy on every GitHub push

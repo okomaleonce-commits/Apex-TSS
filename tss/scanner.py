@@ -1,15 +1,11 @@
 """
-APEX-TSS — Scanner
-====================
-Scans a list of fixtures through the full TSS pipeline and
-returns only matches with confirmed BET signals.
-
-Usage:
-  from tss.scanner import scan_fixtures
-  results = scan_fixtures(fixtures, min_stars=3)
+APEX-TSS — Scanner with Real Odds
+====================================
+Scans fixtures through TSS with real bookmaker odds from The Odds API.
 """
 
 import logging
+import numpy as np
 import pandas as pd
 from datetime import datetime
 from typing import List, Dict, Optional
@@ -21,37 +17,46 @@ def scan_fixtures(
     fixtures: List[Dict],
     min_stars: int = 2,
     min_ev: float = 0.03,
+    use_real_odds: bool = True,
 ) -> List[Dict]:
     """
-    Run TSS analysis on each fixture.
-    Returns only fixtures with at least one BET signal ≥ min_stars.
+    Run full TSS pipeline on fixtures.
+    With use_real_odds=True: fetches real bookmaker odds first.
+    Returns only fixtures with ≥1 BET signal.
     """
     from tss.match_analyzer import (
-        _load_gates, _best_team_match, _detect_league,
-        _get_dc_model, _league_average_probs,
-        _simulate_odds, _run_gates, MARKET_LABELS
+        _load_gates, _best_team_match, _get_dc_model,
+        _league_average_probs, _simulate_odds, _run_gates,
     )
 
-    gates   = _load_gates()
-    results = []
+    gates = _load_gates()
 
-    log.info(f"Scanning {len(fixtures)} fixtures (min_stars={min_stars})")
+    # Enrich with real odds
+    if use_real_odds:
+        try:
+            from tss.odds_api import enrich_fixtures_with_odds, demarginalize_odds
+            fixtures = enrich_fixtures_with_odds(fixtures)
+            has_real_odds = True
+        except Exception as e:
+            log.warning(f"Real odds fetch failed: {e} — using synthetic")
+            has_real_odds = False
+    else:
+        has_real_odds = False
+
+    results = []
+    log.info(f"Scanning {len(fixtures)} fixtures | real_odds={has_real_odds}")
 
     for fix in fixtures:
         home_raw = fix["home"]
         away_raw = fix["away"]
         league   = fix["league"]
-        date_str = fix["date"]
-        time_str = fix.get("time", "")
 
-        # Resolve team names
         home = _best_team_match(home_raw) or home_raw
         away = _best_team_match(away_raw) or away_raw
 
-        # Load DC model
+        # DC model → P_synth
         model    = _get_dc_model(league)
         fallback = False
-
         if model:
             try:
                 probs = model.predict_probs(home, away)
@@ -62,42 +67,159 @@ def scan_fixtures(
             probs    = _league_average_probs(home, away)
             fallback = True
 
-        # Simulate odds + run gates
-        odds    = _simulate_odds(probs, margin=gates["book_margin"])
-        signals = _run_gates(probs, odds, gates)
+        # Real odds or synthetic
+        if has_real_odds and fix.get("odds_matched"):
+            # Use real book odds
+            real_odds = {
+                "odds_H":         fix.get("odds_H"),
+                "odds_D":         fix.get("odds_D"),
+                "odds_A":         fix.get("odds_A"),
+                "odds_over2.5":   fix.get("odds_over2.5"),
+                "odds_under2.5":  fix.get("odds_under2.5"),
+                "odds_over3.5":   fix.get("odds_over3.5"),
+                "odds_under3.5":  fix.get("odds_under3.5"),
+                "odds_btts_yes":  fix.get("odds_btts_yes"),
+                "odds_btts_no":   fix.get("odds_btts_no"),
+            }
+            # Fill missing with synthetic
+            synth = _simulate_odds(probs, margin=gates["book_margin"])
+            for k, v in real_odds.items():
+                if not v or v <= 1.0:
+                    real_odds[k] = synth.get(k, 2.0)
+            odds_dict = real_odds
+            odds_source = fix.get("bookie_used", "real")
+        else:
+            odds_dict  = _simulate_odds(probs, margin=gates["book_margin"])
+            odds_source = "synthetic"
 
-        # Filter BET signals meeting min_stars threshold
+        # Demarginalize real odds → P_book
+        if has_real_odds and fix.get("odds_matched"):
+            from tss.odds_api import demarginalize_odds
+            p_book = demarginalize_odds(fix)
+            # Fill missing markets with synthetic demarg
+            synth_book = _compute_synthetic_pbook(probs, gates["book_margin"])
+            for k, v in synth_book.items():
+                if k not in p_book:
+                    p_book[k] = v
+        else:
+            p_book = _compute_synthetic_pbook(probs, gates["book_margin"])
+
+        # Run TSS gates with real P_book
+        signals = _run_gates_with_pbook(probs, odds_dict, p_book, gates)
+
         bets = [s for s in signals
                 if s["bet"] and s["stars"] >= min_stars and s["ev"] >= min_ev]
 
         if bets:
             results.append({
-                "league":   league,
-                "home":     home,
-                "away":     away,
-                "date":     date_str,
-                "time":     time_str,
-                "fallback": fallback,
-                "bets":     bets,
-                "probs":    probs,
-                "top_ev":   max(s["ev"] for s in bets),
-                "top_stars":max(s["stars"] for s in bets),
+                "league":      league,
+                "home":        home,
+                "away":        away,
+                "date":        fix["date"],
+                "time":        fix.get("time", ""),
+                "fallback":    fallback,
+                "odds_source": odds_source,
+                "bets":        bets,
+                "probs":       probs,
+                "top_ev":      max(s["ev"] for s in bets),
+                "top_stars":   max(s["stars"] for s in bets),
             })
-            log.info(f"  ✅ BET: {home} vs {away} | {len(bets)} signal(s)")
-        else:
-            log.debug(f"  — NO BET: {home} vs {away}")
+            log.info(f"  ✅ {home} vs {away} | {len(bets)} BET(s) | "
+                     f"best EV={max(s['ev'] for s in bets):+.3f} [{odds_source}]")
 
-    # Sort by best EV descending
     results.sort(key=lambda x: x["top_ev"], reverse=True)
     return results
 
 
-def format_scan_message(
-    results: List[Dict],
-    window_label: str,
-    total_scanned: int,
-) -> str:
-    """Format scan results into a Telegram message."""
+def _compute_synthetic_pbook(probs: Dict, margin: float) -> Dict:
+    """Compute synthetic P_book from DC probs + margin via Shin."""
+    from tss.match_analyzer import _simulate_odds, _shin_demarg
+
+    odds = _simulate_odds(probs, margin=margin)
+    result = {}
+
+    def _demarg(keys_odds, keys_out):
+        vals = [odds.get(k, 2.0) for k in keys_odds]
+        try:
+            ps = _shin_demarg(vals)
+            for k, p in zip(keys_out, ps):
+                result[k] = p
+        except Exception:
+            pass
+
+    _demarg(["odds_H","odds_D","odds_A"],            ["P_H","P_D","P_A"])
+    _demarg(["odds_over2.5","odds_under2.5"],         ["P_over2.5","P_under2.5"])
+    _demarg(["odds_over3.5","odds_under3.5"],         ["P_over3.5","P_under3.5"])
+    _demarg(["odds_btts_yes","odds_btts_no"],         ["P_btts_yes","P_btts_no"])
+    return result
+
+
+def _run_gates_with_pbook(probs: Dict, odds: Dict, p_book: Dict, gates: Dict) -> List[Dict]:
+    """Run TSS gates using pre-computed P_book."""
+    from tss.match_analyzer import MARKET_LABELS
+
+    ODDS_KEY = {
+        "H": "odds_H", "D": "odds_D", "A": "odds_A",
+        "over2.5": "odds_over2.5", "under2.5": "odds_under2.5",
+        "over3.5": "odds_over3.5", "under3.5": "odds_under3.5",
+        "btts_yes": "odds_btts_yes", "btts_no": "odds_btts_no",
+    }
+    PBOOK_KEY = {
+        "H": "P_H", "D": "P_D", "A": "P_A",
+        "over2.5": "P_over2.5", "under2.5": "P_under2.5",
+        "over3.5": "P_over3.5", "under3.5": "P_under3.5",
+        "btts_yes": "P_btts_yes", "btts_no": "P_btts_no",
+    }
+
+    signals = []
+    for market in MARKET_LABELS:
+        p_s  = probs.get(market, 0)
+        odd  = odds.get(ODDS_KEY.get(market, ""), 0)
+        p_b  = p_book.get(PBOOK_KEY.get(market, ""), p_s * 0.95)
+
+        if not odd or odd <= 1.0:
+            continue
+
+        ev   = round(p_s * odd - 1, 4)
+        edge = round(p_s - p_b, 4)
+
+        fails = []
+        if ev   < gates["ev_min"]:   fails.append(f"EV={ev:.3f}&lt;{gates['ev_min']}")
+        if edge < gates["edge_min"]: fails.append(f"Edge={edge:.3f}&lt;{gates['edge_min']}")
+        if not (gates["odds_min"] <= odd <= gates["odds_max"]):
+            fails.append(f"Odds={odd} hors [{gates['odds_min']},{gates['odds_max']}]")
+
+        stars = 0
+        if not fails:
+            if ev >= 0.10:   stars += 2
+            elif ev >= 0.05: stars += 1
+            if edge >= 0.10: stars += 2
+            elif edge >= 0.07: stars += 1
+            stars = min(stars, 5)
+
+        b  = odd - 1
+        k  = max(0, (b*p_s - (1-p_s))/b * gates["kelly_fraction"]) if b > 0 else 0
+        sk = min(k, gates["max_stake_pct"])
+
+        signals.append({
+            "market":  market,
+            "label":   MARKET_LABELS[market],
+            "p_synth": round(p_s, 4),
+            "p_book":  round(p_b, 4),
+            "odds":    round(odd, 3),
+            "ev":      ev, "edge": edge,
+            "kelly":   round(k, 4),
+            "stake":   round(sk, 4),
+            "bet":     len(fails) == 0,
+            "fails":   fails,
+            "stars":   stars,
+        })
+
+    return sorted(signals, key=lambda x: x["ev"], reverse=True)
+
+
+def format_scan_message(results: List[Dict], window_label: str,
+                        total_scanned: int) -> str:
 
     ts = datetime.utcnow().strftime("%d/%m/%Y %H:%M UTC")
 
@@ -121,63 +243,38 @@ def format_scan_message(
         "🔭 <b>APEX-TSS | SCAN RÉSULTATS</b>",
         "━━━━━━━━━━━━━━━━━━━━━━━━━",
         f"📅 {window_label}  ·  🕐 {ts}",
-        f"🔍 {total_scanned} matchs scannés  →  "
-        f"<b>{len(results)} signal(s) BET</b>",
+        f"🔍 {total_scanned} matchs  →  <b>{len(results)} signal(s) BET</b>",
         "",
     ]
 
     for i, fix in enumerate(results, 1):
-        fallback_tag = " ⚠️" if fix["fallback"] else ""
-        time_tag     = f" · ⏰ {fix['time']}" if fix.get("time") else ""
+        src_icon  = "📡" if fix.get("odds_source","") not in ("synthetic","") else "🔮"
+        src_label = fix.get("odds_source", "synthetic")
+        fb_tag    = " ⚠️" if fix["fallback"] else ""
+        time_tag  = f" · ⏰ {fix['time']}" if fix.get("time") else ""
 
-        lines.append(
-            f"{'═'*25}\n"
-            f"<b>{i}. {fix['home']}  vs  {fix['away']}</b>\n"
-            f"🌍 {fix['league']}  ·  📅 {fix['date']}{time_tag}{fallback_tag}"
-        )
-
-        # Probabilities summary
         p = fix["probs"]
-        lines.append(
-            f"  1️⃣ {p['H']*100:.0f}%  ➖ {p['D']*100:.0f}%  "
-            f"2️⃣ {p['A']*100:.0f}%  "
-            f"| O2.5: {p['over2.5']*100:.0f}%  BTTS: {p['btts_yes']*100:.0f}%"
-        )
+        lines += [
+            f"{'─'*25}",
+            f"<b>{i}. {fix['home']}  vs  {fix['away']}</b>",
+            f"🌍 {fix['league']}  ·  📅 {fix['date']}{time_tag}  {src_icon} {src_label}{fb_tag}",
+            f"  1️⃣ {p['H']*100:.0f}%  ➖ {p['D']*100:.0f}%  2️⃣ {p['A']*100:.0f}%  "
+            f"O2.5:{p['over2.5']*100:.0f}%",
+            "",
+        ]
 
-        # BET signals
         for s in fix["bets"]:
-            stake_pct = s["stake"] * 100
             lines.append(
-                f"\n  {_stars(s['stars'])}  <b>{s['label']}</b>\n"
-                f"  📊 Cote: <code>{s['odds']}</code>  "
-                f"EV: <code>{s['ev']:+.3f}</code>  "
-                f"Edge: <code>{s['edge']:+.3f}</code>\n"
-                f"  💰 Mise: <code>{stake_pct:.2f}%</code> bankroll"
+                f"  {_stars(s['stars'])}  <b>{s['label']}</b>\n"
+                f"  📊 <code>{s['odds']}</code>  "
+                f"EV:<code>{s['ev']:+.3f}</code>  "
+                f"Edge:<code>{s['edge']:+.3f}</code>  "
+                f"💰<code>{s['stake']*100:.1f}%</code>"
             )
         lines.append("")
 
     lines += [
         "━━━━━━━━━━━━━━━━━━━━━━━━━",
-        "<i>APEX-TSS · Dixon-Coles + Shin · NO BET par défaut</i>",
+        "<i>APEX-TSS · Dixon-Coles + Shin + Real Odds · NO BET par défaut</i>",
     ]
-
     return "\n".join(lines)
-
-
-def format_scan_summary(results: List[Dict], window_label: str,
-                        total_scanned: int) -> str:
-    """
-    Short summary message sent first (while full analysis loads).
-    """
-    if not results:
-        return (f"🔭 <b>Scan {window_label}</b>\n"
-                f"🔍 {total_scanned} matchs — <b>0 signal BET</b>")
-
-    top = results[0]
-    return (
-        f"🔭 <b>Scan {window_label}</b>\n"
-        f"🔍 {total_scanned} matchs → <b>{len(results)} signal(s)</b>\n\n"
-        f"🥇 Meilleur: <b>{top['home']} vs {top['away']}</b>\n"
-        f"   EV max: <code>{top['top_ev']:+.3f}</code>  "
-        f"{'⭐'*top['top_stars']}"
-    )
