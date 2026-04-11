@@ -381,13 +381,30 @@ def _load_fbref_data(league: str) -> pd.DataFrame:
 
 # In-memory model cache (avoids re-fitting on every request)
 _MODEL_CACHE: Dict = {}
+_PICKLE_DIR = Path("data/models")
+_PICKLE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _get_dc_model(league: str):
-    """Load or fit Dixon-Coles model, cached in memory."""
+    """Load pre-fitted DC model from pickle (instant), or fit if missing."""
     if league in _MODEL_CACHE:
         return _MODEL_CACHE[league]
 
+    # 1. Try loading pre-fitted pickle (<1 second)
+    pkl_name = league.replace(" ", "_").replace("/", "_") + ".pkl"
+    pkl_path = _PICKLE_DIR / pkl_name
+    if pkl_path.exists():
+        try:
+            import pickle
+            with open(pkl_path, "rb") as f:
+                model = pickle.load(f)
+            _MODEL_CACHE[league] = model
+            log.info(f"DC model loaded from pickle: {league}")
+            return model
+        except Exception as e:
+            log.warning(f"Pickle load failed [{league}]: {e}")
+
+    # 2. Fallback: fit from scratch (slow on free CPU)
     try:
         from tss.backtest_engine import DixonColesModel
     except ImportError:
@@ -400,8 +417,11 @@ def _get_dc_model(league: str):
     model = DixonColesModel(xi=0.0065)
     try:
         model.fit(df, reference_date=pd.Timestamp(datetime.utcnow()))
+        import pickle
+        with open(pkl_path, "wb") as f:
+            pickle.dump(model, f)
         _MODEL_CACHE[league] = model
-        log.info(f"DC model fitted+cached: {league} ({len(df)} matches)")
+        log.info(f"DC model fitted+saved: {league} ({len(df)} matches)")
         return model
     except Exception as e:
         log.error(f"DC fit failed [{league}]: {e}")
