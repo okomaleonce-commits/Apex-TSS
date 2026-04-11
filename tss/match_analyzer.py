@@ -345,8 +345,15 @@ def _load_fbref_data(league: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+# In-memory model cache (avoids re-fitting on every request)
+_MODEL_CACHE: Dict = {}
+
+
 def _get_dc_model(league: str):
-    """Load or fit Dixon-Coles model for a league."""
+    """Load or fit Dixon-Coles model, cached in memory."""
+    if league in _MODEL_CACHE:
+        return _MODEL_CACHE[league]
+
     try:
         from tss.backtest_engine import DixonColesModel
     except ImportError:
@@ -354,15 +361,13 @@ def _get_dc_model(league: str):
 
     df = _load_fbref_data(league)
     if df.empty or len(df) < 100:
-        log.warning(f"Insufficient data for {league} ({len(df)} matches). "
-                    f"Using league-average model.")
         return None
 
     model = DixonColesModel(xi=0.0065)
     try:
         model.fit(df, reference_date=pd.Timestamp(datetime.utcnow()))
-        log.info(f"DC model fitted: {league} ({len(df)} matches, "
-                 f"{len(model.teams)} teams)")
+        _MODEL_CACHE[league] = model
+        log.info(f"DC model fitted+cached: {league} ({len(df)} matches)")
         return model
     except Exception as e:
         log.error(f"DC fit failed [{league}]: {e}")

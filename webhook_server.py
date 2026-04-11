@@ -180,9 +180,21 @@ def cmd_analyze(cid, text):
     tg_send(cid, "⏳ Analyse TSS en cours...")
     try:
         from tss.match_analyzer import analyze_match_text
-        tg_send(cid, analyze_match_text(match_text))
+        result = analyze_match_text(match_text)
+        # Split if too long (Telegram max 4096 chars)
+        if len(result) <= 4000:
+            ok = tg_send(cid, result)
+            if not ok:
+                log.error(f"tg_send failed for analysis result (len={len(result)})")
+                tg_send(cid, "❌ Erreur envoi du résultat. Réessaie.")
+        else:
+            # Send in two parts
+            mid = result.rfind("\n", 0, 3800)
+            tg_send(cid, result[:mid])
+            tg_send(cid, result[mid:])
     except Exception as e:
-        tg_send(cid, f"❌ Erreur analyse: {e}")
+        log.error(f"cmd_analyze error: {e}", exc_info=True)
+        tg_send(cid, f"❌ Erreur analyse: <code>{str(e)[:200]}</code>")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -259,6 +271,18 @@ def _handle_message(cid: str, text: str):
 
 if __name__ == "__main__":
     log.info(f"Starting APEX-TSS on port {PORT}")
+
+    # Pre-load DC models at startup (avoids fitting delay on first request)
+    def _preload_models():
+        try:
+            from tss.match_analyzer import _get_dc_model
+            for lg in ["EPL", "Serie A", "La Liga", "Bundesliga", "Ligue 1"]:
+                _get_dc_model(lg)
+            log.info("✅ DC models pre-loaded")
+        except Exception as e:
+            log.warning(f"Pre-load skipped: {e}")
+    threading.Thread(target=_preload_models, daemon=True).start()
+
     if WEBHOOK_URL:
         if register_webhook():
             tg_send(CHAT_ID,
