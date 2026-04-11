@@ -180,6 +180,88 @@ def cmd_gates(cid):
     except Exception as e:
         tg_send(cid, f"❌ config.json: {e}")
 
+def cmd_suspect(cid, text):
+    """Scan and return only suspicious matches."""
+    window_text = re.sub(r"^/(suspect|suspicious|alerte)\s*", "", text,
+                         flags=re.IGNORECASE).strip() or "48h"
+    tg_send(cid, f"🚨 <b>Scan matchs suspects...</b> (<code>{window_text}</code>)")
+    try:
+        from tss.fixture_fetcher import get_fixtures
+        from tss.scanner import scan_fixtures, _compute_synthetic_pbook, _run_gates_with_pbook
+        from tss.match_analyzer import (_load_gates, _best_team_match,
+                                         _get_dc_model, _league_average_probs,
+                                         _simulate_odds)
+        from tss.suspicion_engine import analyze_suspicion, format_suspect_message
+
+        fixtures, label = get_fixtures(window_text)
+        if not fixtures:
+            tg_send(cid, f"📭 Aucun match trouvé pour {window_text}.")
+            return
+
+        # Enrich with real odds
+        try:
+            from tss.odds_api import enrich_fixtures_with_odds, demarginalize_odds
+            fixtures = enrich_fixtures_with_odds(fixtures)
+            has_real = True
+        except Exception:
+            has_real = False
+
+        gates   = _load_gates()
+        suspects = []
+
+        for fix in fixtures:
+            home = _best_team_match(fix["home"]) or fix["home"]
+            away = _best_team_match(fix["away"]) or fix["away"]
+            model = _get_dc_model(fix["league"])
+            if model:
+                try:
+                    probs = model.predict_probs(home, away)
+                except Exception:
+                    probs = _league_average_probs(home, away)
+            else:
+                probs = _league_average_probs(home, away)
+
+            odds_dict = {
+                "odds_H":        fix.get("odds_H"),
+                "odds_D":        fix.get("odds_D"),
+                "odds_A":        fix.get("odds_A"),
+                "odds_over2.5":  fix.get("odds_over2.5"),
+                "odds_under2.5": fix.get("odds_under2.5"),
+                "odds_over3.5":  fix.get("odds_over3.5"),
+                "odds_under3.5": fix.get("odds_under3.5"),
+            }
+            synth = _simulate_odds(probs, margin=gates["book_margin"])
+            for k, v in odds_dict.items():
+                if not v or v <= 1.0:
+                    odds_dict[k] = synth.get(k, 2.0)
+
+            if has_real and fix.get("odds_matched"):
+                from tss.odds_api import demarginalize_odds
+                p_book = demarginalize_odds(fix)
+            else:
+                p_book = _compute_synthetic_pbook(probs, gates["book_margin"])
+
+            result = analyze_suspicion(fix, probs, odds_dict, p_book)
+
+            if result["score"] >= 30:
+                suspects.append({"fix": {**fix,"home":home,"away":away},
+                                  "probs": probs, "suspicion": result})
+
+        suspects.sort(key=lambda x: x["suspicion"]["score"], reverse=True)
+        msg = format_suspect_message(suspects, label)
+
+        if len(msg) <= 4000:
+            tg_send(cid, msg)
+        else:
+            mid = msg.rfind("\n", 0, 3800)
+            tg_send(cid, msg[:mid])
+            tg_send(cid, msg[mid:])
+
+    except Exception as e:
+        log.error(f"cmd_suspect error: {e}", exc_info=True)
+        tg_send(cid, f"❌ Erreur: <code>{str(e)[:200]}</code>")
+
+
 def cmd_setgates(cid, text):
     import json
     from pathlib import Path
@@ -440,6 +522,7 @@ def _handle_message(cid: str, text: str):
     elif cmd == "/backtest": cmd_backtest(cid)
     elif cmd == "/gates":    cmd_gates(cid)
     elif cmd == "/scan":     cmd_scan(cid, text)
+    elif cmd in ("/suspect", "/suspicious", "/alerte"): cmd_suspect(cid, text)
     elif cmd in ("/setgates", "/gates_set", "/set"): cmd_setgates(cid, text)
     elif cmd in ("/analyze", "/analyse", "/match", "/tss"):
         cmd_analyze(cid, text)

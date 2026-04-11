@@ -12,6 +12,12 @@ from typing import List, Dict, Optional
 
 log = logging.getLogger("scanner")
 
+try:
+    from tss.suspicion_engine import analyze_suspicion, format_suspicion_block
+    SUSPICION_AVAILABLE = True
+except ImportError:
+    SUSPICION_AVAILABLE = False
+
 
 def scan_fixtures(
     fixtures: List[Dict],
@@ -134,6 +140,14 @@ def scan_fixtures(
         bets = [s for s in signals
                 if s["bet"] and s["stars"] >= min_stars and s["ev"] >= min_ev]
 
+        # Suspicion analysis (always run, regardless of BET/NO BET)
+        suspicion = {}
+        if SUSPICION_AVAILABLE:
+            try:
+                suspicion = analyze_suspicion(fix, probs, odds_dict, p_book)
+            except Exception as e:
+                log.debug(f"Suspicion error: {e}")
+
         if bets:
             results.append({
                 "league":      league,
@@ -147,6 +161,7 @@ def scan_fixtures(
                 "probs":       probs,
                 "top_ev":      max(s["ev"] for s in bets),
                 "top_stars":   max(s["stars"] for s in bets),
+                "suspicion":   suspicion,
             })
             log.info(f"  ✅ {home} vs {away} | {len(bets)} BET(s) | "
                      f"best EV={max(s['ev'] for s in bets):+.3f} [{odds_source}]")
@@ -295,6 +310,10 @@ def format_scan_message(results: List[Dict], window_label: str,
                 f"Edge:<code>{s['edge']:+.3f}</code>  "
                 f"💰<code>{s['stake']*100:.1f}%</code>"
             )
+        # Suspicion flag inline
+        susp = fix.get("suspicion", {})
+        if susp and susp.get("score", 0) >= 30:
+            lines.append(format_suspicion_block(susp))
         lines.append("")
 
     lines += [
