@@ -348,8 +348,8 @@ def format_suspect_message(suspects: List[Dict], window_label: str) -> str:
         lines += [
             f"{'='*25}",
             f"<b>{i}. {fix['home']}  vs  {fix['away']}</b>",
-            f"\U0001f30d {fix['league']}  \u00b7  \U0001f4c5 {fix['date']}"
-            f"{' \u00b7 \u23f0 '+fix['time'] if fix.get('time') else ''}",
+            "🌍 " + fix['league'] + "  ·  📅 " + fix['date'] +
+            (" · ⏰ " + fix['time'] if fix.get('time') else ""),
             f"  1\ufe0f\u20e3 {p['H']*100:.0f}%  \u2796 {p['D']*100:.0f}%  "
             f"2\ufe0f\u20e3 {p['A']*100:.0f}%",
             format_suspicion_block(result),
