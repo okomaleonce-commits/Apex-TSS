@@ -167,6 +167,36 @@ def scan_fixtures(
                      f"best EV={max(s['ev'] for s in bets):+.3f} [{odds_source}]")
 
     results.sort(key=lambda x: x["top_ev"], reverse=True)
+
+    # Gate failure diagnostics
+    if not results:
+        gate_fails = {"no_odds": 0, "ev": 0, "edge": 0, "odds_range": 0, "all_past": 0}
+        for fix in fixtures:
+            home = _best_team_match(fix["home"]) or fix["home"]
+            away = _best_team_match(fix["away"]) or fix["away"]
+            model = _get_dc_model(fix["league"])
+            if not model:
+                gate_fails["no_odds"] += 1
+                continue
+            try:
+                probs = model.predict_probs(home, away)
+            except Exception:
+                probs = _league_average_probs(home, away)
+            odds = _simulate_odds(probs, margin=gates["book_margin"])
+            p_b  = _compute_synthetic_pbook(probs, gates["book_margin"])
+            sigs = _run_gates_with_pbook(probs, odds, p_b, gates)
+            for s in sigs:
+                for f in s.get("fails", []):
+                    if "EV" in f:     gate_fails["ev"]        += 1
+                    if "Edge" in f:   gate_fails["edge"]      += 1
+                    if "Odds" in f:   gate_fails["odds_range"]+= 1
+        log.info(f"Gate failure breakdown: {gate_fails}")
+        if gate_fails["ev"] > 0 and gate_fails["edge"] == 0:
+            log.info("  → All failures on EV gate. Try /setgates ev_min=0.005")
+        elif gate_fails["edge"] > 0:
+            log.info("  → Edge failures dominant. Synthetic odds = near-zero real edge.")
+            log.info("  → Solution: real bookmaker odds needed (Odds API)")
+
     return results
 
 
