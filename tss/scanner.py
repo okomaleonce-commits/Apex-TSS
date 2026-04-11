@@ -43,6 +43,30 @@ def scan_fixtures(
     else:
         has_real_odds = False
 
+    # ── Filter: keep only future matches ──────────────────────────────────────
+    now_utc = datetime.utcnow()
+    future  = []
+    skipped = 0
+    for fix in fixtures:
+        try:
+            fix_date = fix.get("date", "")
+            fix_time = fix.get("time", "00:00") or "00:00"
+            # Parse kickoff time (UTC)
+            kickoff_str = f"{fix_date} {fix_time}"
+            kickoff     = datetime.strptime(kickoff_str, "%Y-%m-%d %H:%M")
+            # Add 90 min buffer — skip if match likely finished
+            if kickoff < now_utc - __import__('datetime').timedelta(minutes=90):
+                log.info(f"  SKIP (past): {fix['home']} vs {fix['away']} @ {kickoff_str}")
+                skipped += 1
+                continue
+        except Exception:
+            pass  # keep if can't parse time
+        future.append(fix)
+
+    if skipped:
+        log.info(f"  Filtered {skipped} past matches — {len(future)} remaining")
+    fixtures = future
+
     results = []
     log.info(f"Scanning {len(fixtures)} fixtures | real_odds={has_real_odds}")
 

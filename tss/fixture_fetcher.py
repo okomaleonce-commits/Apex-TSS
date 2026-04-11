@@ -18,6 +18,60 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta, date
 from typing import List, Dict, Optional, Tuple
+from difflib import SequenceMatcher
+
+# ── Known clubs per league (filter out wrong-division teams) ──────────────────
+KNOWN_CLUBS = {
+    "EPL": {
+        "Arsenal","Chelsea","Liverpool","Manchester City","Manchester United",
+        "Tottenham","Newcastle United","Brighton","Aston Villa","West Ham United",
+        "Wolves","Everton","Fulham","Brentford","Crystal Palace","Bournemouth",
+        "Nottingham Forest","Leicester City","Southampton","Ipswich Town",
+        "Luton Town","Sheffield United","Burnley","Watford","Leeds United",
+        # Common variations
+        "Man City","Man United","Spurs","Nott'm Forest","Newcastle",
+        "Wolverhampton","West Ham","Brighton & Hove Albion",
+    },
+    "Serie A": {
+        "Napoli","Inter","Milan","AC Milan","Juventus","Roma","Lazio","Atalanta",
+        "Fiorentina","Bologna","Torino","Monza","Lecce","Genoa","Hellas Verona",
+        "Cagliari","Empoli","Udinese","Como","Venezia","Parma","Salernitana",
+    },
+    "La Liga": {
+        "Real Madrid","Barcelona","Atletico Madrid","Athletic Club","Villarreal",
+        "Real Sociedad","Real Betis","Valencia","Celta Vigo","Getafe","Osasuna",
+        "Girona","UD Las Palmas","Deportivo Alaves","Rayo Vallecano","Mallorca",
+        "Espanyol","Sevilla","Real Valladolid","CD Leganes",
+    },
+    "Bundesliga": {
+        "Bayern Munich","Borussia Dortmund","Bayer Leverkusen","RB Leipzig",
+        "Eintracht Frankfurt","VfL Wolfsburg","VfB Stuttgart","SC Freiburg",
+        "TSG Hoffenheim","FC Augsburg","1. FSV Mainz 05","Werder Bremen",
+        "1. FC Union Berlin","1. FC Heidenheim","VfL Bochum",
+        "Holstein Kiel","FC St. Pauli","Borussia Monchengladbach",
+    },
+    "Ligue 1": {
+        "Paris Saint-Germain","Olympique de Marseille","Olympique Lyonnais",
+        "AS Monaco","OGC Nice","RC Lens","LOSC Lille","Stade Rennais",
+        "Montpellier HSC","RC Strasbourg","Toulouse FC","FC Nantes",
+        "Stade de Reims","Stade Brestois","Le Havre AC","AJ Auxerre",
+        "SCO Angers","AS Saint-Etienne","FC Metz","PSG","Lyon","Marseille",
+    },
+}
+
+def _is_valid_club(team: str, league: str) -> bool:
+    """Return True if team is known for this league (or no whitelist exists)."""
+    clubs = KNOWN_CLUBS.get(league)
+    if not clubs:
+        return True  # No filter for leagues without whitelist
+    team_lower = team.lower().strip()
+    for club in clubs:
+        if (club.lower() in team_lower or team_lower in club.lower() or
+                SequenceMatcher(None, team_lower, club.lower()).ratio() > 0.82):
+            return True
+    return False
+
+
 import re
 
 log = logging.getLogger("fixture_fetcher")
@@ -90,6 +144,10 @@ def _fetch_tsdb_league(league: str, date_from: date, date_to: date) -> List[Dict
             time = ev.get("strTime", "")[:5] if ev.get("strTime") else ""
 
             if home and away:
+                # Filter: skip teams not belonging to this division
+                if not (_is_valid_club(home, league) and _is_valid_club(away, league)):
+                    log.debug(f"  SKIP wrong division: {home} vs {away} [{league}]")
+                    continue
                 matches.append({
                     "league":   league,
                     "home":     home,
@@ -191,6 +249,14 @@ def parse_scan_window(text: str) -> Tuple[str, str, str]:
     if text in ("today", "aujourd'hui", "auj", "ce soir", "jour"):
         d_from, d_to = today, today
         label = f"Aujourd'hui {today.strftime('%d/%m/%Y')}"
+
+    elif re.match(r"^\d+h$", text):
+        # Any Nh format: 6h, 8h, 24h, 48h...
+        hours  = int(text[:-1])
+        days   = max(1, (hours + 23) // 24)
+        d_from = today
+        d_to   = today + timedelta(days=days)
+        label  = f"Prochaines {text} ({today.strftime('%d/%m')} → {d_to.strftime('%d/%m')})"
 
     elif text in ("48h", "48"):
         d_from = today
