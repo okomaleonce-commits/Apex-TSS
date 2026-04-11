@@ -87,8 +87,8 @@ TSDB_LEAGUES = {
     "La Liga":    4335,
     "Bundesliga": 4331,
     "Ligue 1":    4334,
-    "Eredivisie": 4337,
-    "Belgian Pro":4430,
+    "Eredivisie": 4337,   # Dutch Eredivisie
+    "Belgian Pro":4397,   # Belgian First Division A (corrected)
 }
 
 # football-data.org competition codes (backup)
