@@ -135,7 +135,7 @@ class OddsDownloader:
         results = {}
         for league in leagues:
             for season in seasons:
-                url = build_fdco_url(league, season)
+                url = build_source_url(league, season)
                 if url is None:
                     log.warning(f"No FDCO source for {league} — skipping download")
                     results[(league, season)] = None
