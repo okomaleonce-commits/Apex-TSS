@@ -146,6 +146,7 @@ def _fetch_tsdb_league(league: str, date_from: date, date_to: date) -> List[Dict
                 continue
             # Filter by league
             ev_league = ev.get("strLeague", "")
+            log.debug(f"  TSDB event: {ev.get('strHomeTeam')} vs {ev.get('strAwayTeam')} | strLeague={ev_league!r}")
             if not _league_matches(ev_league, league):
                 continue
             home = ev.get("strHomeTeam", "")
@@ -170,6 +171,7 @@ def _fetch_tsdb_league(league: str, date_from: date, date_to: date) -> List[Dict
 
     # Strategy 2: fallback to next-league endpoint if day fetch returned nothing
     if not matches and league_id:
+        log.info(f"  {league}: day-fetch returned 0 → trying nextleague fallback")
         try:
             url = f"{TSDB_BASE}/eventsnextleague.php?id={league_id}"
             r   = requests.get(url, timeout=15)

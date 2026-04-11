@@ -145,19 +145,80 @@ def _extract_odds(match_data: Dict) -> Dict:
 # 2. TEAM NAME MATCHER
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Team name normalization map: TheSportsDB → Odds API canonical
+TSDB_TO_ODDS_MAP = {
+    # Eredivisie
+    "AFC Ajax":            "Ajax",
+    "Ajax Amsterdam":      "Ajax",
+    "Feyenoord Rotterdam": "Feyenoord",
+    "PSV Eindhoven":       "PSV",
+    "AZ Alkmaar":          "AZ",
+    "FC Twente":           "Twente",
+    "FC Utrecht":          "Utrecht",
+    "NEC Nijmegen":        "NEC",
+    # Belgian Pro
+    "Club Brugge KV":      "Club Brugge",
+    "RSC Anderlecht":      "Anderlecht",
+    "KRC Genk":            "Genk",
+    "KAA Gent":            "Gent",
+    "Standard de Liège":   "Standard Liege",
+    "Royal Antwerp FC":    "Antwerp",
+    # EPL
+    "Manchester City FC":  "Manchester City",
+    "Manchester United FC":"Manchester United",
+    "Tottenham Hotspur FC":"Tottenham Hotspur",
+    "Arsenal FC":          "Arsenal",
+    "Chelsea FC":          "Chelsea",
+    "Liverpool FC":        "Liverpool",
+    # La Liga
+    "FC Barcelona":        "Barcelona",
+    "Real Madrid CF":      "Real Madrid",
+    "Club Atlético de Madrid": "Atletico Madrid",
+    "Athletic Club de Bilbao": "Athletic Club",
+    # Bundesliga
+    "FC Bayern München":   "Bayern Munich",
+    "Borussia Dortmund":   "Borussia Dortmund",
+    "Bayer 04 Leverkusen": "Bayer Leverkusen",
+    # Serie A
+    "AC Milan":            "AC Milan",
+    "FC Internazionale":   "Inter Milan",
+    "Juventus FC":         "Juventus",
+    # Ligue 1
+    "Paris Saint-Germain FC": "Paris Saint-Germain",
+    "Olympique de Marseille": "Marseille",
+    "Olympique Lyonnais":  "Lyon",
+}
+
+def _normalise_team_name(name: str) -> str:
+    """Apply canonical mapping + strip common suffixes."""
+    name = TSDB_TO_ODDS_MAP.get(name, name)
+    # Strip common suffixes/prefixes for fuzzy matching
+    clean = name.lower()
+    for tok in ["fc", "sc", "ac", "afc", "rsc", "kv", "krc", "kaa",
+                "cf", "fk", "sk", "bk", "if", "il", "vfl", "vfb",
+                "1.", "1 ", "fsv", "tsv"]:
+        clean = clean.replace(tok, " ")
+    return " ".join(clean.split())
+
+
 def _name_sim(a: str, b: str) -> float:
-    return SequenceMatcher(None,
-        "".join(c for c in a.lower() if c.isalnum()),
-        "".join(c for c in b.lower() if c.isalnum())
-    ).ratio()
+    na = "".join(c for c in _normalise_team_name(a) if c.isalnum())
+    nb = "".join(c for c in _normalise_team_name(b) if c.isalnum())
+    return SequenceMatcher(None, na, nb).ratio()
 
 
 def _match_team(api_name: str, fixture_name: str) -> float:
-    """Similarity between API team name and fixture team name."""
-    return max(
-        _name_sim(api_name, fixture_name),
-        _name_sim(api_name.split()[-1], fixture_name.split()[-1]),
-    )
+    """Multi-strategy similarity for API vs fixture team names."""
+    # Apply canonical mappings first
+    a_norm = _normalise_team_name(api_name)
+    f_norm = _normalise_team_name(fixture_name)
+    scores = [
+        _name_sim(api_name, fixture_name),      # full names
+        _name_sim(a_norm, f_norm),               # normalised
+        _name_sim(api_name.split()[0], fixture_name.split()[0]),  # first word
+        _name_sim(api_name.split()[-1], fixture_name.split()[-1]),# last word
+    ]
+    return max(scores)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -215,7 +276,7 @@ def enrich_fixtures_with_odds(fixtures: List[Dict]) -> List[Dict]:
                     _match_team(api_away, fix_away)
                 ) / 2
 
-                if score > best_score and score >= 0.65:
+                if score > best_score and score >= 0.58:
                     best_score = score
                     best_entry = entry
 
@@ -229,6 +290,8 @@ def enrich_fixtures_with_odds(fixtures: List[Dict]) -> List[Dict]:
                           f"bookie={odds.get('bookie_used','-')})")
             else:
                 fixtures[idx]["odds_matched"] = False
+                best_name = best_entry["home_team"] if best_entry else "none"
+                log.info(f"  UNMATCHED: {fix_home} vs {fix_away} | Best: {best_name} (score={best_score:.2f})")
 
     matched = sum(1 for f in fixtures if f.get("odds_matched"))
     log.info(f"Odds enrichment: {matched}/{len(fixtures)} fixtures matched")
