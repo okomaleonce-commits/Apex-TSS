@@ -354,72 +354,84 @@ def format_scan_message(results: List[Dict], window_label: str,
     return "\n".join(lines)
 
 
-def format_scan_messages(results: list, window_label: str,
-                         total_scanned: int, top_n: int = 5) -> list:
-    """Split scan results into Telegram messages (≤4000 chars each), Top-N by EV."""
+
+def format_scan_messages(results, window_label, total_scanned, top_n=5):
+    """Returns list of Telegram messages (<=4000 chars each). Shows top_n by EV."""
     from datetime import datetime
     ts = datetime.utcnow().strftime("%d/%m/%Y %H:%M UTC")
 
     if not results:
         return [format_scan_message([], window_label, total_scanned)]
 
-    def _st(n): return "\u2b50" * n + "\u2606" * (5 - n)
-
+    top  = results[:top_n]
+    rest = results[top_n:]
     n_signals = sum(len(r["bets"]) for r in results)
-    top       = results[:top_n]
-    rest      = results[top_n:]
+    SEP1 = "\u2501" * 25   # thick line for header/footer
+    SEP2 = "\u2500" * 25   # thin line between matches
 
-    header = (
-        "\u2501" * 25 + "\n"
+    def st(n):
+        return "\u2b50" * n + "\u2606" * (5 - n)
+
+    parts = []
+
+    # Header (single block)
+    parts.append(
+        SEP1 + "\n"
         "\U0001f52d <b>APEX-TSS | SCAN R\u00c9SULTATS</b>\n"
-        "\u2501" * 25 + "\n"
-        f"\U0001f4c5 {window_label}  \u00b7  \U0001f550 {ts}\n"
-        f"\U0001f50d {total_scanned} matchs  \u2192  "
-        f"<b>{len(results)} BET / {n_signals} signal(s)</b>\n"
-        f"\U0001f3c6 TOP {min(top_n, len(results))} par EV\n"
+        + SEP1 + "\n"
+        + f"\U0001f4c5 {window_label}  \u00b7  \U0001f550 {ts}\n"
+        + f"\U0001f50d {total_scanned} matchs  \u2192  "
+        + f"<b>{len(results)} BET / {n_signals} signal(s)</b>\n"
+        + f"\U0001f3c6 TOP {min(top_n, len(results))} par EV\n"
     )
 
-    blocks = []
+    # Top-N match blocks
     for i, fix in enumerate(top, 1):
-        src  = "\U0001f4e1" if fix.get("odds_source", "") not in ("synthetic", "") else "\U0001f52e"
-        tstr = f" \u00b7 \u23f0 {fix['time']}" if fix.get("time") else ""
-        p    = fix["probs"]
-        b    = (
-            "\u2500" * 25 + "\n"
-            f"<b>{i}. {fix['home']}  vs  {fix['away']}</b>\n"
-            f"\U0001f30d {fix['league']}  \u00b7  \U0001f4c5 {fix['date']}{tstr}  {src}\n"
-            f"  1\ufe0f\u20e3 {p['H']*100:.0f}%  \u2796 {p['D']*100:.0f}%  "
-            f"2\ufe0f\u20e3 {p['A']*100:.0f}%  O2.5:{p['over2.5']*100:.0f}%\n\n"
+        p   = fix["probs"]
+        src = "\U0001f4e1" if fix.get("odds_source", "") not in ("synthetic", "") else "\U0001f52e"
+        tt  = " \u00b7 \u23f0 " + fix["time"] if fix.get("time") else ""
+        b   = (
+            SEP2 + "\n"
+            + f"<b>{i}. {fix['home']}  vs  {fix['away']}</b>\n"
+            + f"\U0001f30d {fix['league']}  \u00b7  \U0001f4c5 {fix['date']}{tt}  {src}\n"
+            + f"  1\ufe0f\u20e3 {p['H']*100:.0f}%"
+            + f"  \u2796 {p['D']*100:.0f}%"
+            + f"  2\ufe0f\u20e3 {p['A']*100:.0f}%"
+            + f"  O2.5:{p['over2.5']*100:.0f}%\n\n"
         )
         for s in fix["bets"]:
             b += (
-                f"  {_st(s['stars'])}  <b>{s['label']}</b>\n"
-                f"  \U0001f4ca <code>{s['odds']}</code>  "
-                f"EV:<code>{s['ev']:+.3f}</code>  "
-                f"Edge:<code>{s['edge']:+.3f}</code>  "
-                f"\U0001f4b0<code>{s['stake']*100:.1f}%</code>\n"
+                f"  {st(s['stars'])}  <b>{s['label']}</b>\n"
+                + f"  \U0001f4ca <code>{s['odds']}</code>  "
+                + f"EV:<code>{s['ev']:+.3f}</code>  "
+                + f"Edge:<code>{s['edge']:+.3f}</code>  "
+                + f"\U0001f4b0<code>{s['stake']*100:.1f}%</code>\n"
             )
-        blocks.append(b)
+        parts.append(b)
 
-    rest_block = ""
+    # Rest summary
     if rest:
-        rest_block = "\u2501" * 25 + "\n"
-        rest_block += f"\U0001f4cb <b>+{len(rest)} autres BET (EV plus faible)</b>\n"
+        r_txt = (
+            SEP1 + "\n"
+            + f"\U0001f4cb <b>+{len(rest)} autres BET (EV plus faible)</b>\n"
+        )
         for r in rest:
             mkt = r["bets"][0]["label"] if r["bets"] else "?"
-            rest_block += f"  \u2022 {r['home']} vs {r['away']} \u2014 {mkt} EV:<code>{r['top_ev']:+.3f}</code>\n"
+            r_txt += f"  \u2022 {r['home']} vs {r['away']} \u2014 {mkt} EV:<code>{r['top_ev']:+.3f}</code>\n"
+        parts.append(r_txt)
 
-    footer = "\n<i>APEX-TSS \u00b7 Dixon-Coles + Shin + Real Odds</i>"
+    parts.append("\n<i>APEX-TSS \u00b7 Dixon-Coles + Shin + Real Odds</i>")
 
-    # Pack into ≤4000 char messages
-    messages  = []
-    current   = header
-    for block in blocks:
-        if len(current) + len(block) > 3900:
-            messages.append(current)
-            current = block
+    # Pack into <=4000 char messages
+    messages, current = [], ""
+    for part in parts:
+        if len(current) + len(part) <= 3900:
+            current += part
         else:
-            current += block
-    current += rest_block + footer
-    messages.append(current)
-    return messages
+            if current:
+                messages.append(current)
+            current = part
+    if current:
+        messages.append(current)
+
+    return messages or [""]
