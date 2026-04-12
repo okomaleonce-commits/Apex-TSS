@@ -234,33 +234,117 @@ def _fetch_fdorg_league(league: str, date_from: str, date_to: str) -> List[Dict]
 # MAIN FETCHER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _fetch_fixtures(date_from: str, date_to: str) -> List[Dict]:
-    """Fetch fixtures from TheSportsDB (primary) across all cached leagues."""
-    d_from = datetime.strptime(date_from, "%Y-%m-%d").date()
-    d_to   = datetime.strptime(date_to,   "%Y-%m-%d").date()
+def _fetch_odds_api_fixtures(date_from: str, date_to: str) -> List[Dict]:
+    """
+    Primary fixture source: The Odds API /events endpoint.
+    Returns upcoming fixtures WITH odds — always up to date for current season.
+    """
+    import os
+    api_key = os.environ.get("ODDS_API_KEY", "4556cbebcaea0e8301f1c176bdb64e31")
+    base    = "https://api.the-odds-api.com/v4"
+
+    SPORT_KEYS = {
+        "EPL":        "soccer_epl",
+        "Serie A":    "soccer_italy_serie_a",
+        "La Liga":    "soccer_spain_la_liga",
+        "Bundesliga": "soccer_germany_bundesliga",
+        "Ligue 1":    "soccer_france_ligue_one",
+    }
+
+    d_from = datetime.strptime(date_from, "%Y-%m-%d")
+    d_to   = datetime.strptime(date_to,   "%Y-%m-%d")
+    # Add 1 day to date_to to include full day
+    from datetime import timezone
+    commence_to = d_to.replace(hour=23, minute=59).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     all_matches = []
+    seen        = set()
+
+    for league, sport_key in SPORT_KEYS.items():
+        try:
+            r = requests.get(
+                f"{base}/sports/{sport_key}/events/",
+                params={
+                    "apiKey":        api_key,
+                    "dateFormat":    "iso",
+                    "commenceTimeTo": commence_to,
+                },
+                timeout=15
+            )
+            remaining = r.headers.get("x-requests-remaining", "?")
+            if r.status_code != 200:
+                log.warning(f"  OddsAPI events {sport_key}: {r.status_code}")
+                continue
+
+            events = r.json()
+            log.info(f"  {league}: {len(events)} events from OddsAPI ({remaining} req left)")
+
+            for ev in events:
+                commence = ev.get("commence_time", "")
+                if not commence:
+                    continue
+                # Parse date
+                ev_date = datetime.strptime(commence[:10], "%Y-%m-%d")
+                if not (d_from <= ev_date <= d_to):
+                    continue
+
+                home = ev.get("home_team", "")
+                away = ev.get("away_team", "")
+                if not home or not away:
+                    continue
+
+                ev_id = ev.get("id", f"{home}{away}{commence[:10]}")
+                if ev_id in seen:
+                    continue
+                seen.add(ev_id)
+
+                time_str = commence[11:16] if len(commence) > 10 else ""
+                all_matches.append({
+                    "league":   league,
+                    "home":     home,
+                    "away":     away,
+                    "date":     commence[:10],
+                    "time":     time_str,
+                    "status":   "SCHEDULED",
+                    "match_id": str(ev_id),
+                    "source":   "OddsAPI-events",
+                })
+
+        except Exception as e:
+            log.error(f"OddsAPI events error [{league}]: {e}")
+
+    return sorted(all_matches, key=lambda x: (x["date"], x["time"]))
+
+
+def _fetch_fixtures(date_from: str, date_to: str) -> List[Dict]:
+    """
+    Fixture pipeline:
+    1. OddsAPI /events (primary — always has current season data)
+    2. TheSportsDB (fallback — may lag on future dates)
+    """
+    # Primary: Odds API events
+    matches = _fetch_odds_api_fixtures(date_from, date_to)
+    if matches:
+        log.info(f"Fixtures from OddsAPI: {len(matches)} total")
+        return matches
+
+    # Fallback: TheSportsDB
+    log.warning("OddsAPI returned 0 fixtures — trying TheSportsDB fallback")
+    d_from = datetime.strptime(date_from, "%Y-%m-%d").date()
+    d_to   = datetime.strptime(date_to,   "%Y-%m-%d").date()
+    all_matches = []
     for league in CACHED_LEAGUES:
-        # Primary: TheSportsDB
-        matches = _fetch_tsdb_league(league, d_from, d_to)
+        m = _fetch_tsdb_league(league, d_from, d_to)
+        if m:
+            log.info(f"  {league}: {len(m)} fixtures (TheSportsDB)")
+        all_matches.extend(m)
 
-        # Backup: football-data.org
-        if not matches:
-            matches = _fetch_fdorg_league(league, date_from, date_to)
-
-        if matches:
-            log.info(f"  {league}: {len(matches)} fixtures ({matches[0]['source']})")
-        all_matches.extend(matches)
-
-    # Deduplicate by (date, home, away)
-    seen = set()
-    unique = []
+    seen, unique = set(), []
     for m in all_matches:
         key = (m["date"], m["home"][:8], m["away"][:8])
         if key not in seen:
             seen.add(key)
             unique.append(m)
-
     return sorted(unique, key=lambda x: (x["date"], x["time"]))
 
 
