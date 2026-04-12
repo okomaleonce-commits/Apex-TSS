@@ -402,16 +402,10 @@ def cmd_scan(cid, text):
         # 2. Scan through TSS
         results = scan_fixtures(fixtures, min_stars=2, min_ev=0.03)
 
-        # 3. Send results (split if > 4000 chars)
-        msg = format_scan_message(results, label, total)
-
-        if len(msg) <= 4000:
-            tg_send(cid, msg)
-        else:
-            # Split into chunks of max 4000 chars at match boundaries
-            chunks = _split_scan_message(msg)
-            for chunk in chunks:
-                tg_send(cid, chunk)
+        # 3. Top-5 + multi-message
+        from tss.scanner import format_scan_messages
+        for chunk in format_scan_messages(results, label, total, top_n=5):
+            tg_send(cid, chunk)
 
     except Exception as e:
         log.error(f"cmd_scan error: {e}", exc_info=True)
