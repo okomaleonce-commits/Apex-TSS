@@ -40,8 +40,11 @@ KNOWN_CLUBS = {
     "La Liga": {
         "Real Madrid","Barcelona","Atletico Madrid","Athletic Club","Villarreal",
         "Real Sociedad","Real Betis","Valencia","Celta Vigo","Getafe","Osasuna",
-        "Girona","UD Las Palmas","Deportivo Alaves","Rayo Vallecano","Mallorca",
-        "Espanyol","Sevilla","Real Valladolid","CD Leganes",
+        "Girona","Las Palmas","UD Las Palmas","Alaves","Deportivo Alaves",
+        "Rayo Vallecano","Vallecano","Mallorca","Espanyol","Sevilla",
+        "Real Valladolid","Valladolid","Leganes","CD Leganes",
+        "Levante","Levante UD","Oviedo","Real Oviedo",
+        "Burgos","Elche","Huesca","Mirandes","Sporting Gijon",
     },
     "Bundesliga": {
         "Bayern Munich","Borussia Dortmund","Bayer Leverkusen","RB Leipzig",
@@ -59,15 +62,32 @@ KNOWN_CLUBS = {
     },
 }
 
+# Explicit non-league clubs to always reject (Club World Cup, friendlies...)
+ALWAYS_REJECT = {
+    "Adelaide United", "Auckland City", "Al Hilal", "Al Ain",
+    "Seattle Sounders", "Mamelodi Sundowns", "Urawa Red Diamonds",
+    "Wydad", "Monterrey", "Fluminense", "CF Montreal",
+    "Inter Miami", "LA Galaxy", "Club Leon",
+}
+
 def _is_valid_club(team: str, league: str) -> bool:
     """Return True if team is known for this league (or no whitelist exists)."""
+    # Explicit reject list (non-league clubs)
+    if team in ALWAYS_REJECT or team.strip() in ALWAYS_REJECT:
+        return False
+
     clubs = KNOWN_CLUBS.get(league)
     if not clubs:
         return True  # No filter for leagues without whitelist
+
     team_lower = team.lower().strip()
     for club in clubs:
-        if (club.lower() in team_lower or team_lower in club.lower() or
-                SequenceMatcher(None, team_lower, club.lower()).ratio() > 0.82):
+        club_lower = club.lower()
+        # Exact substring match
+        if club_lower in team_lower or team_lower in club_lower:
+            return True
+        # Fuzzy match — raised threshold to 0.87 to avoid false positives
+        if SequenceMatcher(None, team_lower, club_lower).ratio() > 0.87:
             return True
     return False
 
