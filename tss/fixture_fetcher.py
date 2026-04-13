@@ -63,17 +63,30 @@ KNOWN_CLUBS = {
 }
 
 # Explicit non-league clubs to always reject (Club World Cup, friendlies...)
+# Club World Cup 2025 + non-European teams that appear under European sport keys
 ALWAYS_REJECT = {
-    "Adelaide United", "Auckland City", "Al Hilal", "Al Ain",
-    "Seattle Sounders", "Mamelodi Sundowns", "Urawa Red Diamonds",
-    "Wydad", "Monterrey", "Fluminense", "CF Montreal",
-    "Inter Miami", "LA Galaxy", "Club Leon",
+    # Oceania
+    "Adelaide United", "Auckland City", "Wellington Phoenix",
+    # Africa
+    "Al Ahly", "Mamelodi Sundowns", "Wydad", "ES Tunis",
+    # Asia
+    "Al Hilal", "Al Ain", "Urawa Red Diamonds", "Jeonbuk",
+    "Ulsan", "Al Nassr", "Al Ittihad",
+    # Americas
+    "Seattle Sounders", "Monterrey", "Club Leon", "Pachuca",
+    "Fluminense", "Flamengo", "CF Montreal", "Inter Miami",
+    "LA Galaxy", "Los Angeles FC", "Portland Timbers",
+    "New York City FC", "Atlanta United",
+    # Middle East
+    "Al Qadsiah",
 }
 
 def _is_valid_club(team: str, league: str) -> bool:
     """Return True if team is known for this league (or no whitelist exists)."""
-    # Explicit reject list (non-league clubs)
-    if team in ALWAYS_REJECT or team.strip() in ALWAYS_REJECT:
+    # Explicit reject list — substring match (handles "Adelaide United FC" etc.)
+    team_stripped = team.strip().lower()
+    if any(r.lower() in team_stripped or team_stripped in r.lower()
+           for r in ALWAYS_REJECT):
         return False
 
     clubs = KNOWN_CLUBS.get(league)
