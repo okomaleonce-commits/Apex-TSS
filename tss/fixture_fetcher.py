@@ -331,9 +331,13 @@ def _fetch_odds_api_fixtures(date_from: str, date_to: str) -> List[Dict]:
                     continue
                 seen.add(ev_id)
 
-                # Validate clubs belong to this league (blocks friendlies/cup wrong teams)
-                if not (_is_valid_club(home, league) and _is_valid_club(away, league)):
-                    log.info(f"    SKIP wrong clubs: {home} vs {away} [{league}]")
+                # DEBUG: log exact strings from OddsAPI
+                log.info(f"    OddsAPI raw: home={home!r} away={away!r}")
+                valid_h = _is_valid_club(home, league)
+                valid_a = _is_valid_club(away, league)
+                log.info(f"    Whitelist: {home!r}={valid_h} {away!r}={valid_a}")
+                if not (valid_h and valid_a):
+                    log.info(f"    SKIP wrong clubs: {home!r} vs {away!r} [{league}]")
                     continue
 
                 time_str = commence[11:16] if len(commence) > 10 else ""
