@@ -33,10 +33,29 @@ Identique à `apex-s0-orchestrator` : deux équipes séparées par "vs"/"contre"
 
 ## Protocole d'exécution
 
-### Phase 0 — Préparation
+### Phase 0 — Résolution de la requête, puis préparation
 
-1. Extraire équipes, date/heure KO (demander UNIQUEMENT si absente), compétition (inférer sinon demander), bankroll/unité (défaut 1u = 1% bankroll).
-2. Annoncer : « Je mobilise l'équipe APEX complète (9 agents, SCRAPER→S1→S8) pour ce match, quelle que soit la ligue. »
+La requête d'entrée accepte **trois formes**, et une seule sortie : la liste canonique des matchs à instruire (1 match résolu = 1 pipeline).
+
+| Forme | Exemples | Résolution |
+|---|---|---|
+| **MATCH** | `Arsenal vs Chelsea`, `PSG contre Marseille` | Confirme l'affiche contre le catalogue réel et récupère compétition + coup d'envoi UTC |
+| **LIGUE** | `Premier League`, `Ligue des Champions`, `Eliteserien` | **Prochaine journée** par défaut (1er coup d'envoi → +3 jours) ; fenêtre réglable (`7d`, `48h`, `weekend`) |
+| **DATE** | `2026-09-27`, `demain`, `weekend`, `48h` | Toutes les affiches de la fenêtre, filtrables par ligue |
+
+Détection automatique : un séparateur `vs`/`contre`/`-` ⇒ MATCH ; un motif de date ou un mot-clé temporel ⇒ DATE ; sinon ⇒ LIGUE.
+
+1. Résoudre la requête :
+   ```bash
+   python3 tools/apex_lead.py init --query "<ligue | date | match>" [--window next|7d|48h|weekend] [--leagues "A,B"] [--limit N]
+   ```
+   Cela crée `runs/<date>/<match_id>/` pour chaque affiche, écrit `_match.json` (avec `source_url` + `retrieved_at_utc`) et `_resolution.json`.
+2. **Lire `unresolved` avant toute chose.** Une affiche non résolue n'est jamais devinée : soit on la redemande à l'utilisateur en forme MATCH explicite, soit on l'exclut du run. Les douze ligues à moteur dédié mais sans flux d'affiches (Ligue 2, Jupiler Pro League, Liga Portugal, Süper Lig, RPL, Saudi Pro League, Allsvenskan, Swiss SL, Arménie, Ligat Ha'Al, Oman, Superliga roumaine) arrivent **obligatoirement** par cette voie.
+3. Sur une forme LIGUE ou DATE, annoncer le nombre de pipelines **avant** de lancer quoi que ce soit : 9 agents par match, le coût croît linéairement. Au-delà d'une dizaine d'affiches, confirmer le périmètre ou poser un `--limit`.
+4. Récupérer bankroll/unité et les caps (défaut 1u = 1% bankroll).
+5. Annoncer : « Je mobilise l'équipe APEX complète (9 agents, SCRAPER→S1→S8) sur N match(s), quelle que soit la ligue. »
+
+`routing_hint` dans `_match.json` est une **indication** issue de la résolution, pas la décision de routage : `apex-league-router` (Phase 1) reste seul à écrire `00_routing.json`.
 
 ### Phase 1 — Routage (agent 1)
 
@@ -112,6 +131,18 @@ Utiliser exactement le même format de sortie qu'`apex-s0-orchestrator` (log d'e
 - **Isolation de contexte** : chaque phase (S1-S8) tourne dans une fenêtre de contexte propre — la conversation principale ne porte que les JSON condensés, pas les recherches/raisonnements intermédiaires de chaque skill.
 - **Auditabilité par agent** : chaque sous-agent a un rôle et une interdiction explicites (ex. `apex-tactician` ne doit jamais produire de probabilité 1X2), ce qui réduit le risque de dérive de rôle observé dans une longue conversation unique.
 - **Couverture ligue complète** : la table de routage vit dans `apex-league-router` et couvre les 22 moteurs `apex-engine-*` existants (contre 16 dans la table historique d'`apex-s0-orchestrator`), avec fallback explicite et dégradé pour toute ligue non couverte.
+
+## Outillage mécanique
+
+Trois points ne doivent pas dépendre de ton raisonnement de conducteur. `tools/apex_lead.py` les prend en charge :
+
+| Commande | Rôle |
+|---|---|
+| `init --query "<ligue\|date\|match>"` | Résout la requête et crée l'arborescence du run |
+| `check --match-dir runs/<run>/<match_id>` | Valide l'enveloppe JSON, évalue G0→G7 par lecture du champ `status`, renvoie la gate bloquante **et le prochain agent à lancer** |
+| `finalize --date <run>` | Recalcule les edges, applique les caps de bankroll, produit `SYNTHESE.md`, `telegram.txt`, `synthese.json` et les lignes de journal |
+
+Lance `check` après **chaque** agent : c'est lui qui arbitre la gate, pas ta lecture du JSON. Un pipeline inachevé ressort en `PENDING` et n'est jamais journalisé — le journal étant append-only et indexé par `match_id`, une ligne prématurée bloquerait définitivement le verdict réel.
 
 ## Limite connue
 

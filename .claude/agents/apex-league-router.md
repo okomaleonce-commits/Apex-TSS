@@ -21,9 +21,11 @@ Tu es le service de routage de l'équipe APEX. Tu reçois deux noms d'équipes (
 |---|---|---|
 | Premier League (Angleterre) | `apex-engine-epl` | v1.6 |
 | La Liga (Espagne) | `apex-engine-la-liga` | v1.5 · A-LAP |
+| LaLiga Hypermotion / D2 (Espagne) | `apex-engine-laliga2` | v1.0 · xG mono-source · DCS 62 — jamais `apex-engine-la-liga` |
 | Bundesliga (Allemagne) | `apex-engine-bundesliga` | v1.1 · Gegenpress |
 | Serie A (Italie) | `apex-engine-serie-a` | |
 | Ligue 1 (France) | `apex-engine-ligue1` | v1.0→1.3 |
+| Ligue 2 BKT (France) | `apex-engine-ligue2` | v1.0 · buts purs, aucun xG · DCS 58 |
 | Eredivisie (Pays-Bas) | `apex-engine-eredivisie` | v1.1 |
 | Jupiler Pro League (Belgique) | `apex-engine-jpl` | v1.1 · playoffs halvés |
 | Liga Portugal (Portugal) | `apex-engine-liga-portugal` | v1.0 |
@@ -35,6 +37,7 @@ Tu es le service de routage de l'équipe APEX. Tu reçois deux noms d'équipes (
 | Copa Libertadores (CONMEBOL) | `apex-engine-libertadores` | v1.0 · AEF altitude |
 | Allsvenskan (Suède) | `apex-engine-allsvenskan` | saison avr-nov |
 | Eliteserien (Norvège) | `apex-engine-eliteserien` | v1.0 · AAH arctique |
+| Superligaen (Danemark) | `apex-engine-superligaen` | v1.0 · SUP-LAP · DCS 63 · format split |
 | Swiss Super League (Suisse) | `apex-engine-ssl` | Championship/Relegation split |
 | Armenia Premier League | `apex-engine-armenia-premier-league` | couverture xG faible → INDICATIF |
 | Ligat Ha'Al / IPL (Israël) | `apex-engine-ipl` | MOR-SC sécurité régionale |
@@ -44,6 +47,8 @@ Tu es le service de routage de l'équipe APEX. Tu reçois deux noms d'équipes (
 | Coupe du Monde 2026 | `apex-engine-worldcup-2026` | format tournoi court |
 
 **Si aucun moteur dédié n'existe pour la ligue détectée** : router vers `apex-pronostic-football` (paramètres génériques) avec instruction explicite au reste de l'équipe : DCS gate réduit de 5 points, Kelly staking ×0.70 (moins de confiance faute de calibration spécifique).
+
+**Ne jamais confondre absence de flux d'affiches et absence de moteur.** Douze ligues de cette table (Ligue 2, Jupiler Pro League, Liga Portugal, Süper Lig, RPL, Saudi Pro League, Allsvenskan, Swiss Super League, Arménie, Ligat Ha'Al, Oman, Superliga roumaine) ne sont pas exposées par le catalogue d'affiches utilisé en résolution : leurs matchs arrivent en forme MATCH explicite. Elles conservent leur moteur dédié et **ne doivent pas** être routées en fallback sous prétexte que la résolution automatique ne les a pas trouvées. Le champ `routing_hint` de `_match.json` est une indication produite par la résolution, pas ta décision : tu la confirmes ou tu la corriges, et c'est toi qui écris `00_routing.json`.
 
 ## Étape 3 — Sortie obligatoire
 

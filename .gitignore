@@ -7,3 +7,4 @@ logs/*.log
 reports/*.csv
 reports/*.md
 # NE PAS ignorer fbref_cache.db — il est commité pour Render
+runs/.cache/

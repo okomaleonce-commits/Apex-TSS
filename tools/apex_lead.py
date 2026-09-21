@@ -10,10 +10,18 @@ conducteur :
   3. le recalcul des edges, le contrôle de bankroll et la production des
      livrables (SYNTHESE.md, telegram.txt, synthese.json, journal CSV).
 
+La requête d'entrée accepte trois formes, résolues par tools/apex_resolve.py
+contre un catalogue d'affiches réel (jamais d'affiche inventée) :
+
+    MATCH  — "Arsenal vs Manchester City"
+    LIGUE  — "Premier League"  (défaut : prochaine journée)
+    DATE   — "2026-09-27", "demain", "weekend", "48h"
+
 Usage :
-    python3 tools/apex_lead.py init      --input <input.yaml|json>
-    python3 tools/apex_lead.py check     --match-dir runs/<date>/<match_id>
-    python3 tools/apex_lead.py finalize  --date <YYYY-MM-DD>
+    python3 tools/apex_lead.py init  --query "Premier League"
+    python3 tools/apex_lead.py init  --input <input.yaml|json>
+    python3 tools/apex_lead.py check --match-dir runs/<run>/<match_id>
+    python3 tools/apex_lead.py finalize --date <run>
 """
 
 from __future__ import annotations
@@ -26,6 +34,9 @@ import re
 import sys
 import unicodedata
 from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import apex_resolve  # noqa: E402  (même répertoire)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JOURNAL = os.path.join(ROOT, "journal", "apex_journal.csv")
@@ -346,13 +357,40 @@ def next_step(match_dir: str):
 # Commandes
 # --------------------------------------------------------------------------
 
+def build_spec(args) -> dict:
+    """Assemble la requête à partir du fichier INPUT et/ou de la CLI."""
+    spec = load_input(args.input) if args.input else {}
+    if args.query:
+        spec["query"] = args.query
+    if args.window:
+        spec["window"] = args.window
+    if args.leagues:
+        spec["leagues"] = [x.strip() for x in args.leagues.split(",") if x.strip()]
+    if not any(spec.get(k) for k in ("query", "league", "date", "match", "matches")):
+        raise SystemExit(
+            "ERREUR: requête vide. Fournir --query \"<ligue|date|match>\" ou un "
+            "fichier --input contenant query:/league:/date:/match:/matches:.")
+    return spec
+
+
 def cmd_init(args) -> int:
-    cfg = load_input(args.input)
-    matches = cfg.get("matches") or []
+    spec = build_spec(args)
+    resolution = apex_resolve.resolve(spec)
+    matches = resolution["matches"]
+
+    if args.limit and len(matches) > args.limit:
+        resolution["notes"].append(
+            f"{len(matches)} affiches résolues, tronquées aux {args.limit} premières "
+            f"(--limit). Les suivantes ne sont pas instruites.")
+        matches = matches[:args.limit]
+
     if not matches:
-        print("ERREUR: aucun match dans le bloc INPUT.", file=sys.stderr)
-        return 2
-    day = args.date or matches[0]["kickoff_utc"][:10]
+        print(json.dumps({"matches": [], "unresolved": resolution["unresolved"],
+                          "notes": resolution["notes"]}, ensure_ascii=False, indent=2))
+        return 3  # rien à instruire : DATA_REQUEST côté conducteur
+
+    # Le run est daté par le premier coup d'envoi résolu, sauf override.
+    day = args.date or min(m["kickoff_utc"][:10] for m in matches)
     run_dir = os.path.join(ROOT, "runs", day)
     created = []
     for m in matches:
@@ -363,15 +401,35 @@ def cmd_init(args) -> int:
         if not os.path.exists(sources):
             with open(sources, "w", encoding="utf-8") as fh:
                 fh.write(f"# Sources — {m['home']} vs {m['away']}\n\n"
-                         f"| URL | retrieved_at_utc | agent |\n|---|---|---|\n")
+                         f"| URL | retrieved_at_utc | agent |\n|---|---|---|\n"
+                         f"| {m.get('source_url','—')} | "
+                         f"{m.get('retrieved_at_utc','—')} | RESOLVER |\n")
         with open(os.path.join(mdir, "_match.json"), "w", encoding="utf-8") as fh:
             json.dump({**m, "match_id": mid}, fh, ensure_ascii=False, indent=2)
-        created.append(mid)
+        created.append({"match_id": mid, "kickoff_utc": m["kickoff_utc"],
+                        "competition": m["competition"],
+                        "engine_hint": m["routing_hint"]["engine_skill"],
+                        "fallback": m["routing_hint"]["fallback_mode"]})
+
+    os.makedirs(run_dir, exist_ok=True)
     with open(os.path.join(run_dir, "_input.json"), "w", encoding="utf-8") as fh:
-        json.dump(cfg, fh, ensure_ascii=False, indent=2)
+        json.dump(spec, fh, ensure_ascii=False, indent=2)
+    with open(os.path.join(run_dir, "_resolution.json"), "w", encoding="utf-8") as fh:
+        json.dump({**resolution, "matches": matches, "resolved_at_utc": now_utc()},
+                  fh, ensure_ascii=False, indent=2)
     ensure_journal()
-    print(json.dumps({"run_dir": os.path.relpath(run_dir, ROOT),
-                      "match_ids": created}, ensure_ascii=False, indent=2))
+
+    fallback_count = sum(1 for c in created if c["fallback"])
+    print(json.dumps({
+        "run_dir": os.path.relpath(run_dir, ROOT),
+        "pipelines": len(created),
+        "fallback_pipelines": fallback_count,
+        "kickoff_span": [min(m["kickoff_utc"] for m in matches),
+                         max(m["kickoff_utc"] for m in matches)],
+        "notes": resolution["notes"],
+        "unresolved": resolution["unresolved"],
+        "matches": created,
+    }, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -524,6 +582,14 @@ def cmd_finalize(args) -> int:
     if notes:
         lines += ["", "## Contrôle de bankroll"] + [f"- {n}" for n in notes]
 
+    pending = [r for r in rows if r["verdict"] == "PENDING"]
+    if pending:
+        lines += ["", "## Pipelines inachevés (non journalisés)"]
+        for r in pending:
+            step = next_step(os.path.join(run_dir, r["match_id"])) or {}
+            lines.append(f"- {r['match_id']} — prochain agent : "
+                         f"{step.get('agent','?')} → {step.get('expected_file','?')}")
+
     errors = [e for r in rows for e in r["schema_errors"]]
     if errors:
         lines += ["", "## Anomalies de schéma"] + [f"- {e}" for e in errors]
@@ -573,11 +639,16 @@ def cmd_finalize(args) -> int:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
 
     # --- journal ----------------------------------------------------------
+    # Le journal est append-only et indexé par match_id : une ligne PENDING
+    # écrite maintenant bloquerait définitivement le verdict réel du pipeline
+    # une fois celui-ci terminé. On ne journalise donc que les pipelines clos.
     journal_rows = []
-    for r in rows:
+    incomplete = [r["match_id"] for r in rows if r["verdict"] == "PENDING"]
+    for r in [r for r in rows if r["verdict"] != "PENDING"]:
         d = r["decision"]
         journal_rows.append({
-            "date": day, "match_id": r["match_id"],
+            "date": (r["meta"].get("kickoff_utc") or day)[:10],
+            "match_id": r["match_id"],
             "competition": r["meta"].get("competition", ""),
             "engine": r["engine"], "drs": r["drs"] if r["drs"] is not None else "",
             "vs": r["vs"] if r["vs"] is not None else "",
@@ -600,6 +671,7 @@ def cmd_finalize(args) -> int:
                        ).get("missing_fields", []) or []})
     print(json.dumps({
         "matches_analysed": len(rows), "counts": counts,
+        "incomplete_pipelines": incomplete,
         "total_exposure_units": round(sum(r.get("stake_final", 0.0) for r in bets), 3),
         "journal_rows_added": added, "missing_data": missing,
         "schema_errors": errors,
@@ -611,9 +683,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="APEX-LEAD — outillage de protocole")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_init = sub.add_parser("init", help="Crée l'arborescence runs/<date>/<match_id>/")
-    p_init.add_argument("--input", required=True)
-    p_init.add_argument("--date")
+    p_init = sub.add_parser(
+        "init", help="Résout la requête (ligue | date | match) et crée l'arborescence")
+    p_init.add_argument("--query", help='Ligue, date ou match : "Premier League", '
+                                        '"2026-09-27", "Arsenal vs Chelsea"')
+    p_init.add_argument("--input", help="Fichier INPUT yaml/json (bankroll, caps, requête)")
+    p_init.add_argument("--window", help='Fenêtre pour la forme LIGUE : '
+                                         '"next" (défaut), "7d", "48h", "weekend"')
+    p_init.add_argument("--leagues", help="Filtre de ligues pour la forme DATE, séparé par des virgules")
+    p_init.add_argument("--limit", type=int, help="Plafonne le nombre de pipelines créés")
+    p_init.add_argument("--date", help="Force le nom du run (défaut : 1er coup d'envoi)")
     p_init.set_defaults(func=cmd_init)
 
     p_check = sub.add_parser("check", help="Évalue les gates G0-G7 pour un match")
