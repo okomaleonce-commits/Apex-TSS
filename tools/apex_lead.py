@@ -1,42 +1,15 @@
-#!/usr/bin/env python3
-"""APEX-LEAD — outillage mécanique du protocole d'équipe d'agents.
-
-Ce module ne fait AUCUNE analyse sportive. Il rend mécaniques les trois
-points du protocole qui ne doivent jamais dépendre du raisonnement du
-conducteur :
-
-  1. la validation de l'enveloppe JSON commune de chaque agent,
-  2. l'évaluation des gates G0-G7 (lecture du champ `status`, pas du texte),
-  3. le recalcul des edges, le contrôle de bankroll et la production des
-     livrables (SYNTHESE.md, telegram.txt, synthese.json, journal CSV).
-
-La requête d'entrée accepte trois formes, résolues par tools/apex_resolve.py
-contre un catalogue d'affiches réel (jamais d'affiche inventée) :
-
-    MATCH  — "Arsenal vs Manchester City"
-    LIGUE  — "Premier League"  (défaut : prochaine journée)
-    DATE   — "2026-09-27", "demain", "weekend", "48h"
-
-Usage :
-    python3 tools/apex_lead.py init  --query "Premier League"
-    python3 tools/apex_lead.py init  --input <input.yaml|json>
-    python3 tools/apex_lead.py check --match-dir runs/<run>/<match_id>
-    python3 tools/apex_lead.py finalize --date <run>
-"""
-
 from __future__ import annotations
 
 import argparse
 import csv
 import json
 import os
-import re
 import sys
-import unicodedata
-from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import apex_resolve  # noqa: E402  (même répertoire)
+from apex_common import (as_float, dig, load_input, match_id_of, now_utc,  # noqa: E402
+                         read_json, slug, validate_envelope as _validate_envelope)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JOURNAL = os.path.join(ROOT, "journal", "apex_journal.csv")
@@ -62,15 +35,16 @@ STEPS = [
     ("A9_PREFLIGHT",  "10_preflight.json"),
 ]
 
+# La chaîne football porte en plus les versions de skills dans l'enveloppe.
 ENVELOPE_KEYS = [
     "match_id", "agent", "skill_versions", "status", "flags", "confidence",
     "payload", "missing_fields", "sources", "generated_at_utc",
 ]
 
-VALID_STATUS = {
-    "OK", "ABORT", "NO_BET", "WAIT_LINEUPS", "LIVE_ONLY", "DATA_REQUEST",
-    "UPSTREAM_MISSING",
-}
+
+def validate_envelope(obj, filename: str) -> list[str]:
+    return _validate_envelope(obj, filename, required=ENVELOPE_KEYS)
+
 
 DEFAULT_DRS_THRESHOLD = 60.0
 PROB_SUM_TOLERANCE = 0.005
@@ -78,84 +52,8 @@ EDGE_TOLERANCE_PTS = 0.1
 
 
 # --------------------------------------------------------------------------
-# Utilitaires
-# --------------------------------------------------------------------------
-
-def slug(text: str) -> str:
-    """Snake_case ASCII : 'Bodø/Glimt' -> 'bodo_glimt'."""
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(c for c in text if not unicodedata.combining(c))
-    text = text.replace("ø", "o").replace("Ø", "O").replace("ß", "ss")
-    text = re.sub(r"[^A-Za-z0-9]+", "_", text).strip("_").lower()
-    return text
-
-
-def match_id_of(home: str, away: str, kickoff_utc: str) -> str:
-    day = kickoff_utc[:10].replace("-", "")
-    return f"{slug(home)}_{slug(away)}_{day}"
-
-
-def now_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def load_input(path: str) -> dict:
-    with open(path, encoding="utf-8") as fh:
-        raw = fh.read()
-    if path.endswith((".yaml", ".yml")):
-        import yaml  # dépendance déjà présente dans l'environnement
-        return yaml.safe_load(raw)
-    return json.loads(raw)
-
-
-def read_json(path: str):
-    if not os.path.exists(path):
-        return None
-    with open(path, encoding="utf-8") as fh:
-        text = fh.read().strip()
-    if not text:
-        return None
-    return json.loads(text)
-
-
-def dig(payload, *keys, default=None):
-    """Lecture tolérante : renvoie la première clé présente et non nulle."""
-    if not isinstance(payload, dict):
-        return default
-    for key in keys:
-        if key in payload and payload[key] is not None:
-            return payload[key]
-    return default
-
-
-def as_float(value):
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-# --------------------------------------------------------------------------
 # Validation d'enveloppe
 # --------------------------------------------------------------------------
-
-def validate_envelope(obj, filename: str) -> list[str]:
-    errors = []
-    if not isinstance(obj, dict):
-        return [f"{filename}: racine JSON non-objet"]
-    for key in ENVELOPE_KEYS:
-        if key not in obj:
-            errors.append(f"{filename}: clé d'enveloppe manquante '{key}'")
-    status = obj.get("status")
-    if status is not None and status not in VALID_STATUS:
-        errors.append(f"{filename}: status '{status}' hors nomenclature")
-    for src in obj.get("sources") or []:
-        if not isinstance(src, dict) or not src.get("url"):
-            errors.append(f"{filename}: source sans url")
-        elif not src.get("retrieved_at_utc"):
-            errors.append(f"{filename}: source sans retrieved_at_utc ({src.get('url')})")
-    return errors
-
 
 def validate_probabilities(pricing) -> list[str]:
     """Règle anti-hallucination n°5 : somme 1X2 = 1 ± 0,005."""
@@ -178,20 +76,9 @@ def validate_probabilities(pricing) -> list[str]:
 def recompute_edge(decision) -> dict:
     """edge_pct = (p_model × market_odds − 1) × 100, calculé ici et non de tête."""
     payload = (decision or {}).get("payload") or {}
-    p_model = as_float(payload.get("p_model"))
-    market_odds = as_float(payload.get("market_odds"))
-    declared = as_float(payload.get("edge_pct"))
-    out = {"p_model": p_model, "market_odds": market_odds,
-           "declared_edge_pct": declared, "computed_edge_pct": None,
-           "delta": None, "mismatch": False}
-    if p_model is None or market_odds is None:
-        return out
-    computed = (p_model * market_odds - 1.0) * 100.0
-    out["computed_edge_pct"] = round(computed, 4)
-    if declared is not None:
-        out["delta"] = round(abs(computed - declared), 4)
-        out["mismatch"] = out["delta"] > EDGE_TOLERANCE_PTS
-    return out
+    from apex_common import recompute_edge as _edge
+    return _edge(payload.get("p_model"), payload.get("market_odds"),
+                 payload.get("edge_pct"), EDGE_TOLERANCE_PTS)
 
 
 # --------------------------------------------------------------------------
