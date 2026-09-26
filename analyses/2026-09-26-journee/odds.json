@@ -1,0 +1,218 @@
+[
+{
+"date": "2026-09-26",
+"time": "15:00",
+"h": "Slovenia",
+"a": "Scotland",
+"o1": 2.82,
+"oX": 3.23,
+"o2": 3.0
+},
+{
+"date": "2026-09-26",
+"time": "18:00",
+"h": "Iceland",
+"a": "Estonia",
+"o1": 1.32,
+"oX": 6.0,
+"o2": 13.5
+},
+{
+"date": "2026-09-26",
+"time": "18:00",
+"h": "Faroe Islands",
+"a": "Kazakhstan",
+"o1": 2.38,
+"oX": 3.35,
+"o2": 3.57
+},
+{
+"date": "2026-09-26",
+"time": "18:00",
+"h": "Bulgaria",
+"a": "Luxembourg",
+"o1": 2.48,
+"oX": 3.12,
+"o2": 3.65
+},
+{
+"date": "2026-09-26",
+"time": "18:00",
+"h": "San Marino",
+"a": "Finland",
+"o1": 50.0,
+"oX": 14.01,
+"o2": 1.1
+},
+{
+"date": "2026-09-26",
+"time": "20:45",
+"h": "England",
+"a": "Spain",
+"o1": 3.6,
+"oX": 3.7,
+"o2": 2.22
+},
+{
+"date": "2026-09-26",
+"time": "20:45",
+"h": "Czechia",
+"a": "Croatia",
+"o1": 3.85,
+"oX": 3.6,
+"o2": 2.15
+},
+{
+"date": "2026-09-26",
+"time": "20:45",
+"h": "Slovakia",
+"a": "Moldova",
+"o1": 1.18,
+"oX": 9.09,
+"o2": 27.0
+},
+{
+"date": "2026-09-26",
+"time": "20:45",
+"h": "Albania",
+"a": "Belarus",
+"o1": 1.64,
+"oX": 4.0,
+"o2": 6.8
+},
+{
+"date": "2026-09-26",
+"time": "20:45",
+"h": "FYR Macedonia",
+"a": "Switzerland",
+"o1": 11.11,
+"oX": 5.2,
+"o2": 1.39
+},
+{
+"date": "2026-09-27",
+"time": "01:30",
+"h": "Philadelphia Union",
+"a": "Orlando City SC",
+"o1": 1.51,
+"oX": 5.3,
+"o2": 6.0
+},
+{
+"date": "2026-09-27",
+"time": "01:30",
+"h": "New York Red Bulls",
+"a": "St. Louis City",
+"o1": 3.85,
+"oX": 4.4,
+"o2": 1.92
+},
+{
+"date": "2026-09-27",
+"time": "01:30",
+"h": "Atlanta United FC",
+"a": "New York City FC",
+"o1": 2.38,
+"oX": 3.9,
+"o2": 3.05
+},
+{
+"date": "2026-09-27",
+"time": "01:30",
+"h": "CF Montreal",
+"a": "FC Cincinnati",
+"o1": 2.8,
+"oX": 4.0,
+"o2": 2.48
+},
+{
+"date": "2026-09-27",
+"time": "01:30",
+"h": "Charlotte",
+"a": "Chicago Fire",
+"o1": 2.24,
+"oX": 4.2,
+"o2": 3.12
+},
+{
+"date": "2026-09-27",
+"time": "02:30",
+"h": "Seattle Sounders",
+"a": "Minnesota United FC",
+"o1": 2.32,
+"oX": 4.0,
+"o2": 3.12
+},
+{
+"date": "2026-09-27",
+"time": "02:30",
+"h": "FC Dallas",
+"a": "Los Angeles FC",
+"o1": 2.36,
+"oX": 3.8,
+"o2": 3.05
+},
+{
+"date": "2026-09-27",
+"time": "02:30",
+"h": "Houston Dynamo",
+"a": "Sporting Kansas City",
+"o1": 1.62,
+"oX": 4.6,
+"o2": 5.7
+},
+{
+"date": "2026-09-27",
+"time": "02:30",
+"h": "Nashville SC",
+"a": "Toronto FC",
+"o1": 1.47,
+"oX": 5.3,
+"o2": 7.4
+},
+{
+"date": "2026-09-27",
+"time": "02:30",
+"h": "Austin",
+"a": "San Diego",
+"o1": 2.5,
+"oX": 3.85,
+"o2": 2.86
+},
+{
+"date": "2026-09-27",
+"time": "03:30",
+"h": "Real Salt Lake",
+"a": "New England Revolution",
+"o1": 2.58,
+"oX": 4.0,
+"o2": 2.72
+},
+{
+"date": "2026-09-27",
+"time": "04:30",
+"h": "San Jose Earthquakes",
+"a": "Portland Timbers",
+"o1": 2.05,
+"oX": 4.2,
+"o2": 3.6
+},
+{
+"date": "2026-09-27",
+"time": "04:30",
+"h": "Vancouver Whitecaps",
+"a": "DC United",
+"o1": 1.28,
+"oX": 7.4,
+"o2": 11.5
+},
+{
+"date": "2026-09-27",
+"time": "04:30",
+"h": "Los Angeles Galaxy",
+"a": "Colorado Rapids",
+"o1": 2.28,
+"oX": 4.17,
+"o2": 3.05
+}
+]
