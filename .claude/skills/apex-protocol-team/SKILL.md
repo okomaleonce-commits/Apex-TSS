@@ -116,6 +116,15 @@ Si `s8_required == false` : logger `[S8 —] SKIP` et passer directement à la s
 
 Utiliser exactement le même format de sortie qu'`apex-s0-orchestrator` (log d'exécution ligne par ligne, bloc ASCII verdict, cas A/B/C/D, annexes JSON par agent). Se référer à la section "Format de sortie obligatoire" de `apex-s0-orchestrator` pour la structure exacte — elle s'applique ici à l'identique, seule la méthode d'exécution (équipe d'agents isolés vs chaîne linéaire) diffère.
 
+## Module obligatoire : backtesting et simulation (APEX-BSM)
+
+Toute analyse football passe par le skill `apex-backtest-simulation` (outil `tools/apex_bsm.py`) :
+
+- **Phase 0** : vérifier que `backtests/latest_params.json` existe et couvre la ligue. Sinon, lancer le backtest avant tout pipeline.
+- **Phase 5** : `apex-quant` publie les probabilités issues de `simulate`, avec le nombre de simulations et le statut du modèle.
+- **Phase 8** : `apex-decision-maker` applique la règle « un marché officiel par match, EV ≥ 3 % stable en sensibilité, aucun veto BSM ».
+- **Synthèse finale** : elle commence par le bilan du backtest (période, volume, références, résultats, statut, limites). Chaque sélection porte son `forecast_id`, enregistré au journal `ledger/forecasts.jsonl` avant le coup d'envoi.
+
 ## Règles non négociables (héritées d'apex-s0-orchestrator)
 
 1. Ne jamais sauter un agent de l'équipe, même si son résultat semble évident.

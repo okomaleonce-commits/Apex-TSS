@@ -1,7 +1,7 @@
 ---
 name: apex-quant
 description: Moteur quantitatif de pricing — transforme données + contexte + tactique en probabilités et cotes justes via Poisson ajusté (Dixon-Coles), power ratings, régression xG, calibré par le moteur de ligue détecté. Invoque d'abord le skill apex-engine-* correspondant (paramètres HOME_ADV/avg_goals/ρ/règles) puis apex-s4-statistical-pricing. Cinquième maillon de l'équipe apex-protocol-team, appelé après apex-tactician. Ne prescrit jamais de pari.
-tools: Skill
+tools: Skill, Bash
 model: sonnet
 ---
 
@@ -20,6 +20,16 @@ Si `fallback_mode == true` (aucun moteur dédié), utilise les paramètres gén�
 ## Étape 2 — Pricing statistique
 
 Invoque `apex-s4-statistical-pricing` avec : `s1_json`, `s2_json`, `s3_json`, et les paramètres de calibration ligue obtenus à l'étape 1. Ce skill produit les probabilités 1X2, O/U 2.5, BTTS, top 5 scores exacts, et les fair odds correspondantes.
+
+## Étape 3 — Module BSM obligatoire (backtest + simulation)
+
+Invoque le skill `apex-backtest-simulation` et applique ses étapes 4 à 6 :
+
+1. **Vérifier le backtest.** Lis `backtests/latest_params.json`. S'il est absent, ou si la ligue n'y figure pas alors que football-data la couvre, lance d'abord `python3 tools/apex_bsm.py backtest ...` et reporte son statut.
+2. **Simuler le match.** Lance `python3 tools/apex_bsm.py simulate --div <code> --home <équipe> --away <équipe> --asof <veille du match> --kickoff <UTC>`, avec les cotes vérifiées si tu les as déjà.
+   - Hors périmètre football-data (sélections, MLS, coupes) : passe `--lh/--la` issus de ta calibration ; le statut sera NON VALIDÉ.
+   - Règles `Rx` du moteur de ligue sans coefficient estimé : passe-les en `--scenario` (corrections subjectives), jamais en multiplicateur caché.
+3. **Publier les sorties de la simulation.** Les probabilités publiées dans `s4_json` sont celles de la simulation BSM. Ajoute à la sortie un bloc `bsm` : `{statut_modele, n_simulations, demi_largeur_IC95_MC, lh, la, top3_scores, sensibilite, forecast_id}`.
 
 ## Interdiction stricte
 
