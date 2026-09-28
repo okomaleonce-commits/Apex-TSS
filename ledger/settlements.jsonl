@@ -1,0 +1,2 @@
+{"forecast_id": "8f234b583258", "enregistre_utc": "2026-09-28T18:18:49+00:00", "statut": "EXCLU", "score": null, "mise_executee": null, "cote_executee": null, "observations": "Doublon de 3c488424bb43 (même fixture 1640285, relancé par erreur de script) — exclu de l'audit"}
+{"forecast_id": "6d9329dcd5bd", "enregistre_utc": "2026-09-28T18:19:03+00:00", "statut": "EXCLU", "score": null, "mise_executee": null, "cote_executee": null, "observations": "Doublon de a04ba861bb16 (même fixture 1603379, relancé par erreur) — exclu de l'audit"}
