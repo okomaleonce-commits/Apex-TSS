@@ -55,11 +55,14 @@ class ApiError(RuntimeError):
 
 
 def api(path: str, **params) -> dict:
+    # Deux modes : variable API_FOOTBALL_KEY, ou « Identifiants API » de l'environnement cloud
+    # (le proxy ajoute l'en-tête x-apisports-key lui-même : la session ne voit jamais la clé).
     key = os.environ.get("API_FOOTBALL_KEY")
-    if not key:
-        raise ApiError("API_FOOTBALL_KEY absente : ajoute-la dans les réglages de l'environnement (variables d'environnement).")
     url = f"{BASE}/{path}?{urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})}"
-    req = urllib.request.Request(url, headers={"x-apisports-key": key, "User-Agent": "apex-tss"})
+    headers = {"User-Agent": "apex-tss"}
+    if key:
+        headers["x-apisports-key"] = key
+    req = urllib.request.Request(url, headers=headers)
     for attempt in range(3):
         try:
             with urllib.request.urlopen(req, timeout=40) as r:
@@ -72,7 +75,10 @@ def api(path: str, **params) -> dict:
                 continue
             raise ApiError(f"HTTP {e.code} sur {path}") from e
     errs = body.get("errors")
-    if errs and (isinstance(errs, dict) and errs or isinstance(errs, list) and errs):
+    if errs:
+        if isinstance(errs, dict) and "token" in errs:
+            raise ApiError("clé absente ou refusée : configure l'identifiant API (hôte v3.football.api-sports.io, "
+                           "en-tête x-apisports-key) dans l'environnement, puis ouvre une nouvelle session.")
         raise ApiError(f"{path} : {errs}")
     body["_quota_restant"] = remaining
     body["_retrieved_at_utc"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")

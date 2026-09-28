@@ -16,5 +16,5 @@ Le hockey (`apex-hockey-team`) et le turf (`apex-turf-team`) ont leurs propres p
 ## Environnement
 
 - Dépendances Python du module : `pip install numpy scipy`.
-- API-Football : la clé se lit uniquement dans la variable d'environnement `API_FOOTBALL_KEY`, jamais dans le code. Avant chaque analyse, lancer `python3 tools/apex_apifootball.py snapshot --date <J>` pour relever les cotes horodatées, les blessures et les compositions, puis `bsm-args --fixture <id>` pour obtenir la commande `simulate`.
+- API-Football : la clé est fournie par les « Identifiants API » de l environnement cloud (hôte `v3.football.api-sports.io`, en-tête `x-apisports-key`, injecté par le proxy) ou, à défaut, par la variable `API_FOOTBALL_KEY`. Jamais dans le code. Avant chaque analyse, lancer `python3 tools/apex_apifootball.py snapshot --date <J>` pour relever les cotes horodatées, les blessures et les compositions, puis `bsm-args --fixture <id>` pour obtenir la commande `simulate`.
 - Historique mis en cache dans `data/history/`, rapports de backtest dans `backtests/`, journal dans `ledger/`.
