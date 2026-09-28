@@ -73,6 +73,9 @@ def api(path: str, **params) -> dict:
             if e.code == 429 and attempt < 2:
                 time.sleep(6 * (attempt + 1))
                 continue
+            if e.code in (401, 403) and b"token" in e.read():
+                raise ApiError("clé absente ou refusée : configure l'identifiant API (hôte v3.football.api-sports.io, "
+                               "en-tête x-apisports-key) dans l'environnement, puis ouvre une nouvelle session.") from e
             raise ApiError(f"HTTP {e.code} sur {path}") from e
     errs = body.get("errors")
     if errs:
