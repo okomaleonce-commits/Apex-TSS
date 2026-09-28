@@ -62,6 +62,7 @@ GRID = {
     "sigma": [0.0, 0.10, 0.20, 0.30],     # écart-type du rythme partagé (0 = Poisson/DC pur)
 }
 LOOKBACK_DAYS = 730
+MIN_GAIN = 0.0005   # gain minimal d'objectif (validation) pour adopter une variante plus complexe
 
 
 # ───────────────────────────── données ─────────────────────────────
@@ -355,7 +356,11 @@ def cmd_backtest(a):
             for (r, s), recs in pooled.items():
                 variants.append({"xi": xi, "K": K, "rho": r, "sigma": s, **score_records(recs)})
     variants.sort(key=lambda v: v["objectif"])
+    # Le rythme partagé (plus complexe) n'est retenu que s'il améliore l'objectif d'au moins MIN_GAIN.
     best = variants[0]
+    simple = min((v for v in variants if v["sigma"] == 0), key=lambda v: v["objectif"])
+    if best["sigma"] > 0 and simple["objectif"] - best["objectif"] < MIN_GAIN:
+        best = simple
     base_sigma0 = min((v for v in variants if v["sigma"] == 0), key=lambda v: v["objectif"])
 
     # 2) TEST FINAL : paramètres gelés, jamais re-réglés
@@ -533,8 +538,8 @@ def render_report(R: dict) -> str:
     for v in R["variantes_essayees"][:10]:
         L.append(f"| {v['xi']} | {v['K']} | {v['rho']} | {v['sigma']} | {v['n']} | {v['ll_1x2']:.4f} | {v['ll_ou25']:.4f} | {v['ll_score']:.4f} | {v['objectif']:.4f} |")
     a = R["apport_rythme_partage"]
-    L += ["", f"Apport du rythme partagé (validation) : objectif sans rythme {a['meilleur_sigma0_objectif']} → retenu {a['retenu_objectif']}.",
-          "Le modèle complexe n'est retenu que s'il améliore l'objectif de validation ; son effet est ensuite vérifié sur le test."]
+    L += ["", f"Apport du rythme partagé (validation) : meilleur objectif sans rythme {a['meilleur_sigma0_objectif']} · retenu {a['retenu_objectif']}.",
+          f"Le rythme partagé n'est adopté que s'il améliore l'objectif de validation d'au moins {MIN_GAIN} ; sinon le modèle simple (σ=0) est gelé."]
     return "\n".join(L) + "\n"
 
 

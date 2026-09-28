@@ -15,6 +15,15 @@ Outil : `tools/apex_bsm.py`. Il faut `numpy` et `scipy` (`pip install numpy scip
 
 > **Règle d'or** : n'invente jamais un backtest, une cote historique ou une simulation. Si les données ou le calcul manquent, écris précisément ce qui manque, et sépare le protocole proposé des résultats réellement obtenus.
 
+## Statut actuel (run `bsm-20260928T153332Z`, détail dans `backtests/README.md`)
+
+- **Face au skill actuel et au modèle simple** : APEX-BSM est meilleur en 1X2.
+- **Face au modèle simple en Over/Under 2,5** : APEX-BSM est moins bon.
+- **Face au marché démarginé** : APEX-BSM est **significativement moins bon** (Δ log-loss +0,021). Les paris à EV ≥ 3 % perdent −14 % par unité sur le test final.
+- ⇒ Statut **NON SUPÉRIEUR AU MARCHÉ**. Par défaut, toute EV contre une cote est vetoée : **surveillance ou abstention**.
+- Ce veto est global. On ne le lève pas pour une seule ligue « favorable » : ce serait une sélection a posteriori.
+- Il ne sera levé que par une nouvelle version validée sur un test vierge (saison 2026-27).
+
 ---
 
 ## Étape 1 — Historique pertinent et vérifiable
