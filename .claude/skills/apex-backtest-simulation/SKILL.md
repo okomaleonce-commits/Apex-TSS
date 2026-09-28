@@ -31,6 +31,11 @@ Outil : `tools/apex_bsm.py`. Il faut `numpy` et `scipy` (`pip install numpy scip
 - **Source par défaut** : football-data.co.uk (`data/history/<div>_<saison>.csv`, mis en cache). Elle fournit les buts, et les cotes Pinnacle **relevées avant le match** : `PSH/PSD/PSA` et `P>2.5`, relevées le vendredi pour le week-end et le mardi pour le milieu de semaine. Elle fournit aussi les cotes de clôture (`PSCH…`), mais celles-ci ne servent qu'à mesurer le CLV.
 - **Pas de xG, de compositions, de repos ni de BTTS dans cette source.** Si on les intègre, il faut citer une autre source, horodatée, et documenter les différences de définition entre fournisseurs (un xG FBref n'est pas un xG Understat).
 - **Ce que la source couvre** : 22 divisions, dont E0-E3 (Premier League à League Two), SP1/SP2, I1/I2, D1/D2, F1/F2, N1, B1, P1, T1, G1 et SC0-SC3. Les sélections nationales, la MLS et les coupes ne sont **pas couvertes** : pour elles, le statut est « NON VALIDÉ, hors périmètre » (voir l'étape 7).
+- **Source complémentaire : API-Football** (`tools/apex_apifootball.py`, clé dans `API_FOOTBALL_KEY`) :
+  - `snapshot --date J` : relevé horodaté (append-only) des cotes par bookmaker (1X2, O/U, BTTS, handicaps asiatiques, double chance), des blessures et des compositions publiées. **À lancer la veille, puis à nouveau après la publication des compositions.** On se constitue ainsi l'historique de cotes horodatées qui servira de test vierge à la v1.1 (saison 2026-27).
+  - `history --league L --season S --stats` : résultats, tirs, tirs cadrés et xG par match (1 appel par match : respecter le quota).
+  - `bsm-args --fixture ID` : génère la commande `simulate`, avec les cotes, leur source et leur heure. Il ajoute `--missing-lineup` si les compositions ne sont pas publiées et signale les correspondances de noms incertaines.
+  - **Limites** : les xG API-Football ne sont pas des xG FBref ou Understat. Ne pas mélanger les fournisseurs sans le documenter, et ne les intégrer au modèle qu'après un backtest qui prouve leur apport.
 - **La forme récente ne valide rien.** Les derniers matchs mesurent la forme, pas la fiabilité du modèle. La validation vient du backtest multi-saisons.
 - **Chaque rapport documente** : les sources, la couverture (matchs, part des matchs avec cotes), les données manquantes et les divergences de définition.
 

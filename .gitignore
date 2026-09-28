@@ -13,3 +13,4 @@ runs_turf/.cache/
 
 # cache historique football-data (retéléchargeable)
 data/history/
+data/apifootball/history/
