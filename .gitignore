@@ -15,3 +15,4 @@ runs_turf/.cache/
 data/history/*
 !data/history/intl_supplement.csv
 data/apifootball/history/
+data/footystats/
