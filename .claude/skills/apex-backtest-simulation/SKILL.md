@@ -192,3 +192,7 @@ Le seuil de 3 % est un filtre de décision, pas une preuve de rentabilité.
 | Synthèse | Commence par le bilan du backtest ; chaque sélection porte son `forecast_id`. |
 
 Pour une analyse rapide hors chaîne (coupon, scan de journée), les étapes 1 à 8 s'appliquent quand même. Seul le découpage en agents est facultatif.
+
+## Ancrage sur le marché (tools/apex_market.py)
+
+Le marché (Pinnacle avant-match démarginé) est le meilleur estimateur connu. Le modèle ne le remplace pas : `calibrate` estime le poids `w` du mélange `p ∝ p_marché^(1−w) × p_modèle^w` sur validation, puis le teste hors échantillon. **Résultat actuel : w = 0** — le modèle « buts passés » n'apporte rien, le mélange = marché. `forward` évalue l'accumulation réelle de la saison en cours (matchs réglés du journal) : log-loss modèle vs marché vs mélange, sans biais rétrospectif. Tant qu'aucun signal d'information (mouvement de cote, compositions horodatées, xG) n'est ajouté, l'attente honnête est que le modèle égale le marché sans le battre. Ne jamais présenter le mélange comme battant le marché sans que `forward` le montre sur plusieurs centaines de matchs.

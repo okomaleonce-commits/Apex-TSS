@@ -285,6 +285,13 @@ def main():
     print(f"Elo international : +{elo_info[0]} résultats, à jour au {elo_info[1]}")
     runs, skipped = run_day(day, a.max_calls, now, a.refresh)
     out = report(day, runs, skipped, settled, elo_info)
+    fwd = sh(["python3", "tools/apex_market.py", "forward"]).stdout
+    try:
+        target = out if isinstance(out, Path) else ROOT / out
+        with open(target, "a", encoding="utf-8") as fh:
+            fh.write("\n## Évaluation en avant — modèle ancré sur le marché\n\n```\n" + fwd.strip() + "\n```\n")
+    except Exception:
+        pass
     print(f"{sum(1 for r in runs if 'forecast_id' in r)} prévisions enregistrées → {out.relative_to(ROOT)}")
     print(sh(["python3", "tools/apex_bsm.py", "audit"]).stdout[-1500:])
 
