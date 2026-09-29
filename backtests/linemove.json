@@ -1,0 +1,103 @@
+{
+ "n_matchs": 3408,
+ "divs": [
+  "E0",
+  "E1",
+  "E2",
+  "E3",
+  "SP1",
+  "I1",
+  "D1",
+  "F1"
+ ],
+ "test": [
+  "2526"
+ ],
+ "Q1_precision": {
+  "logloss_avant_match": 1.0027,
+  "logloss_cloture": 1.0014
+ },
+ "Q2_steam": {
+  "suivre_min0pct": {
+   "n": 3408,
+   "rendement": -0.02,
+   "IC95": [
+    -0.0687,
+    0.032
+   ]
+  },
+  "suivre_min2pct": {
+   "n": 1148,
+   "rendement": 0.0304,
+   "IC95": [
+    -0.0449,
+    0.1097
+   ]
+  },
+  "suivre_min5pct": {
+   "n": 167,
+   "rendement": 0.1032,
+   "IC95": [
+    -0.0837,
+    0.3028
+   ]
+  },
+  "fader_min2pct": {
+   "n": 1200,
+   "rendement": -0.137,
+   "IC95": [
+    -0.2089,
+    -0.0694
+   ]
+  },
+  "fader_min5pct": {
+   "n": 155,
+   "rendement": -0.1592,
+   "IC95": [
+    -0.3234,
+    0.0163
+   ]
+  }
+ },
+ "Q3_anticipation": {
+  "correlation_signal_mouvement": -0.0151,
+  "paris_modele": {
+   "seuil_3pct": {
+    "n": 2249,
+    "rendement": -0.1596,
+    "IC95": [
+     -0.2206,
+     -0.1001
+    ],
+    "clv_moyen": -0.0582,
+    "part_clv_positif": 0.173
+   },
+   "seuil_5pct": {
+    "n": 1408,
+    "rendement": -0.147,
+    "IC95": [
+     -0.2261,
+     -0.0721
+    ],
+    "clv_moyen": -0.0586,
+    "part_clv_positif": 0.181
+   },
+   "seuil_8pct": {
+    "n": 637,
+    "rendement": -0.1614,
+    "IC95": [
+     -0.2695,
+     -0.0412
+    ],
+    "clv_moyen": -0.0589,
+    "part_clv_positif": 0.17
+   }
+  }
+ },
+ "verdict": [
+  "Q1 : la clôture est plus précise que l'avant-match",
+  "Q2 : suivre le steam (≥5%) rapporte 0.1032 IC95 [-0.0837, 0.3028] — pas d'edge net",
+  "Q3 : corrélation signal↔mouvement -0.015 — le modèle n'anticipe pas le mouvement"
+ ],
+ "limite": "mouvement avant-match→clôture uniquement ; ouverture→avant-match seulement testable en avant (forward)"
+}
