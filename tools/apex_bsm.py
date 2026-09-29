@@ -768,7 +768,7 @@ def cmd_simulate(a):
 
     fid = hashlib.sha1(f"{a.home}|{a.away}|{a.kickoff}|{dt.datetime.now(dt.timezone.utc).isoformat()}".encode()).hexdigest()[:12]
     rec = {"forecast_id": fid, "cree_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-           "coup_envoi": a.kickoff, "div": a.div, "home": a.home, "away": a.away, "model_version": MODEL_VERSION,
+           "coup_envoi": a.kickoff, "fixture_id": a.fixture_id, "div": a.div, "home": a.home, "away": a.away, "model_version": MODEL_VERSION,
            "source_lambdas": source, "statut_modele": status, "lh": round(lh, 3), "la": round(la, 3), "rho": rho, "sigma": sigma,
            "scenarios": scen, "n_simulations": n, "demi_largeur_IC95_MC": round(half, 4),
            "marches": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in M.items()
@@ -864,6 +864,7 @@ def main():
     s.add_argument("--n0", type=int, default=10_000); s.add_argument("--nmax", type=int, default=640_000)
     s.add_argument("--tol", type=float, default=0.005); s.add_argument("--seed", type=int, default=2026)
     s.add_argument("--record", action="store_true"); s.add_argument("--refresh", action="store_true")
+    s.add_argument("--fixture-id", type=int, help="identifiant API-Football (règlement automatique)")
     st = sp.add_parser("settle")
     st.add_argument("--forecast-id", required=True)
     st.add_argument("--status", default="JOUE", choices=["JOUE", "REPORTE", "ANNULE", "EXCLU"])
