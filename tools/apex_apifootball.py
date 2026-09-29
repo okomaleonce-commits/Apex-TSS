@@ -41,7 +41,7 @@ OUT = ROOT / "data" / "apifootball"
 HIST_FD = ROOT / "data" / "history"
 
 # ligue API-Football → code football-data.co.uk (périmètre du backtest BSM)
-LEAGUE_TO_DIV = {39: "E0", 40: "E1", 41: "E2", 42: "E3", 140: "SP1", 141: "SP2", 135: "I1", 136: "I2",
+LEAGUE_TO_DIV = {39: "E0", 40: "E1", 41: "E2", 42: "E3", 43: "EC", 140: "SP1", 141: "SP2", 135: "I1", 136: "I2",
                  78: "D1", 79: "D2", 61: "F1", 62: "F2", 88: "N1", 144: "B1", 94: "P1", 203: "T1",
                  197: "G1", 179: "SC0", 180: "SC1"}
 BET_IDS = {1: "1X2", 5: "OU", 8: "BTTS", 4: "AH", 12: "DC"}
@@ -338,8 +338,8 @@ def cmd_bsm_args(a):
         srcs.add(bk4)
     args.append(f'--odds-source "API-Football/{"+".join(sorted(s for s in srcs if s))}" --odds-time {r["retrieved_at_utc"]}')
     if r.get("compositions") is None and not r.get("compositions_erreur"):
-        args.append("--missing-lineup")
-        warn.append("compositions non publiées au moment du relevé → --missing-lineup (surveillance)")
+        warn.append("compositions non publiées au moment du relevé : prévision « veille » (heure standard du protocole) ; "
+                    "refaire un relevé après publication, et ajouter --missing-lineup si une absence déterminante reste incertaine")
     args.append("--record")
     print(" \\\n  ".join(args))
     for w_ in warn:
