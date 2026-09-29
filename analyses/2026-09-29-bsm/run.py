@@ -55,7 +55,7 @@ def odds_args(odds):
         for side in ("dom", "ext"):
             for line, c in (ah.get(side) or {}).items():
                 if abs(float(line)) <= 2:
-                    args += ["--odds-ah", f"{side}:{float(line):+.2f}:{c}"]
+                    args += ["--odds-ah", f"{side}:{float(line) + 0.0:+.2f}:{c}"]
         srcs.add(bk)
     return args, "+".join(sorted(s for s in srcs if s))
 

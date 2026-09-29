@@ -45,3 +45,11 @@ Une EV calculée contre les cotes par ce modèle est présumée illusoire. Le mo
 - **Ancrage marché** : mélanger les probabilités du modèle et celles du marché, avec un poids estimé en validation. C'est la seule voie réaliste pour détecter un écart exploitable, puisque le modèle seul est moins bon que le marché.
 - **O/U** : remplacer le total de buts propre à chaque équipe par une moyenne de ligue, ou rétrécir davantage.
 - **xG** : utiliser une source horodatée, en remplacement ou en mélange estimé des buts. Jamais en surcouche.
+
+## Run `bsm-20260929T010237Z` — National League (EC) ajoutée
+
+- **Changement de procédure** : même procédure, même grille, avec la ligue EC en plus. Paramètres gelés : ξ = 0,003, K = 6, ρ = −0,05, σ = 0.
+- **Test final 2025-26** : 3 808 matchs. Log-loss 1X2 : APEX-BSM 1,0208 · skill actuel 1,0327 · modèle simple 1,0748 · marché 1,0022.
+- **Face au marché** : Δ +0,0186, IC95 [+0,014 ; +0,024]. En EC seule : Δ +0,005, IC95 [−0,006 ; +0,017].
+- **Paris simulés** : −12,8 % par unité. Statut inchangé : **NON SUPÉRIEUR AU MARCHÉ**.
+- Ce run devient la référence (`latest_params.json`).

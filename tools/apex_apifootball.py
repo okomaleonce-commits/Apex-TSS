@@ -131,10 +131,22 @@ def parse_odds(resp: list) -> dict:
                 elif kind == "BTTS" and vals.get("Yes") and vals.get("No"):
                     b["BTTS"] = [vals["Yes"], vals["No"]]
                 elif kind == "AH":
+                    # Convention API-Football : « Away X » est l'autre côté de la ligne « Home X »,
+                    # soit l'équipe extérieure au handicap -X (ex. « Away -0.25 » = extérieur +0.25).
+                    dom, ext = {}, {}
                     for lab, o in vals.items():
                         m = re.match(r"(Home|Away) ([+-]?[\d.]+)$", lab)
                         if m and o:
-                            b.setdefault("AH", {}).setdefault("dom" if m.group(1) == "Home" else "ext", {})[m.group(2)] = o
+                            x = float(m.group(2))
+                            if m.group(1) == "Home":
+                                dom[x] = o
+                            else:
+                                ext[-x] = o
+                    # contrôle : les deux côtés d'une même ligne doivent former un marché plausible
+                    ok = {x for x in dom if -x in ext and 0.98 <= 1 / dom[x] + 1 / ext[-x] <= 1.15}
+                    if ok:
+                        b["AH"] = {"dom": {f"{x:+.2f}": dom[x] for x in sorted(ok)},
+                                   "ext": {f"{-x + 0.0:+.2f}": ext[-x] for x in sorted(ok)}}
                 elif kind == "DC":
                     b["DC"] = vals
     return out
@@ -197,7 +209,11 @@ def cmd_snapshot(a):
                "season": f["league"]["season"], "home": f["teams"]["home"]["name"], "away": f["teams"]["away"]["name"],
                "home_id": f["teams"]["home"]["id"], "away_id": f["teams"]["away"]["id"]}
         try:
-            rec["odds"] = parse_odds(api_all("odds", fixture=fid)); calls += 1
+            raw = api_all("odds", fixture=fid); calls += 1
+            rec["odds"] = parse_odds(raw)
+            # valeurs brutes conservées pour audit (marchés utilisés seulement)
+            rec["odds_brut"] = {bk["name"]: {str(bt["id"]): bt["values"] for bt in bk.get("bets", []) if bt.get("id") in BET_IDS}
+                                for item in raw for bk in item.get("bookmakers", [])}
         except ApiError as e:
             rec["odds_erreur"] = str(e)
         if not a.odds_only:

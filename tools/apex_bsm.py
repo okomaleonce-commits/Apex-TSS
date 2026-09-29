@@ -706,7 +706,7 @@ def cmd_simulate(a):
         evs.append({"marche": "BTTS non", "p": M["BTTS_non"], "cote": offers["BTTS"][1], "ev": M["BTTS_non"] * offers["BTTS"][1] - 1,
                     "sens": [(1 - s["BTTS_oui"]) * offers["BTTS"][1] - 1 for s in sens.values()]})
     for spec in a.odds_ah or []:
-        side, line, o = spec.split(":"); line = float(line); o = float(o)
+        side, line, o = spec.split(":"); line = float(line) + 0.0; o = float(o)
         st = M[f"AH_{side}{line:+.2f}"]
         evs.append({"marche": f"AH {side} {line:+.2f}", "p": st["gain"] + st["demi_gain"], "cote": o, "ev": ev_states(st, o),
                     "etats": {k: round(v, 4) for k, v in st.items()}, "sens": []})
@@ -721,13 +721,33 @@ def cmd_simulate(a):
         veto.append("backtest : modèle significativement moins précis que le marché → EV présumée illusoire")
     if a.missing_lineup:
         veto.append("composition déterminante manquante")
-    # écart suspect : > 10 points de probabilité avec le marché démarginé → erreur de modèle probable
-    if "1X2" in offers and not status.startswith("VALIDÉ"):
-        pk = demargin(offers["1X2"])
-        for e, q in zip([e for e in evs if e["marche"].startswith("1X2")], pk):
-            e["ecart_marche"] = e["p"] - q
-            if abs(e["p"] - q) > 0.10:
-                e["suspect"] = True
+    # écart suspect : > 10 points de probabilité implicite avec le marché démarginé → erreur de modèle probable.
+    # Marchés à règlement partiel (AH) comparés via leurs cotes justes (EV = 0).
+    def fair_prob(e):
+        st = e.get("etats")
+        if not st:
+            return e["p"]
+        den = st["gain"] + st["demi_gain"] / 2
+        return den / (den + st["demi_perte"] / 2 + st["perte"]) if den > 0 else 0.0
+    mkt = {}
+    if "1X2" in offers:
+        mkt.update(zip(("1X2 1", "1X2 X", "1X2 2"), demargin(offers["1X2"])))
+    if "OU2.5" in offers:
+        mkt.update(zip(("Over 2.5", "Under 2.5"), demargin(offers["OU2.5"])))
+    if "BTTS" in offers:
+        mkt.update(zip(("BTTS oui", "BTTS non"), demargin(offers["BTTS"])))
+    ah = {e["marche"]: e["cote"] for e in evs if e["marche"].startswith("AH ")}
+    for name, o in ah.items():
+        _, side, line = name.split()
+        opp = f"AH {'ext' if side == 'dom' else 'dom'} {-float(line) + 0.0:+.2f}"
+        if opp in ah:
+            mkt[name] = demargin([o, ah[opp]])[0]
+    if not status.startswith("VALIDÉ"):
+        for e in evs:
+            if e["marche"] in mkt:
+                e["ecart_marche"] = fair_prob(e) - mkt[e["marche"]]
+                if abs(e["ecart_marche"]) > 0.10:
+                    e["suspect"] = True
     ok = [e for e in evs if e["ev"] >= 0.03 and (not e["sens"] or min(e["sens"]) >= 0) and not e.get("suspect")]
     if any(e.get("suspect") and e["ev"] >= 0.03 for e in evs):
         notes.append("EV ≥ 3 % écartée : écart > 10 pts avec le marché sur un modèle non validé (erreur de modèle probable).")
