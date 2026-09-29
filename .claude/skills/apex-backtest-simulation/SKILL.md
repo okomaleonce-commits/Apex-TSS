@@ -36,6 +36,11 @@ Outil : `tools/apex_bsm.py`. Il faut `numpy` et `scipy` (`pip install numpy scip
   - `history --league L --season S --stats` : résultats, tirs, tirs cadrés et xG par match (1 appel par match : respecter le quota).
   - `bsm-args --fixture ID` : génère la commande `simulate`, avec les cotes, leur source et leur heure. Il signale les compositions non encore publiées (prévision « veille ») et les correspondances de noms incertaines.
   - **Limites** : les xG API-Football ne sont pas des xG FBref ou Understat. Ne pas mélanger les fournisseurs sans le documenter, et ne les intégrer au modèle qu'après un backtest qui prouve leur apport.
+- **Sélections nationales : `tools/apex_intl.py`.**
+  - `backtest` reconstruit l'Elo match par match à partir des résultats officiels depuis 1872, puis compare les conversions Elo → λ (apprentissage 2008-2018, validation 2019-2022, test 2023+).
+  - `lambdas --home X --away Y [--neutral] [--tournament …]` donne les λ avec la conversion gelée ; on les passe à `simulate --lh/--la --rho`.
+  - **Statut actuel** : H1 validée contre l'ancienne heuristique et la référence simple, **non comparée au marché** (pas de cotes historiques). Biais connus : surestimation des buts en qualifs CAN, sous-estimation en CONCACAF.
+  - **Conséquence** : les matchs de sélections restent INDICATIFS, et les marchés de buts CAN et CONCACAF sont sous surveillance.
 - **La forme récente ne valide rien.** Les derniers matchs mesurent la forme, pas la fiabilité du modèle. La validation vient du backtest multi-saisons.
 - **Chaque rapport documente** : les sources, la couverture (matchs, part des matchs avec cotes), les données manquantes et les divergences de définition.
 

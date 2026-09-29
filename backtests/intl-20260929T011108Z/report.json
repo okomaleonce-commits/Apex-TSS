@@ -1,0 +1,552 @@
+{
+ "run_id": "intl-20260929T011108Z",
+ "version": "apex-intl-1.0.0",
+ "source": "https://raw.githubusercontent.com/martj42/international_results/master/results.csv",
+ "complement": "intl_supplement.csv",
+ "dernier_match": "2026-09-28",
+ "n_matchs_total": 49672,
+ "periodes": {
+  "apprentissage": "2008-2018",
+  "validation": "2019-2022",
+  "test_final": "2023 → 2026-09-28"
+ },
+ "effectifs": {
+  "apprentissage": 10382,
+  "validation": 3547,
+  "test": 3837
+ },
+ "variantes": [
+  {
+   "quad": true,
+   "friendly": false,
+   "rho": -0.1,
+   "theta": [
+    0.1752,
+    0.7968,
+    -0.0566,
+    0.0,
+    1.1154
+   ],
+   "n": 3547,
+   "logloss_1x2": 0.858,
+   "brier_1x2": 0.5035,
+   "rps_1x2": 0.1673,
+   "logloss_ou25": 0.6764,
+   "logloss_btts": 0.6667,
+   "logloss_score": 2.8084,
+   "buts_predits": 2.726,
+   "buts_observes": 2.692,
+   "objectif": 1.5344
+  },
+  {
+   "quad": true,
+   "friendly": false,
+   "rho": -0.05,
+   "theta": [
+    0.1752,
+    0.7968,
+    -0.0566,
+    0.0,
+    1.1154
+   ],
+   "n": 3547,
+   "logloss_1x2": 0.8581,
+   "brier_1x2": 0.5035,
+   "rps_1x2": 0.1673,
+   "logloss_ou25": 0.6764,
+   "logloss_btts": 0.6663,
+   "logloss_score": 2.8067,
+   "buts_predits": 2.726,
+   "buts_observes": 2.692,
+   "objectif": 1.5345
+  },
+  {
+   "quad": true,
+   "friendly": true,
+   "rho": -0.1,
+   "theta": [
+    0.2014,
+    0.7957,
+    -0.0602,
+    -0.0671,
+    1.1234
+   ],
+   "n": 3547,
+   "logloss_1x2": 0.8577,
+   "brier_1x2": 0.5033,
+   "rps_1x2": 0.1672,
+   "logloss_ou25": 0.6769,
+   "logloss_btts": 0.6673,
+   "logloss_score": 2.8082,
+   "buts_predits": 2.745,
+   "buts_observes": 2.692,
+   "objectif": 1.5346
+  },
+  {
+   "quad": true,
+   "friendly": true,
+   "rho": -0.05,
+   "theta": [
+    0.2014,
+    0.7957,
+    -0.0602,
+    -0.0671,
+    1.1234
+   ],
+   "n": 3547,
+   "logloss_1x2": 0.8579,
+   "brier_1x2": 0.5034,
+   "rps_1x2": 0.1672,
+   "logloss_ou25": 0.6769,
+   "logloss_btts": 0.6669,
+   "logloss_score": 2.8065,
+   "buts_predits": 2.745,
+   "buts_observes": 2.692,
+   "objectif": 1.5348
+  },
+  {
+   "quad": true,
+   "friendly": false,
+   "rho": 0.0,
+   "theta": [
+    0.1752,
+    0.7968,
+    -0.0566,
+    0.0,
+    1.1154
+   ],
+   "n": 3547,
+   "logloss_1x2": 0.8589,
+   "brier_1x2": 0.5039,
+   "rps_1x2": 0.1673,
+   "logloss_ou25": 0.6764,
+   "logloss_btts": 0.6661,
+   "logloss_score": 2.8064,
+   "buts_predits": 2.726,
+   "buts_observes": 2.692,
+   "objectif": 1.5352999999999999
+  },
+  {
+   "quad": true,
+   "friendly": true,
+   "rho": 0.0,
+   "theta": [
+    0.2014,
+    0.7957,
+    -0.0602,
+    -0.0671,
+    1.1234
+   ],
+   "n": 3547,
+   "logloss_1x2": 0.8588,
+   "brier_1x2": 0.5038,
+   "rps_1x2": 0.1673,
+   "logloss_ou25": 0.6769,
+   "logloss_btts": 0.6666,
+   "logloss_score": 2.8061,
+   "buts_predits": 2.745,
+   "buts_observes": 2.692,
+   "objectif": 1.5356999999999998
+  },
+  {
+   "quad": false,
+   "friendly": false,
+   "rho": -0.1,
+   "theta": [
+    0.159,
+    0.747,
+    0.0,
+    0.0,
+    1.1344
+   ],
+   "n": 3547,
+   "logloss_1x2": 0.8587,
+   "brier_1x2": 0.5039,
+   "rps_1x2": 0.1674,
+   "logloss_ou25": 0.6772,
+   "logloss_btts": 0.6684,
+   "logloss_score": 2.8119,
+   "buts_predits": 2.742,
+   "buts_observes": 2.692,
+   "objectif": 1.5359
+  },
+  {
+   "quad": false,
+   "friendly": false,
+   "rho": -0.05,
+   "theta": [
+    0.159,
+    0.747,
+    0.0,
+    0.0,
+    1.1344
+   ],
+   "n": 3547,
+   "logloss_1x2": 0.8587,
+   "brier_1x2": 0.5038,
+   "rps_1x2": 0.1674,
+   "logloss_ou25": 0.6772,
+   "logloss_btts": 0.6679,
+   "logloss_score": 2.8102,
+   "buts_predits": 2.742,
+   "buts_observes": 2.692,
+   "objectif": 1.5359
+  },
+  {
+   "quad": false,
+   "friendly": true,
+   "rho": -0.1,
+   "theta": [
+    0.1814,
+    0.7431,
+    0.0,
+    -0.0599,
+    1.144
+   ],
+   "n": 3547,
+   "logloss_1x2": 0.8584,
+   "brier_1x2": 0.5038,
+   "rps_1x2": 0.1674,
+   "logloss_ou25": 0.6776,
+   "logloss_btts": 0.6691,
+   "logloss_score": 2.8118,
+   "buts_predits": 2.76,
+   "buts_observes": 2.692,
+   "objectif": 1.536
+  },
+  {
+   "quad": false,
+   "friendly": true,
+   "rho": -0.05,
+   "theta": [
+    0.1814,
+    0.7431,
+    0.0,
+    -0.0599,
+    1.144
+   ],
+   "n": 3547,
+   "logloss_1x2": 0.8586,
+   "brier_1x2": 0.5037,
+   "rps_1x2": 0.1674,
+   "logloss_ou25": 0.6776,
+   "logloss_btts": 0.6686,
+   "logloss_score": 2.8101,
+   "buts_predits": 2.76,
+   "buts_observes": 2.692,
+   "objectif": 1.5362
+  },
+  {
+   "quad": false,
+   "friendly": false,
+   "rho": 0.0,
+   "theta": [
+    0.159,
+    0.747,
+    0.0,
+    0.0,
+    1.1344
+   ],
+   "n": 3547,
+   "logloss_1x2": 0.8595,
+   "brier_1x2": 0.5041,
+   "rps_1x2": 0.1675,
+   "logloss_ou25": 0.6772,
+   "logloss_btts": 0.6676,
+   "logloss_score": 2.8099,
+   "buts_predits": 2.742,
+   "buts_observes": 2.692,
+   "objectif": 1.5367000000000002
+  },
+  {
+   "quad": false,
+   "friendly": true,
+   "rho": 0.0,
+   "theta": [
+    0.1814,
+    0.7431,
+    0.0,
+    -0.0599,
+    1.144
+   ],
+   "n": 3547,
+   "logloss_1x2": 0.8594,
+   "brier_1x2": 0.504,
+   "rps_1x2": 0.1674,
+   "logloss_ou25": 0.6776,
+   "logloss_btts": 0.6683,
+   "logloss_score": 2.8097,
+   "buts_predits": 2.76,
+   "buts_observes": 2.692,
+   "objectif": 1.537
+  }
+ ],
+ "retenue": {
+  "quad": true,
+  "friendly": false,
+  "rho": -0.1,
+  "theta": [
+   0.16982530019882458,
+   0.8137724515386949,
+   -0.0605865387108185,
+   0.0,
+   1.056019748327453
+  ]
+ },
+ "test_final": {
+  "H1 régression gelée": {
+   "n": 3837,
+   "logloss_1x2": 0.8623,
+   "brier_1x2": 0.5074,
+   "rps_1x2": 0.1681,
+   "logloss_ou25": 0.6817,
+   "logloss_btts": 0.6739,
+   "logloss_score": 2.8697,
+   "buts_predits": 2.731,
+   "buts_observes": 2.772
+  },
+  "H0 heuristique actuelle": {
+   "n": 3837,
+   "logloss_1x2": 0.8789,
+   "brier_1x2": 0.5171,
+   "rps_1x2": 0.1723,
+   "logloss_ou25": 0.6831,
+   "logloss_btts": 0.7068,
+   "logloss_score": 2.9297,
+   "buts_predits": 2.599,
+   "buts_observes": 2.772
+  },
+  "Référence simple (moyennes)": {
+   "n": 3837,
+   "logloss_1x2": 1.0539,
+   "brier_1x2": 0.6351,
+   "rps_1x2": 0.2291,
+   "logloss_ou25": 0.6935,
+   "logloss_btts": 0.6994,
+   "logloss_score": 3.2107,
+   "buts_predits": 2.671,
+   "buts_observes": 2.772
+  }
+ },
+ "deltas_logloss_1x2": {
+  "H1 − H0": [
+   -0.0166,
+   [
+    -0.0232,
+    -0.0103
+   ]
+  ],
+  "H1 − simple": [
+   -0.1916,
+   [
+    -0.2088,
+    -0.1745
+   ]
+  ],
+  "H0 − simple": [
+   -0.175,
+   [
+    -0.195,
+    -0.1542
+   ]
+  ]
+ },
+ "par_type": [
+  {
+   "type": "amical",
+   "n": 950,
+   "ll_H1": 0.9112,
+   "ll_H0": 0.931,
+   "delta": -0.0198,
+   "IC95": [
+    -0.0331,
+    -0.0066
+   ]
+  },
+  {
+   "type": "qualification",
+   "n": 1514,
+   "ll_H1": 0.7954,
+   "ll_H0": 0.8057,
+   "delta": -0.0103,
+   "IC95": [
+    -0.018,
+    -0.0029
+   ]
+  },
+  {
+   "type": "ligue des nations",
+   "n": 509,
+   "ll_H1": 0.8989,
+   "ll_H0": 0.8987,
+   "delta": 0.0002,
+   "IC95": [
+    -0.0126,
+    0.0121
+   ]
+  },
+  {
+   "type": "phase finale",
+   "n": 417,
+   "ll_H1": 0.9009,
+   "ll_H0": 0.9242,
+   "delta": -0.0233,
+   "IC95": [
+    -0.0522,
+    0.0042
+   ]
+  },
+  {
+   "type": "autre tournoi",
+   "n": 447,
+   "ll_H1": 0.9072,
+   "ll_H0": 0.9513,
+   "delta": -0.0441,
+   "IC95": [
+    -0.0713,
+    -0.0182
+   ]
+  }
+ ],
+ "calibration": {
+  "1X2 H1": [
+   {
+    "tranche": "0.0-0.1",
+    "n": 1727,
+    "p_moy": 0.05,
+    "freq_obs": 0.056
+   },
+   {
+    "tranche": "0.1-0.2",
+    "n": 1907,
+    "p_moy": 0.152,
+    "freq_obs": 0.158
+   },
+   {
+    "tranche": "0.2-0.3",
+    "n": 3042,
+    "p_moy": 0.259,
+    "freq_obs": 0.265
+   },
+   {
+    "tranche": "0.3-0.4",
+    "n": 1441,
+    "p_moy": 0.331,
+    "freq_obs": 0.328
+   },
+   {
+    "tranche": "0.4-0.5",
+    "n": 824,
+    "p_moy": 0.45,
+    "freq_obs": 0.459
+   },
+   {
+    "tranche": "0.5-0.6",
+    "n": 691,
+    "p_moy": 0.55,
+    "freq_obs": 0.527
+   },
+   {
+    "tranche": "0.6-0.7",
+    "n": 601,
+    "p_moy": 0.648,
+    "freq_obs": 0.627
+   },
+   {
+    "tranche": "0.7-0.8",
+    "n": 545,
+    "p_moy": 0.75,
+    "freq_obs": 0.727
+   },
+   {
+    "tranche": "0.8-0.9",
+    "n": 446,
+    "p_moy": 0.848,
+    "freq_obs": 0.85
+   },
+   {
+    "tranche": "0.9-1.0",
+    "n": 287,
+    "p_moy": 0.942,
+    "freq_obs": 0.93
+   }
+  ],
+  "Over 2.5 H1": [
+   {
+    "tranche": "0.4-0.5",
+    "n": 2479,
+    "p_moy": 0.445,
+    "freq_obs": 0.459
+   },
+   {
+    "tranche": "0.5-0.6",
+    "n": 772,
+    "p_moy": 0.543,
+    "freq_obs": 0.547
+   },
+   {
+    "tranche": "0.6-0.7",
+    "n": 357,
+    "p_moy": 0.644,
+    "freq_obs": 0.591
+   },
+   {
+    "tranche": "0.7-0.8",
+    "n": 156,
+    "p_moy": 0.743,
+    "freq_obs": 0.712
+   },
+   {
+    "tranche": "0.8-0.9",
+    "n": 48,
+    "p_moy": 0.849,
+    "freq_obs": 0.896
+   },
+   {
+    "tranche": "0.9-1.0",
+    "n": 25,
+    "p_moy": 0.94,
+    "freq_obs": 0.76
+   }
+  ],
+  "Over 2.5 H0": [
+   {
+    "tranche": "0.3-0.4",
+    "n": 914,
+    "p_moy": 0.385,
+    "freq_obs": 0.447
+   },
+   {
+    "tranche": "0.4-0.5",
+    "n": 1527,
+    "p_moy": 0.448,
+    "freq_obs": 0.46
+   },
+   {
+    "tranche": "0.5-0.6",
+    "n": 1151,
+    "p_moy": 0.55,
+    "freq_obs": 0.57
+   },
+   {
+    "tranche": "0.6-0.7",
+    "n": 183,
+    "p_moy": 0.619,
+    "freq_obs": 0.672
+   },
+   {
+    "tranche": "0.7-0.8",
+    "n": 34,
+    "p_moy": 0.744,
+    "freq_obs": 0.912
+   },
+   {
+    "tranche": "0.8-0.9",
+    "n": 28,
+    "p_moy": 0.833,
+    "freq_obs": 0.786
+   }
+  ]
+ },
+ "statut": "H1 VALIDÉE contre H0 et la référence simple ; NON COMPARÉE AU MARCHÉ (pas de cotes historiques)"
+}

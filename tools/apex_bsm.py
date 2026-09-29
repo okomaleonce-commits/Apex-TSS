@@ -628,9 +628,10 @@ def cmd_simulate(a):
     notes = []
     if a.lh and a.la:
         lh, la = a.lh, a.la
-        rho = params["rho"] if params else -0.05; sigma = params["sigma"] if params else 0.0
-        source = "λ fournis directement (hors périmètre du backtest : non validé)"
-        status = "NON VALIDÉ — λ externes"
+        rho = a.rho if a.rho is not None else (params["rho"] if params else -0.05)
+        sigma = params["sigma"] if params else 0.0
+        source = a.lambda_source or "λ fournis directement (hors périmètre du backtest : non validé)"
+        status = a.status_note or "NON VALIDÉ — λ externes"
     else:
         if not params:
             sys.exit("Aucun backtest disponible : lancer d'abord `backtest`, ou fournir --lh/--la (statut NON VALIDÉ).")
@@ -851,6 +852,9 @@ def main():
     s.add_argument("--div", default=""); s.add_argument("--home", required=True); s.add_argument("--away", required=True)
     s.add_argument("--seasons", default="2425,2526,2627"); s.add_argument("--asof"); s.add_argument("--kickoff", default="")
     s.add_argument("--lh", type=float); s.add_argument("--la", type=float)
+    s.add_argument("--rho", type=float, help="ρ Dixon-Coles propre à la source des λ externes")
+    s.add_argument("--lambda-source", help="provenance des λ externes (ex. APEX-INTL H1)")
+    s.add_argument("--status-note", help="statut de validation des λ externes ; ne doit pas commencer par VALIDÉ sans comparaison marché")
     s.add_argument("--scenario", action="append", help="proba:mult_dom:mult_ext (correction subjective)")
     s.add_argument("--odds-1x2"); s.add_argument("--odds-ou25"); s.add_argument("--odds-btts")
     s.add_argument("--odds-ah", action="append", help="dom|ext:ligne:cote, ex. dom:-0.25:1.95")

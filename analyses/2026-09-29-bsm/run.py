@@ -17,6 +17,12 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import apex_apifootball as AF  # noqa: E402
 import apex_bsm as B  # noqa: E402
+import apex_intl as I  # noqa: E402
+
+INTL = "--h0" not in sys.argv
+ONLY_NATIONS = "--nations" in sys.argv
+import datetime as _dt
+NOW = _dt.datetime.now(_dt.timezone.utc).isoformat()   # H1 par défaut ; --h0 reproduit l'ancienne heuristique
 
 SNAP = ROOT / "data/apifootball/snapshots/2026-09-29.jsonl"
 ELO = json.load(open(Path(__file__).with_name("elo.json")))
@@ -68,16 +74,27 @@ def main():
     meta = []
     for r in sorted(recs.values(), key=lambda r: r["kickoff_utc"]):
         cmd = ["python3", "tools/apex_bsm.py", "simulate", "--kickoff", r["kickoff_utc"], "--record"]
+        if ONLY_NATIONS and r["league_id"] == 43:
+            continue
+        if r["kickoff_utc"] <= NOW:
+            continue                                   # match déjà commencé : aucune prévision a posteriori
         if r["league_id"] == 43:
             hn, hs = AF.fd_name("EC", r["home"]); an, as_ = AF.fd_name("EC", r["away"])
             cmd += ["--div", "EC", "--home", hn, "--away", an, "--asof", r["kickoff_utc"][:10],
                     "--seasons", "2425,2526,2627"]
             info = {"mapping": [[r["home"], hn, round(hs, 2)], [r["away"], an, round(as_, 2)]]}
         else:
-            base_T = 2.45 if r["league_id"] == 5 else 2.2
-            lh, la, we = elo_lambdas(r["home"], r["away"], base_T)
-            cmd += ["--home", r["home"], "--away", r["away"], "--lh", str(lh), "--la", str(la)]
-            info = {"elo": [ELO[r["home"]], ELO[r["away"]]], "we": round(we, 3)}
+            if INTL:   # conversion H1 backtestée (tools/apex_intl.py)
+                lh, la, P = I.lambdas_for(r["home"], r["away"])
+                cmd += ["--home", r["home"], "--away", r["away"], "--lh", f"{lh:.3f}", "--la", f"{la:.3f}",
+                        "--rho", str(P["rho"]), "--lambda-source", f"APEX-INTL H1 ({P['run_id']}, Elo au {P['elo_au']})",
+                        "--status-note", "NON COMPARÉ AU MARCHÉ — conversion Elo→λ validée contre H0 et référence simple"]
+                info = {"elo": [P["elo"][I.canon(r["home"])], P["elo"][I.canon(r["away"])]], "modele": "H1"}
+            else:
+                base_T = 2.45 if r["league_id"] == 5 else 2.2
+                lh, la, we = elo_lambdas(r["home"], r["away"], base_T)
+                cmd += ["--home", r["home"], "--away", r["away"], "--lh", str(lh), "--la", str(la)]
+                info = {"elo": [ELO[r["home"]], ELO[r["away"]]], "we": round(we, 3), "modele": "H0"}
         oa, src = odds_args(r.get("odds", {}))
         cmd += oa + ["--odds-source", f"API-Football/{src}" if src else "aucune", "--odds-time", r["retrieved_at_utc"]]
         res = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
@@ -88,7 +105,7 @@ def main():
         fid = [l for l in res.stdout.splitlines() if l.startswith("forecast_id")][0].split()[2]
         meta.append({"fixture_id": r["fixture_id"], "forecast_id": fid, "league": r["league"], "cmd": shlex.join(cmd), **info})
         print(res.stdout.splitlines()[0], "→", [l for l in res.stdout.splitlines() if l.startswith("DÉCISION")][0])
-    json.dump(meta, open(Path(__file__).with_name("runs.json"), "w"), ensure_ascii=False, indent=1)
+    json.dump(meta, open(Path(__file__).with_name("runs_h1.json" if (INTL and ONLY_NATIONS) else "runs.json"), "w"), ensure_ascii=False, indent=1)
 
 
 if __name__ == "__main__":
