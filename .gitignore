@@ -12,5 +12,6 @@ runs_hockey/.cache/
 runs_turf/.cache/
 
 # cache historique football-data (retéléchargeable)
-data/history/
+data/history/*
+!data/history/intl_supplement.csv
 data/apifootball/history/
