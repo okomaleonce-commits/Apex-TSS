@@ -285,6 +285,7 @@ def main():
     print(f"Elo international : +{elo_info[0]} résultats, à jour au {elo_info[1]}")
     runs, skipped = run_day(day, a.max_calls, now, a.refresh)
     out = report(day, runs, skipped, settled, elo_info)
+    sh(["python3", "tools/apex_tsbase.py", "capture", "--league", "39"])  # base horodatée EPL (T24/T045)
     fwd = sh(["python3", "tools/apex_market.py", "forward"]).stdout
     try:
         target = out if isinstance(out, Path) else ROOT / out
