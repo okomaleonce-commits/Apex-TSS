@@ -329,6 +329,79 @@ def test_build_email_html(tmp_path):
         W.SNAP = old
 
 
+# ───────── bilan : notation des marchés ─────────
+
+def test_grade_over_under():
+    assert W.grade_market("Over 2.5", 2, 1) == "gagné"
+    assert W.grade_market("Over 2.5", 1, 1) == "perdu"
+    assert W.grade_market("Under 2.5", 1, 1) == "gagné"
+    assert W.grade_market("Under 2.5", 2, 1) == "perdu"
+
+
+def test_grade_ah_half_lines():
+    # AH -0.5/-1 domicile : +2 = gagné, +1 = demi, nul/défaite = perdu
+    assert W.grade_market("Handicap asiatique -0.5/-1 domicile (ou Team Over 1.5 domicile)", 3, 1) == "gagné"
+    assert W.grade_market("Handicap asiatique -0.5/-1 domicile", 1, 0) == "demi-gagné"
+    assert W.grade_market("Handicap asiatique -0.5/-1 domicile", 1, 1) == "perdu"
+    # côté extérieur
+    assert W.grade_market("Handicap asiatique -0.5/-1 extérieur", 0, 2) == "gagné"
+    assert W.grade_market("Handicap asiatique -0.5/-1 extérieur", 0, 1) == "demi-gagné"
+
+
+def test_grade_double_chance():
+    assert W.grade_market("Double chance 1X / +0.5 AH domicile", 0, 0) == "gagné"
+    assert W.grade_market("Double chance 1X / +0.5 AH domicile", 0, 1) == "perdu"
+    assert W.grade_market("Double chance X2 / +0.5 AH extérieur", 0, 1) == "gagné"
+    assert W.grade_market("Double chance X2 / +0.5 AH extérieur", 2, 0) == "perdu"
+
+
+def test_grade_non_gradable_and_missing():
+    assert W.grade_market("Aligné sur le mouvement de ligne", 1, 1) == "non-gradé"
+    assert W.grade_market("Over 2.5", None, None) == "non-gradé"
+
+
+def test_hit_rate_half_counts():
+    rows = [{"result": "gagné"}, {"result": "demi-gagné"}, {"result": "perdu"}, {"result": "push"}]
+    taux, n = W._hit_rate(rows)
+    assert n == 3            # push exclu
+    assert taux == round((1 + 0.5) / 3, 3)
+
+
+def test_compute_bilan_grades_done_only(tmp_path):
+    import json
+    day = dt.date(2026, 9, 30)
+    old = W.SNAP
+    try:
+        W.SNAP = tmp_path
+        recs = [
+            {"fixture_id": 1, "home": "A", "away": "B", "league": "L", "phase": "DONE",
+             "score": {"home": 3, "away": 0}, "confidence": 80, "data_quality": 80,
+             "reco": {"decision": {"tier": "JOUER", "signal": "BLOWOUT 100/100",
+                                   "marche": "Handicap asiatique -0.5/-1 domicile"}}},
+            {"fixture_id": 2, "home": "C", "away": "D", "league": "L", "phase": "DONE",
+             "score": {"home": 0, "away": 0}, "confidence": 60, "data_quality": 70,
+             "reco": {"decision": {"tier": "JOUER_PETIT", "signal": "STATSCONVERGENCE 83/100",
+                                   "marche": "Over 2.5"}}},
+            {"fixture_id": 3, "home": "E", "away": "F", "league": "L", "phase": "LIVE",
+             "score": {"home": 1, "away": 0}, "confidence": 60, "data_quality": 70,
+             "reco": {"decision": {"tier": "JOUER_PETIT", "signal": "UPSET 60/100", "marche": "Under 2.5"}}},
+        ]
+        with open(tmp_path / f"{day}.jsonl", "w", encoding="utf-8") as fh:
+            for r in recs:
+                fh.write(json.dumps(r) + "\n")
+        b = W.compute_bilan(day)
+        assert b["n_decisions"] == 3
+        assert b["n_terminees_gradees"] == 2        # le LIVE n'est pas gradé
+        assert b["n_non_terminees"] == 1
+        results = {g["match"]: g["result"] for g in b["decisions"]}
+        assert results["A – B"] == "gagné"
+        assert results["C – D"] == "perdu"          # 0-0, Over 2.5 perdu
+        subj, html = W.build_bilan_email(b)
+        assert "BILAN" in subj and "Conclusions" in html
+    finally:
+        W.SNAP = old
+
+
 def _run_all():
     import types
     g = dict(globals())

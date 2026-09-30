@@ -909,6 +909,207 @@ def apex_align(reco_market: str, fc: dict):
     return aligned, resume
 
 
+# ───────────────────────── BILAN de fin de journée (post-match, spec §39-43) ─────────────────────────
+
+def grade_market(market: str, hg, ag):
+    """Note un marché recommandé contre le score final. → 'gagné' / 'demi-gagné' / 'push' / 'perdu' /
+    'non-gradé'. Pur, testable. hg/ag = buts domicile/extérieur."""
+    if market is None or hg is None or ag is None:
+        return "non-gradé"
+    m = market.lower()
+    total = hg + ag
+    diff = hg - ag
+    if "over 2.5" in m:
+        return "gagné" if total >= 3 else "perdu"
+    if "under 2.5" in m:
+        return "gagné" if total <= 2 else "perdu"
+    if "handicap asiatique -0.5/-1 domicile" in m:
+        return "gagné" if diff >= 2 else ("demi-gagné" if diff == 1 else "perdu")
+    if "handicap asiatique -0.5/-1 extérieur" in m or "handicap asiatique -0.5/-1 exterieur" in m:
+        return "gagné" if -diff >= 2 else ("demi-gagné" if -diff == 1 else "perdu")
+    if "double chance 1x" in m or "+0.5 ah domicile" in m:
+        return "gagné" if diff >= 0 else "perdu"
+    if "double chance x2" in m or "+0.5 ah extérieur" in m or "+0.5 ah exterieur" in m:
+        return "gagné" if diff <= 0 else "perdu"
+    if "team over 1.5 domicile" in m:
+        return "gagné" if hg >= 2 else "perdu"
+    if "team over 1.5 extérieur" in m or "team over 1.5 exterieur" in m:
+        return "gagné" if ag >= 2 else "perdu"
+    return "non-gradé"   # ex. « aligné sur le mouvement de ligne » : pas de marché ferme
+
+
+def _hit_rate(rows):
+    """(gagné + 0.5·demi) / (gradés hors push). Renvoie (taux|None, n_gradés)."""
+    g = sum(1 for r in rows if r["result"] == "gagné")
+    d = sum(1 for r in rows if r["result"] == "demi-gagné")
+    p = sum(1 for r in rows if r["result"] == "push")
+    n = sum(1 for r in rows if r["result"] in ("gagné", "demi-gagné", "perdu"))  # push exclu
+    if n == 0:
+        return None, 0
+    return round((g + 0.5 * d) / n, 3), n
+
+
+def compute_bilan(day):
+    """Note chaque décision de la journée contre le résultat final. Renvoie un dict complet
+    (décisions gradées + agrégats par palier/signal/marché/confiance) pour l'email ET la mémoire de données."""
+    rows = latest_by_fixture(day)
+    graded = []
+    for r in rows:
+        d = (r.get("reco", {}) or {}).get("decision", {}) or {}
+        if d.get("tier") not in ("JOUER", "JOUER_PETIT"):
+            continue
+        sc = r.get("score") or {}
+        hg, ag = (sc.get("home"), sc.get("away")) if isinstance(sc, dict) else (None, None)
+        done = r.get("phase") == "DONE" and hg is not None and ag is not None
+        res = grade_market(d.get("marche"), hg, ag) if done else "non-terminé"
+        graded.append({"match": f"{r['home']} – {r['away']}", "league": r.get("league"),
+                       "tier": d["tier"], "signal": d.get("signal", ""),
+                       "marche": d.get("marche"), "confidence": r.get("confidence"),
+                       "data_quality": r.get("data_quality"),
+                       "score": f"{hg}-{ag}" if done else None, "result": res})
+    termines = [g for g in graded if g["result"] not in ("non-terminé", "non-gradé")]
+
+    def agg(keyfn):
+        buckets = {}
+        for g in termines:
+            buckets.setdefault(keyfn(g), []).append(g)
+        return {k: {"taux": _hit_rate(v)[0], "n": _hit_rate(v)[1],
+                    "gagné": sum(1 for x in v if x["result"] == "gagné"),
+                    "demi": sum(1 for x in v if x["result"] == "demi-gagné"),
+                    "perdu": sum(1 for x in v if x["result"] == "perdu")}
+                for k, v in sorted(buckets.items())}
+
+    def conf_bucket(g):
+        c = g.get("confidence") or 0
+        return "conf<50" if c < 50 else ("conf50-69" if c < 70 else "conf>=70")
+
+    taux_global, n_global = _hit_rate(termines)
+    return {
+        "jour": str(day), "genere_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "n_decisions": len(graded), "n_terminees_gradees": len(termines),
+        "n_non_terminees": sum(1 for g in graded if g["result"] == "non-terminé"),
+        "n_non_gradees": sum(1 for g in graded if g["result"] == "non-gradé"),
+        "taux_global": taux_global,
+        "par_palier": agg(lambda g: g["tier"]),
+        "par_signal": agg(lambda g: (g["signal"].split()[0] if g["signal"] else "?")),
+        "par_marche": agg(lambda g: g["marche"].split(" (")[0][:26] if g["marche"] else "?"),
+        "par_confiance": agg(conf_bucket),
+        "decisions": graded,
+        "note": ("Taux = (gagné + 0.5·demi) / gradés hors push. Résultats de marché, PAS un ROI "
+                 "(les cotes exactes ne sont pas verrouillées ici). Échantillon d'une journée : indicatif, "
+                 "à cumuler sur plusieurs jours avant toute recalibration."),
+    }
+
+
+def bilan_conclusions(b) -> list:
+    """Phrases de conclusion factuelles, sans surinterprétation."""
+    out = []
+    tg = b["taux_global"]
+    out.append(f"Journée {b['jour']} : {b['n_terminees_gradees']} décisions terminées et gradées"
+               + (f", taux de réussite pondéré {tg:.0%}." if tg is not None else "."))
+    for sig, s in sorted(b["par_signal"].items(), key=lambda kv: (kv[1]["taux"] is None, -(kv[1]["taux"] or 0))):
+        if s["n"] >= 3 and s["taux"] is not None:
+            out.append(f"Signal {sig} : {s['taux']:.0%} sur {s['n']} ({s['gagné']}G/{s['demi']}½/{s['perdu']}P).")
+    best_m = [(k, v) for k, v in b["par_marche"].items() if v["n"] >= 3 and v["taux"] is not None]
+    if best_m:
+        best = max(best_m, key=lambda kv: kv[1]["taux"]); worst = min(best_m, key=lambda kv: kv[1]["taux"])
+        out.append(f"Marché le plus fiable : {best[0]} ({best[1]['taux']:.0%}/{best[1]['n']}). "
+                   f"Le moins fiable : {worst[0]} ({worst[1]['taux']:.0%}/{worst[1]['n']}).")
+    out.append("Rappel : échantillon d'une seule journée — indicatif, pas une preuve. À cumuler pour recalibrer.")
+    return out
+
+
+def save_bilan(b):
+    """Écrit le bilan en mémoire de données pour les recalibrations futures (append-only par jour)."""
+    d = ROOT / "data" / "worm" / "bilans"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{b['jour']}.json").write_text(json.dumps(b, ensure_ascii=False, indent=1), encoding="utf-8")
+    # ligne agrégée cumulable pour la recalibration
+    with open(d / "history.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"jour": b["jour"], "genere_utc": b["genere_utc"],
+                             "n": b["n_terminees_gradees"], "taux_global": b["taux_global"],
+                             "par_signal": {k: {"taux": v["taux"], "n": v["n"]} for k, v in b["par_signal"].items()},
+                             "par_marche": {k: {"taux": v["taux"], "n": v["n"]} for k, v in b["par_marche"].items()}},
+                            ensure_ascii=False) + "\n")
+    return d / f"{b['jour']}.json"
+
+
+def build_bilan_email(b) -> tuple:
+    def esc(x):
+        return str(x).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    tg = f"{b['taux_global']:.0%}" if b["taux_global"] is not None else "n/c"
+    subject = f"APEX-WORM BILAN {b['jour']} · {b['n_terminees_gradees']} décisions gradées · réussite {tg}"
+    css = ("body{font-family:-apple-system,Segoe UI,Arial,sans-serif;color:#1a1a2e;background:#f4f5f7;padding:16px}"
+           ".card{background:#fff;border-radius:12px;padding:16px 18px;max-width:820px;margin:0 auto}"
+           "table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:6px 8px;border-bottom:1px solid #eee;text-align:left}"
+           "th{background:#fafafe;color:#555}.muted{color:#6b7280;font-size:12px}h1{font-size:19px}h2{font-size:15px;color:#3b3b58}"
+           ".g{color:#137333;font-weight:700}.p{color:#b3261e;font-weight:700}.d{color:#8a6d00;font-weight:700}.r{text-align:right}")
+    H = [f"<html><head><meta charset='utf-8'><style>{css}</style></head><body><div class='card'>",
+         f"<h1>APEX-WORM — BILAN journée {b['jour']}</h1>",
+         f"<div class='muted'>{b['n_decisions']} décisions · {b['n_terminees_gradees']} terminées et gradées · "
+         f"{b['n_non_gradees']} non gradées (marché non ferme) · réussite pondérée <b>{tg}</b></div>",
+         "<h2>Conclusions</h2><ul>"]
+    H += [f"<li>{esc(c)}</li>" for c in bilan_conclusions(b)]
+    H += ["</ul>"]
+
+    def tbl(title, agg):
+        rows = [f"<h2>{title}</h2><table><tr><th>Clé</th><th class='r'>Réussite</th><th class='r'>N</th>"
+                "<th class='r'>G</th><th class='r'>½</th><th class='r'>P</th></tr>"]
+        for k, v in sorted(agg.items(), key=lambda kv: (kv[1]["taux"] is None, -(kv[1]["taux"] or 0))):
+            t = f"{v['taux']:.0%}" if v["taux"] is not None else "n/c"
+            rows.append(f"<tr><td>{esc(k)}</td><td class='r'>{t}</td><td class='r'>{v['n']}</td>"
+                        f"<td class='r g'>{v['gagné']}</td><td class='r d'>{v['demi']}</td><td class='r p'>{v['perdu']}</td></tr>")
+        return "".join(rows) + "</table>"
+    H += [tbl("Par signal", b["par_signal"]), tbl("Par marché", b["par_marche"]),
+          tbl("Par palier", b["par_palier"]), tbl("Par confiance", b["par_confiance"])]
+
+    H += ["<h2>Détail des décisions</h2><table><tr><th>Match</th><th>Palier</th><th>Marché</th>"
+          "<th>Signal</th><th>Score</th><th>Résultat</th></tr>"]
+    order = {"gagné": 0, "demi-gagné": 1, "push": 2, "perdu": 3, "non-gradé": 4, "non-terminé": 5}
+    for g in sorted(b["decisions"], key=lambda x: order.get(x["result"], 9)):
+        cls = {"gagné": "g", "demi-gagné": "d", "perdu": "p"}.get(g["result"], "muted")
+        H.append(f"<tr><td>{esc(g['match'])}</td><td>{esc(g['tier'])}</td><td>{esc((g['marche'] or '')[:28])}</td>"
+                 f"<td>{esc(g['signal'])}</td><td>{esc(g['score'] or '—')}</td>"
+                 f"<td class='{cls}'>{esc(g['result'])}</td></tr>")
+    H += ["</table>",
+          f"<div class='muted'>{esc(b['note'])} Enregistré dans data/worm/bilans/{b['jour']}.json pour les recalibrations.</div>",
+          "</div></body></html>"]
+    return subject, "\n".join(H)
+
+
+def cmd_bilan(a):
+    tz = apex_tz()
+    base = dt.datetime.combine(dt.date.fromisoformat(a.date), dt.time(12, 0), tzinfo=tz) if a.date else dt.datetime.now(tz)
+    day, start, end = apex_window(base)
+    sentinel = ROOT / "data" / "worm" / "bilans" / f"{day}.done"
+    if a.only_if_complete:
+        rows = latest_by_fixture(day)
+        if not rows:
+            print("BILAN_SKIP : aucun relevé pour cette journée.")
+            return
+        pending = [r for r in rows if r.get("phase") in ("PREMATCH", "LIVE")]
+        if pending:
+            print(f"BILAN_SKIP : journée non terminée ({len(pending)} matchs encore à jouer/en cours).")
+            return
+        if sentinel.exists():
+            print("BILAN_DÉJÀ_FAIT : bilan de la journée déjà émis.")
+            return
+    b = compute_bilan(day)
+    path = save_bilan(b)
+    subject, html = build_bilan_email(b)
+    out_html = REP / f"{day}.bilan.html"
+    REP.mkdir(parents=True, exist_ok=True)
+    out_html.write_text(html, encoding="utf-8")
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    sentinel.write_text(b["genere_utc"], encoding="utf-8")
+    print("BILAN_READY")
+    print(f"  {b['n_terminees_gradees']} décisions gradées · réussite pondérée "
+          + (f"{b['taux_global']:.0%}" if b["taux_global"] is not None else "n/c"))
+    print(f"  données : {path.relative_to(ROOT)} · email HTML : {out_html.relative_to(ROOT)}")
+    if getattr(a, "email", False):
+        send_email_smtp(subject, html)
+
+
 # ───────────────────────── EMAIL (notification mise en forme, spec §36-38) ─────────────────────────
 
 def build_email_html(day) -> tuple:
@@ -1107,10 +1308,12 @@ def main():
     s.add_argument("--money", action="store_true", help="brancher l'argent public excapper (volume matché) + arbworld si API autorisée")
     s.add_argument("--email", action="store_true", help="envoyer le digest par email (SMTP via secrets)")
     r = sp.add_parser("report"); r.add_argument("--date"); r.add_argument("--email", action="store_true")
+    bi = sp.add_parser("bilan"); bi.add_argument("--date"); bi.add_argument("--email", action="store_true")
+    bi.add_argument("--only-if-complete", action="store_true", help="ne produit le bilan que si tous les matchs du jour sont terminés (une seule fois)")
     sp.add_parser("window")
     a = p.parse_args()
     try:
-        {"scan": cmd_scan, "report": cmd_report, "window": cmd_window}[a.cmd](a)
+        {"scan": cmd_scan, "report": cmd_report, "bilan": cmd_bilan, "window": cmd_window}[a.cmd](a)
     except AF.ApiError as e:
         sys.exit(f"Erreur API-Football : {e}")
 
