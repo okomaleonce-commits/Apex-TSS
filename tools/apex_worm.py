@@ -1,0 +1,742 @@
+#!/usr/bin/env python3
+"""APEX-WORM — scanner football « ver informationnel », indépendant des protocoles APEX précédents.
+
+Boucle conceptuelle (spec §28) :
+  DISCOVER → COLLECT → NORMALIZE → STORE → COMPARE → ANALYZE → RANK → REPORT
+
+Ne cherche pas seulement des value bets : cherche des ANOMALIES exploitables (spec §45) et recommande
+toujours un marché quand le match est assez documenté, sinon NO BET. Chaque donnée porte sa provenance
+(OBSERVED / CALCULATED / INFERRED / UNCONFIRMED, spec §34) et son heure de relevé. Rien n'est inventé :
+une famille de données absente est écrite comme absente, jamais estimée en douce.
+
+Honnêteté sur les sources : la source structurée disponible dans cet environnement (API-Football) ne
+fournit ni volume de mises ni % de parieurs publics. Les composantes Sharp/RLM qui exigent ces données
+sont donc marquées UNAVAILABLE ; ce qui est calculable (dispersion inter-books, écart Pinnacle↔médiane,
+trajectoire de la ligne entre nos propres relevés horodatés) l'est, et rien de plus.
+
+Fenêtre APEX (spec §2) : une journée va de 08:00:00 à 07:59:59 le lendemain, dans le fuseau APEX_TIMEZONE
+(jamais codé en dur ; défaut UTC).
+
+Usage :
+  python3 tools/apex_worm.py scan [--date AAAA-MM-JJ] [--leagues 39,140] [--max-calls N] [--max-fixtures N]
+  python3 tools/apex_worm.py report [--date AAAA-MM-JJ]
+  python3 tools/apex_worm.py window   # affiche la fenêtre APEX courante et sort
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import math
+import os
+import statistics
+import sys
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import apex_apifootball as AF  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+SNAP = ROOT / "data" / "worm" / "snapshots"
+REP = ROOT / "reports" / "worm"
+
+LIVE_STATUS = {"1H", "HT", "2H", "ET", "BT", "P", "LIVE", "INT"}
+DONE_STATUS = {"FT", "AET", "PEN"}
+DEAD_STATUS = {"PST", "CANC", "ABD", "AWD", "WO", "SUSP"}
+
+# provenance (spec §34)
+OBSERVED, CALCULATED, INFERRED, UNCONFIRMED = "OBSERVED", "CALCULATED", "INFERRED", "UNCONFIRMED"
+UNAVAILABLE = "UNAVAILABLE"   # donnée absente de la source (jamais estimée en douce)
+
+
+# ───────────────────────── fenêtre APEX (spec §2) ─────────────────────────
+
+def apex_tz() -> ZoneInfo:
+    return ZoneInfo(os.environ.get("APEX_TIMEZONE", "UTC"))
+
+
+def apex_window(now_local: dt.datetime):
+    """Renvoie (apex_day, start_local, end_local). La journée commence à 08:00 ; avant 08:00 on est
+    encore dans la journée de la veille."""
+    day = now_local.date() if now_local.hour >= 8 else now_local.date() - dt.timedelta(days=1)
+    start = dt.datetime.combine(day, dt.time(8, 0, 0), tzinfo=now_local.tzinfo)
+    end = start + dt.timedelta(days=1) - dt.timedelta(seconds=1)
+    return day, start, end
+
+
+def in_window(kickoff_local: dt.datetime, start, end) -> bool:
+    return start <= kickoff_local <= end
+
+
+# ───────────────────────── marché : primitives pures ─────────────────────────
+
+def demargin(odds):
+    """[cotes] → probabilités justes (marge retirée), ou None."""
+    if not odds or not all(o and o > 1 for o in odds):
+        return None
+    inv = [1.0 / o for o in odds]
+    s = sum(inv)
+    return [round(x / s, 4) for x in inv]
+
+
+def margin(odds):
+    if not odds or not all(o and o > 1 for o in odds):
+        return None
+    return round(sum(1.0 / o for o in odds) - 1.0, 4)
+
+
+def book_dispersion(odds_by_book, market="1X2"):
+    """Écart-type de la proba juste (issue 1) entre bookmakers = (dés)accord du marché. Plus bas = consensus."""
+    fair = []
+    for bk, m in odds_by_book.items():
+        if bk.startswith("_") or market not in m:
+            continue
+        d = demargin(m[market] if market == "1X2" else None)
+        if d:
+            fair.append(d[0])
+    if len(fair) < 2:
+        return None, len(fair)
+    return round(statistics.pstdev(fair), 4), len(fair)
+
+
+# ───────────────────────── modèle structurel léger (spec §19) ─────────────────────────
+# CALCULATED : Poisson à partir des taux de buts marqués/encaissés issus du classement.
+# INFERRED quand on complète par une hypothèse (avantage terrain générique). Jamais présenté comme certain.
+
+HOME_ADV = 1.10  # avantage terrain générique, INFERRED (spec §19 : ne jamais prétendre à la certitude)
+
+
+def poisson_1x2(lh, la, max_goals=15):
+    """Probabilités 1X2 par Poisson indépendant (modèle structurel, pas de calage marché)."""
+    ph = [math.exp(-lh) * lh ** k / math.factorial(k) for k in range(max_goals + 1)]
+    pa = [math.exp(-la) * la ** k / math.factorial(k) for k in range(max_goals + 1)]
+    h = d = a = 0.0
+    for i, xi in enumerate(ph):
+        for j, xj in enumerate(pa):
+            p = xi * xj
+            if i > j:
+                h += p
+            elif i == j:
+                d += p
+            else:
+                a += p
+    return [round(h, 4), round(d, 4), round(a, 4)]
+
+
+def poisson_over(lh, la, line=2.5, max_goals=12):
+    tot = lh + la
+    under = 0.0
+    thr = math.floor(line)
+    for k in range(thr + 1):
+        under += math.exp(-tot) * tot ** k / math.factorial(k)
+    return round(1 - under, 4)
+
+
+def team_rates(strength, tid, avg_gf):
+    """(buts marqués/match, buts encaissés/match) d'une équipe depuis le classement, ou None."""
+    s = strength.get(tid)
+    if not s or not s.get("played"):
+        return None
+    return s["gf"] / s["played"], s["ga"] / s["played"]
+
+
+def structural_lambdas(strength, home_id, away_id, avg_gf):
+    """λ attendus (dom, ext) = force d'attaque × faiblesse défensive adverse, normalisées à avg_gf.
+    Renvoie (lh, la) ou None si le classement ne couvre pas les deux équipes."""
+    rh = team_rates(strength, home_id, avg_gf)
+    ra = team_rates(strength, away_id, avg_gf)
+    if not rh or not ra:
+        return None
+    gf_h, ga_h = rh
+    gf_a, ga_a = ra
+    half = avg_gf / 2 if avg_gf else 1.35
+    atk_h, def_h = gf_h / half, ga_h / half
+    atk_a, def_a = gf_a / half, ga_a / half
+    # bornes : au-delà de ~4.5 buts attendus, c'est de l'extrapolation d'un écart de division non fiable.
+    lh = min(4.5, max(0.2, half * atk_h * def_a * HOME_ADV))
+    la = min(4.5, max(0.2, half * atk_a * def_h / HOME_ADV))
+    return round(lh, 3), round(la, 3)
+
+
+# ───────────────────────── moteurs d'anomalies (spec §13-18) ─────────────────────────
+
+def clamp(x):
+    return max(0, min(100, int(round(x))))
+
+
+def sharp_signal(fair_now, fair_prev, hours_between, dispersion, pinnacle_vs_median):
+    """SHARP proxy (spec §13). Volume/public/exchange = UNAVAILABLE dans cette source de données.
+    On combine seulement le calculable : trajectoire de ligne entre nos relevés, consensus (dispersion),
+    et divergence Pinnacle↔médiane (Pinnacle = book réputé plus informé)."""
+    comp = {"volume": UNAVAILABLE, "public_pct": UNAVAILABLE, "exchange": UNAVAILABLE}
+    score = 0.0
+    if fair_now and fair_prev and hours_between and hours_between > 0:
+        move = max(abs(a - b) for a, b in zip(fair_now, fair_prev))
+        velocity = move / hours_between
+        comp["line_move"] = {"valeur": round(move, 4), "provenance": CALCULATED}
+        comp["velocity"] = {"valeur": round(velocity, 4), "provenance": CALCULATED}
+        score += min(40, move * 400)          # 10 pts de proba ≈ 40
+        score += min(20, velocity * 400)
+    else:
+        comp["line_move"] = {"valeur": None, "provenance": UNCONFIRMED}
+    if dispersion is not None:
+        comp["consensus"] = {"dispersion": dispersion, "provenance": CALCULATED}
+        score += max(0, 20 - dispersion * 400)  # faible dispersion = consensus serré
+    if pinnacle_vs_median is not None:
+        comp["pinnacle_vs_median"] = {"valeur": round(pinnacle_vs_median, 4), "provenance": CALCULATED}
+        score += min(20, abs(pinnacle_vs_median) * 200)
+    return clamp(score), comp
+
+
+def blowout_engine(fair_1x2, strength, home_id, away_id):
+    """BLOWOUT (spec §15) : supériorité multidimensionnelle. None si classement absent."""
+    if not fair_1x2:
+        return None, {"raison": "cotes 1X2 absentes"}
+    sh, sa = strength.get(home_id), strength.get(away_id)
+    if not sh or not sa or not sh.get("played") or not sa.get("played"):
+        return None, {"raison": "classement/forme absents pour une des équipes", "provenance": UNCONFIRMED}
+    fav_home = fair_1x2[0] >= fair_1x2[2]
+    fav_prob = max(fair_1x2[0], fair_1x2[2])
+    ppg_h, ppg_a = sh["points"] / sh["played"], sa["points"] / sa["played"]
+    gd_h = (sh["gf"] - sh["ga"]) / sh["played"]
+    gd_a = (sa["gf"] - sa["ga"]) / sa["played"]
+    ppg_gap = (ppg_h - ppg_a) if fav_home else (ppg_a - ppg_h)
+    gd_gap = (gd_h - gd_a) if fav_home else (gd_a - gd_h)
+    comp = {"fav": "domicile" if fav_home else "extérieur",
+            "market_fav_prob": {"valeur": round(fav_prob, 4), "provenance": CALCULATED},
+            "ppg_gap": {"valeur": round(ppg_gap, 3), "provenance": OBSERVED},
+            "gd_per_game_gap": {"valeur": round(gd_gap, 3), "provenance": OBSERVED},
+            "home_edge": fav_home}
+    score = (max(0, fav_prob - 0.5) * 120        # marché très favorable
+             + max(0, ppg_gap) * 18              # écart de points par match
+             + max(0, gd_gap) * 12               # écart de différence de buts
+             + (6 if fav_home else 0))
+    return clamp(score), comp
+
+
+def upset_engine(fair_1x2, strength, home_id, away_id):
+    """UPSET (spec §16) : outsider sous-évalué (petit écart structurel malgré une cote élevée)."""
+    if not fair_1x2:
+        return None, {"raison": "cotes 1X2 absentes"}
+    sh, sa = strength.get(home_id), strength.get(away_id)
+    if not sh or not sa or not sh.get("played") or not sa.get("played"):
+        return None, {"raison": "classement absent", "provenance": UNCONFIRMED}
+    dog_home = fair_1x2[0] < fair_1x2[2]
+    dog_prob = min(fair_1x2[0], fair_1x2[2])
+    ppg_h, ppg_a = sh["points"] / sh["played"], sa["points"] / sa["played"]
+    ppg_gap = abs(ppg_h - ppg_a)
+    comp = {"dog": "domicile" if dog_home else "extérieur",
+            "market_dog_prob": {"valeur": round(dog_prob, 4), "provenance": CALCULATED},
+            "ppg_gap_absolu": {"valeur": round(ppg_gap, 3), "provenance": OBSERVED},
+            "dog_at_home": dog_home}
+    # petit écart de niveau + cote généreuse + avantage terrain de l'outsider = résistance de prix
+    score = (max(0, 0.9 - ppg_gap) * 40          # équipes proches au classement
+             + max(0, 0.40 - dog_prob) * 120     # le marché price un vrai outsider
+             + (12 if dog_home else 0))
+    return clamp(score), comp
+
+
+def convergence_engine(strength, home_id, away_id, market_over, avg_gf):
+    """STATSCONVERGENCE (spec §17) : combien de familles indépendantes pointent vers Over/Under 2.5."""
+    sh, sa = strength.get(home_id), strength.get(away_id)
+    if not sh or not sa or not sh.get("played") or not sa.get("played"):
+        return None, None, {"raison": "classement absent", "provenance": UNCONFIRMED}
+    gf_h, ga_h = sh["gf"] / sh["played"], sh["ga"] / sh["played"]
+    gf_a, ga_a = sa["gf"] / sa["played"], sa["ga"] / sa["played"]
+    ref = (avg_gf / 2) if avg_gf else 1.35
+    votes_over, votes_under, fams = 0, 0, []
+    for name, val in (("dom_buts_marques", gf_h), ("ext_buts_encaisses", ga_a),
+                      ("ext_buts_marques", gf_a), ("dom_buts_encaisses", ga_h)):
+        if val > ref * 1.05:
+            votes_over += 1
+            fams.append({"famille": name, "sens": "over", "valeur": round(val, 2), "provenance": OBSERVED})
+        elif val < ref * 0.95:
+            votes_under += 1
+            fams.append({"famille": name, "sens": "under", "valeur": round(val, 2), "provenance": OBSERVED})
+    lh_lambda = (gf_h + ga_a) / 2
+    la_lambda = (gf_a + ga_h) / 2
+    p_over_struct = poisson_over(lh_lambda, la_lambda, 2.5)
+    if p_over_struct > 0.55:
+        votes_over += 1
+        fams.append({"famille": "poisson_structurel", "sens": "over", "valeur": p_over_struct, "provenance": CALCULATED})
+    elif p_over_struct < 0.45:
+        votes_under += 1
+        fams.append({"famille": "poisson_structurel", "sens": "under", "valeur": p_over_struct, "provenance": CALCULATED})
+    if market_over is not None:
+        if market_over > 0.55:
+            votes_over += 1
+            fams.append({"famille": "marche_over25", "sens": "over", "valeur": round(market_over, 3), "provenance": CALCULATED})
+        elif market_over < 0.45:
+            votes_under += 1
+            fams.append({"famille": "marche_over25", "sens": "under", "valeur": round(market_over, 3), "provenance": CALCULATED})
+    total_fams = 6 if market_over is not None else 5
+    if votes_over >= votes_under:
+        direction, votes = "Over 2.5", votes_over
+    else:
+        direction, votes = "Under 2.5", votes_under
+    score = clamp(100 * votes / total_fams)
+    return score, direction, {"familles": fams, "votes_over": votes_over, "votes_under": votes_under,
+                              "p_over_structurel": p_over_struct}
+
+
+# ───────────────────────── qualité & confiance (spec §24-25) ─────────────────────────
+
+def data_quality(rec) -> int:
+    q = 0
+    _, o1 = AF.pick_book(rec.get("odds", {}), "1X2")
+    nbook = len([k for k in rec.get("odds", {}) if not k.startswith("_")])
+    if o1:
+        q += 25 + min(15, nbook * 3)
+    if rec.get("strength_ok"):
+        q += 25
+    if rec.get("compositions"):
+        q += 15
+    if rec.get("blessures") is not None:
+        q += 10
+    _, ou = AF.pick_book(rec.get("odds", {}), "OU")
+    if ou and ou.get("2.5"):
+        q += 10
+    return clamp(q)
+
+
+def confidence(rec, dispersion) -> int:
+    c = 0.4 * rec["data_quality"]
+    if dispersion is not None:
+        c += max(0, 25 - dispersion * 500)
+    else:
+        c += 5
+    sp = rec.get("min_played") or 0
+    c += min(15, sp * 2)                       # taille d'échantillon (matchs joués)
+    if rec.get("compositions"):
+        c += 15                                # certitude compositions
+    if rec.get("signal_stable"):
+        c += 10
+    return clamp(c)
+
+
+# ───────────────────────── recommandation de marché (spec §22) ─────────────────────────
+
+def recommend(rec):
+    """Traduit l'anomalie la plus forte en PRIMARY MARKET, ou NO BET. Marque VALUE: NON CONFIRMÉE
+    dès que l'edge n'est pas robuste (le modèle structurel ne bat pas le marché : c'est la règle, pas
+    une exception). Ne jamais inventer un pari pour remplir une case (spec §22)."""
+    scores = {"BLOWOUT": rec.get("blowout"), "UPSET": rec.get("upset"), "STATSCONVERGENCE": rec.get("convergence"),
+              "SHARP": rec.get("sharp")}
+    ranked = sorted(((k, v) for k, v in scores.items() if v is not None), key=lambda kv: kv[1], reverse=True)
+    if not ranked or ranked[0][1] < 45 or rec["data_quality"] < 40:
+        return {"primary_market": "NO BET", "raison": "aucune anomalie assez nette ou données insuffisantes",
+                "value": "NON CONFIRMÉE"}
+    tag, sc = ranked[0]
+    _, o1 = AF.pick_book(rec.get("odds", {}), "1X2")
+    fair = demargin(o1) if o1 else None
+    fav_home = fair[0] >= fair[2] if fair else None
+    if tag == "BLOWOUT":
+        side = "domicile" if fav_home else "extérieur"
+        market = f"Handicap asiatique -0.5/-1 {side} (ou Team Over 1.5 {side})"
+    elif tag == "UPSET":
+        dog_home = (fair[0] < fair[2]) if fair else True
+        market = ("Double chance 1X / +0.5 AH domicile" if dog_home else "Double chance X2 / +0.5 AH extérieur")
+    elif tag == "STATSCONVERGENCE":
+        market = rec.get("convergence_dir", "Over 2.5")
+    else:  # SHARP : suivre le sens du mouvement de ligne, jamais aveuglément (spec §14)
+        market = "Aligné sur le mouvement de ligne (voir trajectoire) — confirmer avant mise"
+    # VALUE : uniquement sur un marché RÉELLEMENT price (1X2). Les marchés d'anomalie (AH, DC, O/U) ne
+    # sont pas price ici → value NON CONFIRMÉE, jamais déduite d'une EV 1X2 sans rapport (honnêteté).
+    ev = rec.get("ev_best")            # meilleure EV 1X2, indicative
+    ev_idx = rec.get("ev_best_idx")
+    value = "NON CONFIRMÉE"
+    out = {"primary_market": market, "signal_dominant": f"{tag} {sc}/100", "value": value,
+           "ev_indicatif_1x2": ev, "tags": [k for k, v in ranked if v >= 45]}
+    # Cas d'une vraie value 1X2 directe : le marché price affiche EV ≥ 3 % → on la remonte comme telle.
+    if ev is not None and ev >= 0.03 and ev_idx is not None and o1:
+        issue = ["1 (domicile)", "X (nul)", "2 (extérieur)"][ev_idx]
+        out["value_1x2_directe"] = {"issue": issue, "cote": o1[ev_idx], "ev": ev, "value": "CONFIRMÉE",
+                                    "note": "EV sur cote price ; le modèle structurel ne bat pas le marché en backtest — à confirmer en avant"}
+    return out
+
+
+# ───────────────────────── réseau : DISCOVER / COLLECT ─────────────────────────
+
+def discover(tz_name, day, start, end, leagues):
+    """Fixtures dont le coup d'envoi tombe dans la fenêtre APEX. 1-2 appels (dates locales couvertes)."""
+    seen, fixtures, calls = set(), [], 0
+    for d in (day, day + dt.timedelta(days=1)):
+        b = AF.api("fixtures", date=d.isoformat(), timezone=tz_name)
+        calls += 1
+        for f in b["response"]:
+            ko_local = dt.datetime.fromisoformat(f["fixture"]["date"])
+            if not in_window(ko_local, start, end):
+                continue
+            if leagues and f["league"]["id"] not in leagues:
+                continue
+            if f["fixture"]["id"] in seen:
+                continue
+            seen.add(f["fixture"]["id"])
+            fixtures.append(f)
+    return fixtures, calls
+
+
+def fetch_standings(league_id, season, cache):
+    """Classement d'une ligue → {team_id: {points, played, gf, ga}} ; mis en cache par (ligue, saison)."""
+    key = (league_id, season)
+    if key in cache:
+        return cache[key]
+    table = {}
+    try:
+        b = AF.api("standings", league=league_id, season=season)
+        for lg in b.get("response", []):
+            for group in lg.get("league", {}).get("standings", []):
+                for row in group:
+                    allst = row.get("all", {})
+                    goals = allst.get("goals", {})
+                    table[row["team"]["id"]] = {
+                        "points": row.get("points", 0), "played": allst.get("played", 0),
+                        "gf": goals.get("for", 0), "ga": goals.get("against", 0), "rank": row.get("rank")}
+    except AF.ApiError:
+        table = {}
+    cache[key] = table
+    return table
+
+
+def prev_snapshot_index(day):
+    """Dernier état connu par fixture depuis le snapshot du jour APEX (pour COMPARE)."""
+    path = SNAP / f"{day.isoformat()}.jsonl"
+    idx = {}
+    if path.exists():
+        for line in open(path, encoding="utf-8"):
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            idx[r["fixture_id"]] = r
+    return idx
+
+
+# ───────────────────────── SCAN (boucle WORM complète) ─────────────────────────
+
+def cmd_scan(a):
+    tz = apex_tz()
+    tz_name = os.environ.get("APEX_TIMEZONE", "UTC")
+    now_local = dt.datetime.now(tz)
+    if a.date:
+        base = dt.datetime.combine(dt.date.fromisoformat(a.date), dt.time(12, 0), tzinfo=tz)
+        day, start, end = apex_window(base)
+    else:
+        day, start, end = apex_window(now_local)
+    leagues = {int(x) for x in a.leagues.split(",")} if a.leagues else None
+    print(f"Fenêtre APEX {day} · {start.strftime('%d/%m %H:%M')} → {end.strftime('%d/%m %H:%M')} ({tz_name})")
+
+    fixtures, calls = discover(tz_name, day, start, end, leagues)
+    print(f"DISCOVER : {len(fixtures)} matchs dans la fenêtre ({calls} appels)"
+          + (f" · ligues {sorted(leagues)}" if leagues else " · toutes compétitions"))
+    if a.max_fixtures:
+        fixtures = fixtures[:a.max_fixtures]
+
+    prev = prev_snapshot_index(day)
+    SNAP.mkdir(parents=True, exist_ok=True)
+    out_path = SNAP / f"{day.isoformat()}.jsonl"
+    scan_time = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    strength_cache, results, changes, skipped = {}, [], [], 0
+
+    for f in fixtures:
+        if calls + 2 > a.max_calls:
+            skipped = len(fixtures) - len(results)
+            print(f"Budget d'appels atteint ({a.max_calls}) : {skipped} matchs non traités ce passage.")
+            break
+        fid = f["fixture"]["id"]
+        status = f["fixture"]["status"]["short"]
+        lg = f["league"]
+        rec = {"fixture_id": fid, "scan_time_utc": scan_time, "kickoff": f["fixture"]["date"],
+               "status": status, "phase": "LIVE" if status in LIVE_STATUS else ("DONE" if status in DONE_STATUS else
+                                                                                ("DEAD" if status in DEAD_STATUS else "PREMATCH")),
+               "league_id": lg["id"], "league": lg["name"], "country": lg.get("country"), "season": lg["season"],
+               "home": f["teams"]["home"]["name"], "away": f["teams"]["away"]["name"],
+               "home_id": f["teams"]["home"]["id"], "away_id": f["teams"]["away"]["id"],
+               "score": f.get("goals")}
+
+        # COLLECT — cotes (toujours), puis compositions/blessures si prématch et budget
+        try:
+            raw = AF.api_all("odds", fixture=fid); calls += 1
+            rec["odds"] = AF.parse_odds(raw)
+        except AF.ApiError as e:
+            rec["odds"] = {}; rec["odds_erreur"] = str(e)[:120]
+        if rec["phase"] == "PREMATCH" and calls + 1 <= a.max_calls and not a.odds_only:
+            try:
+                lu = AF.api("fixtures/lineups", fixture=fid)["response"]; calls += 1
+                rec["compositions"] = [{"equipe": t["team"]["name"], "titulaires":
+                                        [p["player"]["name"] for p in t.get("startXI", [])]} for t in lu] or None
+            except AF.ApiError:
+                rec["compositions"] = None
+
+        # NORMALIZE + force des équipes (classement, 1 appel/ligue mis en cache)
+        strength = {}
+        if calls + 1 <= a.max_calls:
+            before = len(strength_cache)
+            strength = fetch_standings(lg["id"], lg["season"], strength_cache)
+            if len(strength_cache) > before:
+                calls += 1
+        rec["strength_ok"] = bool(strength.get(rec["home_id"]) and strength.get(rec["away_id"]))
+        avg_gf = 1.35 * 2
+        if rec["strength_ok"]:
+            sh, sa = strength[rec["home_id"]], strength[rec["away_id"]]
+            rec["min_played"] = min(sh.get("played", 0), sa.get("played", 0))
+
+        # marché
+        _, o1 = AF.pick_book(rec["odds"], "1X2")
+        fair = demargin(o1)
+        rec["market_prob_1x2"] = fair
+        rec["margin_1x2"] = margin(o1)
+        disp, nbook = book_dispersion(rec["odds"], "1X2")
+        rec["market_dispersion"] = disp
+        _, ou = AF.pick_book(rec["odds"], "OU")
+        market_over = None
+        if ou and ou.get("2.5") and all(ou["2.5"]):
+            d = demargin(ou["2.5"])
+            market_over = d[0] if d else None
+        rec["market_over25"] = market_over
+
+        # modèle structurel + probas (spec §19)
+        rec["model_prob_1x2"] = None
+        if rec["strength_ok"]:
+            lam = structural_lambdas(strength, rec["home_id"], rec["away_id"], avg_gf)
+            if lam:
+                rec["lambdas"] = lam
+                rec["model_prob_1x2"] = poisson_1x2(*lam)
+                rec["expected_score"] = {"xg_dom": lam[0], "xg_ext": lam[1]}
+        # proba ajustée : ancrée sur le marché (le modèle ne bat pas le marché → poids modèle faible, honnête)
+        adj = fair
+        if fair and rec["model_prob_1x2"]:
+            w = 0.15
+            bl  = [ (1-w)*fair[i] + w*rec["model_prob_1x2"][i] for i in range(3) ]
+            s = sum(bl); adj = [round(x/s, 4) for x in bl]
+        rec["adjusted_prob_1x2"] = adj
+
+        # COMPARE (mouvement de ligne vs relevé précédent du jour)
+        p = prev.get(fid)
+        fair_prev = p.get("market_prob_1x2") if p else None
+        hours_between = None
+        if p and p.get("scan_time_utc"):
+            t0 = dt.datetime.fromisoformat(p["scan_time_utc"])
+            t1 = dt.datetime.fromisoformat(scan_time)
+            hours_between = max(0.0, (t1 - t0).total_seconds() / 3600)
+        rec["signal_stable"] = bool(fair_prev and fair and max(abs(x - y) for x, y in zip(fair, fair_prev)) < 0.01)
+
+        # pinnacle vs médiane
+        pin_vs_med = None
+        if "Pinnacle" in rec["odds"] and "1X2" in rec["odds"]["Pinnacle"]:
+            dpin = demargin(rec["odds"]["Pinnacle"]["1X2"])
+            if dpin and disp is not None and fair:
+                pin_vs_med = dpin[0] - fair[0]
+
+        # ANALYZE — moteurs d'anomalies
+        rec["sharp"], rec["sharp_components"] = sharp_signal(fair, fair_prev, hours_between, disp, pin_vs_med)
+        rec["blowout"], rec["blowout_components"] = blowout_engine(fair, strength, rec["home_id"], rec["away_id"])
+        rec["upset"], rec["upset_components"] = upset_engine(fair, strength, rec["home_id"], rec["away_id"])
+        conv = convergence_engine(strength, rec["home_id"], rec["away_id"], market_over, avg_gf)
+        rec["convergence"], rec["convergence_dir"], rec["convergence_components"] = conv
+
+        # divergence stats↔marché (spec §18)
+        if rec["convergence"] and market_over is not None and rec.get("convergence_dir"):
+            struct_over = rec["convergence_components"].get("p_over_structurel")
+            if struct_over is not None:
+                if (struct_over > 0.55 and market_over < 0.45) or (struct_over < 0.45 and market_over > 0.55):
+                    rec["divergence_alert"] = {"stats": round(struct_over, 3), "marche": round(market_over, 3),
+                                               "note": "contradiction stats↔marché : chercher la cause (météo, absence, échantillon)"}
+
+        # EV 1X2 indicative (proba ajustée × cote), honnête : rarement ≥ 3 %
+        ev_best = None
+        if adj and o1:
+            evs = [adj[i] * o1[i] - 1 for i in range(3)]
+            rec["ev_best_idx"] = max(range(3), key=lambda i: evs[i])
+            ev_best = round(evs[rec["ev_best_idx"]], 4)
+        rec["ev_best"] = ev_best
+
+        # qualité, confiance, recommandation
+        rec["data_quality"] = data_quality(rec)
+        rec["confidence"] = confidence(rec, disp)
+        rec["reco"] = recommend(rec)
+
+        # détection de changements (spec §27)
+        for ch in detect_changes(p, rec):
+            changes.append(ch)
+
+        with open(out_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        results.append(rec)
+
+    print(f"COLLECT/ANALYZE : {len(results)} matchs traités · ~{calls} appels API")
+    if changes:
+        print(f"CHANGEMENTS : {len(changes)}")
+        for c in changes[:15]:
+            print(f"  [{c['type']}] {c['match']} · {c['detail']}")
+
+    print(f"STORE : {out_path.relative_to(ROOT)} (append-only)")
+    write_report(day)
+
+
+def detect_changes(prev, rec):
+    out = []
+    m = f"{rec['home']}–{rec['away']}"
+    if prev is None:
+        if (rec.get("reco") or {}).get("primary_market") not in (None, "NO BET"):
+            out.append({"type": "NEW SIGNAL", "match": m, "detail": rec["reco"]["primary_market"]})
+        return out
+    # bascule de phase
+    if prev.get("phase") != rec.get("phase"):
+        out.append({"type": "PHASE", "match": m, "detail": f"{prev.get('phase')} → {rec['phase']}"})
+    # mouvement de cote
+    fp, fn = prev.get("market_prob_1x2"), rec.get("market_prob_1x2")
+    if fp and fn:
+        mv = max(abs(x - y) for x, y in zip(fn, fp))
+        if mv >= 0.03:
+            out.append({"type": "ODDS MOVE", "match": m, "detail": f"Δ proba max {mv*100:+.1f} pts"})
+    # compositions
+    if not prev.get("compositions") and rec.get("compositions"):
+        out.append({"type": "LINEUP CHANGE", "match": m, "detail": "compositions publiées → recalcul"})
+    # signaux
+    for tag in ("sharp", "blowout", "upset", "convergence"):
+        a0, a1 = prev.get(tag), rec.get(tag)
+        if a0 is None or a1 is None:
+            continue
+        if a1 - a0 >= 15:
+            out.append({"type": "SIGNAL STRENGTHENED", "match": m, "detail": f"{tag} {a0}→{a1}"})
+        elif a0 - a1 >= 15:
+            out.append({"type": "SIGNAL WEAKENED", "match": m, "detail": f"{tag} {a0}→{a1}"})
+        if a0 >= 45 and a1 < 45:
+            out.append({"type": "SIGNAL INVALIDATED", "match": m, "detail": f"{tag} sous le seuil ({a1})"})
+    return out
+
+
+# ───────────────────────── REPORT (spec §36-38) ─────────────────────────
+
+def latest_by_fixture(day):
+    path = SNAP / f"{day.isoformat()}.jsonl"
+    latest = {}
+    if not path.exists():
+        return []
+    for line in open(path, encoding="utf-8"):
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        latest[r["fixture_id"]] = r  # le dernier relevé écrase (on veut l'état courant)
+    return list(latest.values())
+
+
+def relevance(r):
+    """Priorité = force du signal × qualité des données × stabilité (spec §38), pas la cote."""
+    best = max([x for x in (r.get("sharp"), r.get("blowout"), r.get("upset"), r.get("convergence")) if x is not None],
+               default=0)
+    stab = 1.0 if r.get("signal_stable") else 0.85
+    return best * (r.get("data_quality", 0) / 100) * stab
+
+
+def write_report(day):
+    REP.mkdir(parents=True, exist_ok=True)
+    rows = latest_by_fixture(day)
+    rows.sort(key=relevance, reverse=True)
+    L = [f"# APEX-WORM — journée {day} (fenêtre 08:00→07:59, {os.environ.get('APEX_TIMEZONE','UTC')})",
+         f"Généré {dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%d %H:%MZ')} · {len(rows)} matchs scannés.",
+         "",
+         "*Signaux calculés uniquement à partir des données disponibles (API-Football). Volume de mises et "
+         "% parieurs publics NON DISPONIBLES : composantes Sharp/RLM partielles. Le modèle structurel ne "
+         "bat pas le marché — toute value non robuste est marquée NON CONFIRMÉE.*", ""]
+
+    def top(tag, label):
+        cand = sorted([r for r in rows if r.get(tag)], key=lambda r: r[tag], reverse=True)[:5]
+        if not cand:
+            return []
+        out = [f"### {label}"]
+        for r in cand:
+            out.append(f"- **{r['home']}–{r['away']}** ({r['league']}) · {tag} {r[tag]}/100 · "
+                       f"conf {r.get('confidence','?')} · DQ {r.get('data_quality','?')} · {r['reco']['primary_market']}")
+        return out + [""]
+
+    L += ["## TOP SIGNALS", ""]
+    L += top("sharp", "TOP SHARP (proxy — volume indisponible)")
+    L += top("blowout", "TOP BLOWOUT")
+    L += top("upset", "TOP UPSET")
+    L += top("convergence", "TOP STATSCONVERGENCE")
+    live = [r for r in rows if r.get("phase") == "LIVE"]
+    if live:
+        L += ["### TOP LIVE", ""] + [f"- **{r['home']}–{r['away']}** {r.get('score')} · {r['status']}" for r in live[:8]] + [""]
+
+    L += ["## Tableau principal", "",
+          "| Match | Comp. | KO | Marché | Prob(adj) | Sharp | Blow | Upset | Conv | Conf | DQ | Value |",
+          "|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|"]
+    for r in rows[:60]:
+        adj = r.get("adjusted_prob_1x2")
+        pa = f"{adj[0]:.2f}/{adj[1]:.2f}/{adj[2]:.2f}" if adj else "—"
+        reco = r.get("reco", {})
+        vd = reco.get("value_1x2_directe")
+        value_cell = f"1X2 {vd['issue'][0]} @{vd['cote']} EV{vd['ev']:+.2f}" if vd else reco.get("value", "")
+        L.append(f"| {r['home']}–{r['away']} | {(r.get('country') or '')[:3]} {r['league'][:14]} | "
+                 f"{r['kickoff'][11:16]} | {reco.get('primary_market','?')[:26]} | {pa} | "
+                 f"{r.get('sharp','–')} | {r.get('blowout','–')} | {r.get('upset','–')} | "
+                 f"{r.get('convergence','–')} | {r.get('confidence','–')} | {r.get('data_quality','–')} | "
+                 f"{value_cell} |")
+
+    # fiches détaillées des meilleures anomalies (spec §37)
+    L += ["", "## Fiches détaillées (top anomalies)", ""]
+    for r in rows[:8]:
+        if relevance(r) < 30:
+            continue
+        reco = r.get("reco", {})
+        vd = reco.get("value_1x2_directe")
+        L += [f"### {r['home']} – {r['away']}  ({r['country']} · {r['league']})",
+              f"- Coup d'envoi : {r['kickoff']} · phase {r['phase']}",
+              f"- PRIMARY MARKET : **{reco.get('primary_market')}** · VALUE marché recommandé : {reco.get('value')}"
+              + (f" · EV 1X2 indicative {r['ev_best']:+.3f}" if r.get('ev_best') is not None else ""),]
+        if vd:
+            L.append(f"- Value 1X2 directe : **{vd['issue']} @ {vd['cote']}** · EV {vd['ev']:+.3f} (CONFIRMÉE sur cote price ; {vd['note']})")
+        L += [
+              f"- Probabilités 1X2 — marché {r.get('market_prob_1x2')} · modèle {r.get('model_prob_1x2')} · ajustée {r.get('adjusted_prob_1x2')}",
+              f"- Scores — Sharp {r.get('sharp')} · Blowout {r.get('blowout')} · Upset {r.get('upset')} · Convergence {r.get('convergence')} ({r.get('convergence_dir')})",
+              f"- Confiance {r.get('confidence')}/100 · Qualité données {r.get('data_quality')}/100"]
+        if r.get("expected_score"):
+            L.append(f"- Score attendu (xG structurel) : {r['expected_score']['xg_dom']} – {r['expected_score']['xg_ext']}")
+        if r.get("divergence_alert"):
+            L.append(f"- ⚠ DIVERGENCE : {r['divergence_alert']['note']}")
+        if r.get("compositions"):
+            L.append("- Compositions publiées : oui (recalcul possible)")
+        L.append(f"- Dernier relevé : {r.get('scan_time_utc')}")
+        L.append("")
+    path = REP / f"{day.isoformat()}.md"
+    path.write_text("\n".join(L) + "\n", encoding="utf-8")
+    print(f"REPORT : {path.relative_to(ROOT)}")
+
+
+def cmd_report(a):
+    tz = apex_tz()
+    base = dt.datetime.combine(dt.date.fromisoformat(a.date), dt.time(12, 0), tzinfo=tz) if a.date else dt.datetime.now(tz)
+    day, _, _ = apex_window(base)
+    write_report(day)
+
+
+def cmd_window(a):
+    tz = apex_tz()
+    day, start, end = apex_window(dt.datetime.now(tz))
+    print(f"Journée APEX : {day}")
+    print(f"Début  : {start.isoformat()}")
+    print(f"Fin    : {end.isoformat()}")
+    print(f"Fuseau : {os.environ.get('APEX_TIMEZONE','UTC')}")
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sp = p.add_subparsers(dest="cmd", required=True)
+    s = sp.add_parser("scan")
+    s.add_argument("--date"); s.add_argument("--leagues"); s.add_argument("--max-calls", type=int, default=90)
+    s.add_argument("--max-fixtures", type=int); s.add_argument("--odds-only", action="store_true")
+    r = sp.add_parser("report"); r.add_argument("--date")
+    sp.add_parser("window")
+    a = p.parse_args()
+    try:
+        {"scan": cmd_scan, "report": cmd_report, "window": cmd_window}[a.cmd](a)
+    except AF.ApiError as e:
+        sys.exit(f"Erreur API-Football : {e}")
+
+
+if __name__ == "__main__":
+    main()

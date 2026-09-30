@@ -1,0 +1,59 @@
+name: APEX-WORM scanner
+
+# Scan complet toutes les heures (spec §32). Le programme décide lui-même quels matchs
+# appartiennent à la fenêtre APEX courante (08:00 → 07:59, spec §2).
+on:
+  schedule:
+    - cron: "3 * * * *"        # toutes les heures à HH:03 (léger décalage pour éviter la minute 0 surchargée)
+  workflow_dispatch:            # exécution manuelle (spec §32)
+    inputs:
+      leagues:
+        description: "Filtrer sur des ligues (ids API-Football séparés par des virgules) — vide = toutes"
+        required: false
+        default: ""
+      max_calls:
+        description: "Plafond d'appels API pour ce passage"
+        required: false
+        default: "400"
+
+concurrency:
+  group: apex-worm
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install numpy scipy
+
+      - name: Run tests (spec §31)
+        run: python3 tests/test_apex_worm.py
+
+      - name: FULL SCAN
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}   # jamais dans le code (spec §33)
+          FOOTYSTATS_KEY: ${{ secrets.FOOTYSTATS_KEY }}
+          APEX_TIMEZONE: ${{ vars.APEX_TIMEZONE || 'UTC' }}   # fuseau configurable (spec §2)
+        run: |
+          python3 tools/apex_worm.py scan \
+            --leagues "${{ github.event.inputs.leagues }}" \
+            --max-calls "${{ github.event.inputs.max_calls || 400 }}"
+
+      - name: Upload report + snapshots (artefacts, pas de commit horaire — spec §30)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-worm-${{ github.run_id }}
+          path: |
+            reports/worm/
+            data/worm/
+          retention-days: 14
+          if-no-files-found: ignore

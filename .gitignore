@@ -17,3 +17,5 @@ data/history/*
 data/apifootball/history/
 data/footystats/
 data/tsbase/
+data/worm/
+reports/worm/
