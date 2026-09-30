@@ -36,6 +36,14 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import apex_apifootball as AF  # noqa: E402
+try:
+    import apex_betfair as BF  # noqa: E402
+except Exception:  # pragma: no cover
+    BF = None
+try:
+    import apex_excapper as XC  # noqa: E402
+except Exception:  # pragma: no cover
+    XC = None
 
 ROOT = Path(__file__).resolve().parent.parent
 SNAP = ROOT / "data" / "worm" / "snapshots"
@@ -84,6 +92,30 @@ def margin(odds):
     if not odds or not all(o and o > 1 for o in odds):
         return None
     return round(sum(1.0 / o for o in odds) - 1.0, 4)
+
+
+def align_exchange(es, home, away):
+    """Réaligne les probas/argent d'échange (clés = noms de coureurs Betfair) sur [dom, nul, ext].
+    Renvoie {fair:[h,d,a]|None, money:[h,d,a]|None, total_matched}. None si l'appariement échoue."""
+    if not es or BF is None:
+        return None
+
+    def to_vec(d):
+        if not d:
+            return None
+        names = list(d)
+        draw = next((k for k in names if "draw" in k.lower()), None)
+        rest = [k for k in names if k != draw]
+        if len(rest) < 2:
+            return None
+        hn = max(rest, key=lambda k: BF.sim(home, k))
+        an = max(rest, key=lambda k: BF.sim(away, k))
+        if hn == an:
+            return None
+        return [d[hn], d.get(draw, 0.0) if draw else 0.0, d[an]]
+
+    return {"fair": to_vec(es.get("exchange_fair")), "money": to_vec(es.get("money_pct")),
+            "total_matched": es.get("total_matched")}
 
 
 def book_dispersion(odds_by_book, market="1X2"):
@@ -165,10 +197,18 @@ def clamp(x):
     return max(0, min(100, int(round(x))))
 
 
-def sharp_signal(fair_now, fair_prev, hours_between, dispersion, pinnacle_vs_median):
-    """SHARP proxy (spec §13). Volume/public/exchange = UNAVAILABLE dans cette source de données.
-    On combine seulement le calculable : trajectoire de ligne entre nos relevés, consensus (dispersion),
-    et divergence Pinnacle↔médiane (Pinnacle = book réputé plus informé)."""
+def fmt_score(sc):
+    """{'home':1,'away':0} → '1–0' ; None → '—'."""
+    if isinstance(sc, dict):
+        return f"{sc.get('home', '?')}–{sc.get('away', '?')}"
+    return "—" if sc is None else str(sc)
+
+
+def sharp_signal(fair_now, fair_prev, hours_between, dispersion, pinnacle_vs_median, exchange=None):
+    """SHARP (spec §13). Composantes calculables sans échange : trajectoire de ligne entre nos relevés,
+    consensus (dispersion), divergence Pinnacle↔médiane. Quand l'échange Betfair est fourni (`exchange` =
+    {fair:[h,d,a], money:[h,d,a], total_matched}), on ajoute le VOLUME réel, la confirmation d'échange et
+    un vrai Reverse Line Movement. Sans échange, volume/public/exchange restent UNAVAILABLE (spec §34)."""
     comp = {"volume": UNAVAILABLE, "public_pct": UNAVAILABLE, "exchange": UNAVAILABLE}
     score = 0.0
     if fair_now and fair_prev and hours_between and hours_between > 0:
@@ -186,6 +226,30 @@ def sharp_signal(fair_now, fair_prev, hours_between, dispersion, pinnacle_vs_med
     if pinnacle_vs_median is not None:
         comp["pinnacle_vs_median"] = {"valeur": round(pinnacle_vs_median, 4), "provenance": CALCULATED}
         score += min(20, abs(pinnacle_vs_median) * 200)
+
+    if exchange:
+        tm = exchange.get("total_matched")
+        if tm is not None:
+            comp["volume"] = {"total_matched": tm, "provenance": OBSERVED}
+            score += min(15, math.log10(max(tm, 1)) * 4)   # liquidité (spec §13) : ~+12 pour 10^3, +24 plafonné
+        ef = exchange.get("fair")
+        if ef:
+            comp["exchange"] = {"fair": ef, "provenance": OBSERVED}
+            if fair_now and fair_prev:
+                moved = [a - b for a, b in zip(fair_now, fair_prev)]
+                j = max(range(3), key=lambda i: moved[i])   # issue vers laquelle la ligne se déplace
+                if ef[j] >= fair_now[j]:                     # l'échange price cette issue au moins aussi haut
+                    comp["exchange_confirmation"] = {"issue": j, "provenance": OBSERVED}
+                    score += 15
+        mv = exchange.get("money")
+        if mv:
+            comp["public_pct"] = {"repartition": [round(x, 4) for x in mv], "provenance": OBSERVED}
+            if fair_now and fair_prev:
+                pub = max(range(3), key=lambda i: mv[i])     # côté où va l'argent public
+                if mv[pub] >= 0.55 and fair_now[pub] < fair_prev[pub] - 0.01:
+                    comp["rlm"] = {"issue": pub, "public_money": round(mv[pub], 3), "provenance": CALCULATED,
+                                   "note": "argent public majoritaire mais cote qui dérive → Reverse Line Movement"}
+                    score += 15
     return clamp(score), comp
 
 
@@ -326,7 +390,8 @@ def recommend(rec):
     ranked = sorted(((k, v) for k, v in scores.items() if v is not None), key=lambda kv: kv[1], reverse=True)
     if not ranked or ranked[0][1] < 45 or rec["data_quality"] < 40:
         return {"primary_market": "NO BET", "raison": "aucune anomalie assez nette ou données insuffisantes",
-                "value": "NON CONFIRMÉE"}
+                "value": "NON CONFIRMÉE",
+                "decision": {"tier": "NO BET", "unites_indicatives": 0.0, "marche": "NO BET"}}
     tag, sc = ranked[0]
     _, o1 = AF.pick_book(rec.get("odds", {}), "1X2")
     fair = demargin(o1) if o1 else None
@@ -353,6 +418,23 @@ def recommend(rec):
         issue = ["1 (domicile)", "X (nul)", "2 (extérieur)"][ev_idx]
         out["value_1x2_directe"] = {"issue": issue, "cote": o1[ev_idx], "ev": ev, "value": "CONFIRMÉE",
                                     "note": "EV sur cote price ; le modèle structurel ne bat pas le marché en backtest — à confirmer en avant"}
+
+    # DÉCISION de marché (spec §22, §44) : un signal n'est pas qu'à surveiller, il conduit à un choix.
+    # Le palier module la conviction ET la mise indicative ; l'échange (confirmation, RLM, volume) et une
+    # value 1X2 directe font monter d'un cran. Sizing volontairement prudent (unités de suivi, pas un
+    # conseil de mise réelle : le modèle ne bat pas le marché, la cote reste à vérifier avant tout pari).
+    dq = rec["data_quality"]
+    exch_conf = bool(rec.get("exchange_confirmation")) or bool(rec.get("rlm"))
+    strong_extra = exch_conf or bool(out.get("value_1x2_directe"))
+    if sc >= 70 and dq >= 65 and strong_extra:
+        tier, units = "JOUER", 1.0
+    elif sc >= 55 and dq >= 50:
+        tier, units = "JOUER_PETIT", 0.5
+    else:
+        tier, units = "SURVEILLER", 0.25
+    out["decision"] = {"tier": tier, "unites_indicatives": units, "marche": market,
+                       "signal": f"{tag} {sc}/100", "confirmation_echange": exch_conf,
+                       "note": "cote à vérifier et horodater avant toute mise ; unités indicatives de suivi, non un conseil de value"}
     return out
 
 
@@ -432,6 +514,21 @@ def cmd_scan(a):
           + (f" · ligues {sorted(leagues)}" if leagues else " · toutes compétitions"))
     if a.max_fixtures:
         fixtures = fixtures[:a.max_fixtures]
+
+    # Échange Betfair (volume + prix + argent public) : relevé une fois pour toute la fenêtre.
+    bf_markets, bf_vols = [], {}
+    if a.exchange and BF is not None:
+        try:
+            tok = BF.login()
+            d0 = start.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+            d1 = end.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+            bf_markets = BF.football_match_odds(tok, d0, d1)
+            bf_vols = BF.market_volumes(tok, [m["market_id"] for m in bf_markets])
+            print(f"ÉCHANGE Betfair : {len(bf_markets)} marchés Match Odds, "
+                  f"volume total {sum(v['total_matched'] for v in bf_vols.values()):,.0f} £")
+        except Exception as e:  # noqa: BLE001
+            print(f"ÉCHANGE Betfair indisponible ({str(e)[:100]}) → composantes volume/public UNAVAILABLE.")
+            bf_markets = []
 
     prev = prev_snapshot_index(day)
     SNAP.mkdir(parents=True, exist_ok=True)
@@ -529,8 +626,21 @@ def cmd_scan(a):
             if dpin and disp is not None and fair:
                 pin_vs_med = dpin[0] - fair[0]
 
+        # Échange Betfair apparié à ce match (volume, prix, argent public)
+        exch = None
+        if bf_markets:
+            m_bf, sco = BF.match_fixture(rec["home"], rec["away"], rec["kickoff"], bf_markets)
+            if m_bf:
+                es = BF.exchange_signal(m_bf, bf_vols)
+                exch = align_exchange(es, rec["home"], rec["away"])
+                if exch:
+                    exch["appariement"] = {"event": m_bf["event_name"], "score": sco}
+        rec["exchange"] = exch
+
         # ANALYZE — moteurs d'anomalies
-        rec["sharp"], rec["sharp_components"] = sharp_signal(fair, fair_prev, hours_between, disp, pin_vs_med)
+        rec["sharp"], rec["sharp_components"] = sharp_signal(fair, fair_prev, hours_between, disp, pin_vs_med, exch)
+        rec["exchange_confirmation"] = "exchange_confirmation" in rec["sharp_components"]
+        rec["rlm"] = rec["sharp_components"].get("rlm")
         rec["blowout"], rec["blowout_components"] = blowout_engine(fair, strength, rec["home_id"], rec["away_id"])
         rec["upset"], rec["upset_components"] = upset_engine(fair, strength, rec["home_id"], rec["away_id"])
         conv = convergence_engine(strength, rec["home_id"], rec["away_id"], market_over, avg_gf)
@@ -573,6 +683,12 @@ def cmd_scan(a):
 
     print(f"STORE : {out_path.relative_to(ROOT)} (append-only)")
     write_report(day)
+    if getattr(a, "email", False):
+        subject, html = build_email_html(day)
+        out_html = REP / f"{day.isoformat()}.email.html"
+        out_html.write_text(html, encoding="utf-8")
+        print(f"EMAIL HTML : {out_html.relative_to(ROOT)}")
+        send_email_smtp(subject, html)
 
 
 def detect_changes(prev, rec):
@@ -653,14 +769,31 @@ def write_report(day):
                        f"conf {r.get('confidence','?')} · DQ {r.get('data_quality','?')} · {r['reco']['primary_market']}")
         return out + [""]
 
+    # DÉCISIONS DU JOUR : les signaux conduisent à un choix de marché (spec §22, §44)
+    deci = [r for r in rows if (r.get("reco", {}).get("decision", {}) or {}).get("tier") in ("JOUER", "JOUER_PETIT")]
+    deci.sort(key=lambda r: (r["reco"]["decision"]["tier"] != "JOUER", -relevance(r)))
+    L += ["## DÉCISIONS DU JOUR", ""]
+    if deci:
+        L += ["| Palier | Match | Comp. | KO | Marché retenu | Signal | Éch. | Unités | Conf |",
+              "|---|---|---|---|---|---|:--:|--:|--:|"]
+        for r in deci[:25]:
+            d = r["reco"]["decision"]
+            L.append(f"| **{d['tier']}** | {r['home']}–{r['away']} | {(r.get('country') or '')[:3]} {r['league'][:12]} | "
+                     f"{r['kickoff'][11:16]} | {d['marche'][:30]} | {d['signal']} | "
+                     f"{'✓' if d.get('confirmation_echange') else '—'} | {d['unites_indicatives']} | {r.get('confidence','?')} |")
+        L += ["", "*Unités indicatives de suivi, pas un conseil de mise : la cote est à vérifier et horodater "
+              "avant tout pari, et le modèle structurel ne bat pas le marché.*", ""]
+    else:
+        L += ["*Aucune décision JOUER/JOUER_PETIT ce passage — le reste est à surveiller ou NO BET.*", ""]
+
     L += ["## TOP SIGNALS", ""]
-    L += top("sharp", "TOP SHARP (proxy — volume indisponible)")
+    L += top("sharp", "TOP SHARP")
     L += top("blowout", "TOP BLOWOUT")
     L += top("upset", "TOP UPSET")
     L += top("convergence", "TOP STATSCONVERGENCE")
     live = [r for r in rows if r.get("phase") == "LIVE"]
     if live:
-        L += ["### TOP LIVE", ""] + [f"- **{r['home']}–{r['away']}** {r.get('score')} · {r['status']}" for r in live[:8]] + [""]
+        L += ["### TOP LIVE", ""] + [f"- **{r['home']}–{r['away']}** {fmt_score(r.get('score'))} · {r['status']}" for r in live[:8]] + [""]
 
     L += ["## Tableau principal", "",
           "| Match | Comp. | KO | Marché | Prob(adj) | Sharp | Blow | Upset | Conv | Conf | DQ | Value |",
@@ -707,11 +840,120 @@ def write_report(day):
     print(f"REPORT : {path.relative_to(ROOT)}")
 
 
+# ───────────────────────── EMAIL (notification mise en forme, spec §36-38) ─────────────────────────
+
+def build_email_html(day) -> tuple:
+    """(sujet, html) — digest du dernier état du jour, priorisé sur les décisions puis les anomalies."""
+    rows = latest_by_fixture(day)
+    rows.sort(key=relevance, reverse=True)
+    tz_name = os.environ.get("APEX_TIMEZONE", "UTC")
+    deci = [r for r in rows if (r.get("reco", {}).get("decision", {}) or {}).get("tier") in ("JOUER", "JOUER_PETIT")]
+    deci.sort(key=lambda r: (r["reco"]["decision"]["tier"] != "JOUER", -relevance(r)))
+    n_jouer = sum(1 for r in deci if r["reco"]["decision"]["tier"] == "JOUER")
+    live = [r for r in rows if r.get("phase") == "LIVE"]
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%MZ")
+    subject = f"APEX-WORM {day} · {len(deci)} décisions ({n_jouer} JOUER) · {len(rows)} matchs"
+
+    def esc(x):
+        return str(x).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    css = ("body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1a1a2e;margin:0;"
+           "background:#f4f5f7;padding:16px} .card{background:#fff;border-radius:12px;padding:16px 18px;"
+           "max-width:820px;margin:0 auto 14px;box-shadow:0 1px 4px rgba(0,0,0,.08)} h1{font-size:19px;margin:0 0 4px}"
+           "h2{font-size:15px;margin:18px 0 8px;color:#3b3b58} .muted{color:#6b7280;font-size:12px}"
+           "table{border-collapse:collapse;width:100%;font-size:13px} th,td{padding:6px 8px;border-bottom:1px solid #eee;text-align:left}"
+           "th{background:#fafafe;color:#555} .jouer{background:#e7f6ec;color:#137333;font-weight:700;border-radius:6px;padding:1px 7px}"
+           ".petit{background:#fef7e0;color:#8a6d00;font-weight:700;border-radius:6px;padding:1px 7px}"
+           ".r{text-align:right} .tag{color:#4338ca;font-size:12px} .warn{color:#8a6d00}")
+    H = [f"<html><head><meta charset='utf-8'><style>{css}</style></head><body>",
+         "<div class='card'>",
+         f"<h1>APEX-WORM — journée {day}</h1>",
+         f"<div class='muted'>Fenêtre 08:00→07:59 ({tz_name}) · généré {stamp} · {len(rows)} matchs · "
+         f"{len(deci)} décisions dont {n_jouer} JOUER · {len(live)} en direct</div>"]
+
+    if deci:
+        H += ["<h2>Décisions du jour</h2>",
+              "<table><tr><th>Palier</th><th>Match</th><th>Compét.</th><th>KO</th><th>Marché retenu</th>"
+              "<th>Signal</th><th>Éch.</th><th class='r'>Unités</th><th class='r'>Conf</th></tr>"]
+        for r in deci[:25]:
+            d = r["reco"]["decision"]
+            cls = "jouer" if d["tier"] == "JOUER" else "petit"
+            H.append(f"<tr><td><span class='{cls}'>{d['tier']}</span></td><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
+                     f"<td>{esc((r.get('country') or '')[:3])} {esc(r['league'][:16])}</td><td>{r['kickoff'][11:16]}</td>"
+                     f"<td>{esc(d['marche'][:34])}</td><td class='tag'>{esc(d['signal'])}</td>"
+                     f"<td>{'✓' if d.get('confirmation_echange') else '—'}</td>"
+                     f"<td class='r'>{d['unites_indicatives']}</td><td class='r'>{r.get('confidence','?')}</td></tr>")
+        H += ["</table>",
+              "<div class='muted warn'>Unités indicatives de suivi, pas un conseil de mise : cote à vérifier et "
+              "horodater avant tout pari ; le modèle structurel ne bat pas le marché.</div>"]
+    else:
+        H += ["<h2>Décisions du jour</h2><div class='muted'>Aucune décision JOUER/JOUER_PETIT ce passage.</div>"]
+
+    if live:
+        H += ["<h2>En direct</h2><table><tr><th>Match</th><th>Score</th><th>Statut</th></tr>"]
+        for r in live[:10]:
+            H.append(f"<tr><td>{esc(r['home'])}–{esc(r['away'])}</td><td>{esc(fmt_score(r.get('score')))}</td><td>{esc(r['status'])}</td></tr>")
+        H += ["</table>"]
+
+    H += ["<h2>Meilleures anomalies</h2><table><tr><th>Match</th><th>Sharp</th><th>Blow</th><th>Upset</th>"
+          "<th>Conv</th><th>Marché</th><th>Value</th></tr>"]
+    for r in rows[:15]:
+        reco = r.get("reco", {})
+        vd = reco.get("value_1x2_directe")
+        val = f"1X2 {vd['issue'][0]} EV{vd['ev']:+.2f}" if vd else reco.get("value", "")
+        H.append(f"<tr><td>{esc(r['home'])}–{esc(r['away'])}</td><td>{r.get('sharp','–')}</td><td>{r.get('blowout','–')}</td>"
+                 f"<td>{r.get('upset','–')}</td><td>{r.get('convergence','–')}</td>"
+                 f"<td>{esc(reco.get('primary_market','?')[:30])}</td><td>{esc(val)}</td></tr>")
+    H += ["</table>",
+          "<div class='muted'>Volume/argent public : réels quand l'échange Betfair est branché, sinon UNAVAILABLE "
+          "(jamais estimés). Détail complet dans reports/worm/.</div>",
+          "</div></body></html>"]
+    return subject, "\n".join(H)
+
+
+def send_email_smtp(subject, html) -> bool:
+    """Envoie le digest par SMTP si configuré (secrets CI / variables d'env). Renvoie True si envoyé.
+    Variables : WORM_SMTP_HOST, WORM_SMTP_PORT (587), WORM_SMTP_USER, WORM_SMTP_PASS, WORM_EMAIL_TO,
+    WORM_EMAIL_FROM (défaut = WORM_SMTP_USER)."""
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    host = os.environ.get("WORM_SMTP_HOST")
+    to = os.environ.get("WORM_EMAIL_TO")
+    user = os.environ.get("WORM_SMTP_USER")
+    pwd = os.environ.get("WORM_SMTP_PASS")
+    if not (host and to and user and pwd):
+        print("Email non envoyé : WORM_SMTP_* / WORM_EMAIL_TO non configurés (secrets).")
+        return False
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = os.environ.get("WORM_EMAIL_FROM", user)
+    msg["To"] = to
+    msg.attach(MIMEText(html, "html", "utf-8"))
+    port = int(os.environ.get("WORM_SMTP_PORT", "587"))
+    try:
+        with smtplib.SMTP(host, port, timeout=30) as srv:
+            srv.starttls()
+            srv.login(user, pwd)
+            srv.sendmail(msg["From"], [x.strip() for x in to.split(",")], msg.as_string())
+        print(f"Email envoyé à {to}.")
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"Email non envoyé (SMTP) : {str(e)[:120]}")
+        return False
+
+
 def cmd_report(a):
     tz = apex_tz()
     base = dt.datetime.combine(dt.date.fromisoformat(a.date), dt.time(12, 0), tzinfo=tz) if a.date else dt.datetime.now(tz)
     day, _, _ = apex_window(base)
     write_report(day)
+    if getattr(a, "email", False):
+        subject, html = build_email_html(day)
+        out = REP / f"{day.isoformat()}.email.html"
+        out.write_text(html, encoding="utf-8")
+        print(f"EMAIL HTML : {out.relative_to(ROOT)}")
+        send_email_smtp(subject, html)
 
 
 def cmd_window(a):
@@ -729,7 +971,9 @@ def main():
     s = sp.add_parser("scan")
     s.add_argument("--date"); s.add_argument("--leagues"); s.add_argument("--max-calls", type=int, default=90)
     s.add_argument("--max-fixtures", type=int); s.add_argument("--odds-only", action="store_true")
-    r = sp.add_parser("report"); r.add_argument("--date")
+    s.add_argument("--exchange", action="store_true", help="brancher l'échange Betfair (volume + argent public + RLM réel)")
+    s.add_argument("--email", action="store_true", help="envoyer le digest par email (SMTP via secrets)")
+    r = sp.add_parser("report"); r.add_argument("--date"); r.add_argument("--email", action="store_true")
     sp.add_parser("window")
     a = p.parse_args()
     try:

@@ -39,12 +39,23 @@ passage). La trajectoire des cotes entre relevés est elle-même une donnée (sp
 workflow GitHub Actions `.github/workflows/apex-worm.yml` lance le scan toutes les heures et publie le
 rapport + les snapshots en **artefacts** (pas 24 commits/jour, spec §30).
 
+## Échange Betfair + excapper (volume et argent public réels)
+
+Avec `--exchange`, le scan branche l'**échange Betfair** (API officielle, compte de l'utilisateur, creds en
+variables d'environnement, spec §33) : volume réellement matché par marché, prix d'échange (probabilité la
+plus « vraie »), et répartition d'argent par sélection. Cela alimente pour de vrai les composantes du moteur
+Sharp — `volume` (liquidité), confirmation d'échange, et un **Reverse Line Movement RÉEL** (argent public
+majoritaire sur une issue dont la cote dérive, §14). Connecteurs : `tools/apex_betfair.py`,
+`tools/apex_excapper.py` (% argent public via API autorisée uniquement, jamais de scraping).
+
+Sans creds Betfair/excapper, ces composantes restent `UNAVAILABLE` — jamais estimées. Aucun contournement
+d'authentification ni de CAPTCHA (spec §6).
+
 ## Moteurs (spec §13-18)
 
-- **Sharp** (proxy) : trajectoire de ligne entre nos relevés, consensus inter-books (dispersion), écart
-  Pinnacle↔médiane. **Le volume de mises et le % de parieurs publics ne sont PAS disponibles** dans la
-  source (API-Football) : ces composantes sont marquées `UNAVAILABLE`, jamais estimées. Le Reverse Line
-  Movement complet (§14) exige le côté public → non calculable ici, à ne pas prétendre.
+- **Sharp** : trajectoire de ligne entre nos relevés, consensus inter-books (dispersion), écart
+  Pinnacle↔médiane, et — quand l'échange est branché — volume réel, confirmation d'échange et RLM réel.
+  Sans échange, volume/public/RLM restent `UNAVAILABLE`.
 - **Blowout** (§15) : supériorité multidimensionnelle (proba marché du favori, écart de points/match,
   écart de différence de buts, avantage terrain).
 - **Upset** (§16) : outsider sous-évalué (petit écart de niveau malgré une cote généreuse).
@@ -68,10 +79,25 @@ signalé pour Sharp/Blowout/Upset/Convergence même sans value ; le rapport écr
 `VALUE: NON CONFIRMÉE`. On n'invente jamais un pari pour remplir une case ; `NO BET` est une conclusion
 valide (spec §22).
 
+## Décision de marché (spec §22, §44)
+
+Un signal ne reste pas « à surveiller » : il conduit à une **décision**. Chaque match assez documenté reçoit
+un palier — `JOUER` (signal fort ≥70, DQ ≥65, ET confirmation d'échange ou value 1X2 directe), `JOUER_PETIT`
+(≥55, DQ ≥50), `SURVEILLER` (≥45), sinon `NO BET` — avec le marché retenu et une **mise en unités
+indicatives de suivi** (1.0 / 0.5 / 0.25 / 0). Ce ne sont pas des conseils de mise : la cote est à vérifier
+et horodater avant tout pari, et le modèle structurel ne bat pas le marché. La value directe n'est
+`CONFIRMÉE` que sur un marché réellement price (1X2).
+
+## Email (notification, spec §36-38)
+
+Avec `--email`, le scan écrit `reports/worm/<jour>.email.html` (digest mis en forme : décisions du jour,
+matchs en direct, meilleures anomalies) et l'envoie par SMTP si `WORM_SMTP_HOST/USER/PASS` + `WORM_EMAIL_TO`
+sont configurés (secrets CI). En session interactive, le même HTML peut être envoyé via le connecteur Gmail.
+
 ## Sortie
 
 - `data/worm/snapshots/<jour>.jsonl` — historique horodaté append-only (non versionné).
-- `reports/worm/<jour>.md` — TOP SIGNALS, tableau principal, fiches détaillées (spec §36-38).
+- `reports/worm/<jour>.md` + `.email.html` — TOP SIGNALS, décisions, tableau, fiches (spec §36-38).
 
 ## Équipe d'agents
 
@@ -82,5 +108,8 @@ n'invente rien.
 
 ## Secrets (spec §33)
 
-`API_FOOTBALL_KEY` (ou identifiant API injecté en en-tête par l'environnement cloud) et
-`FOOTYSTATS_KEY` restent hors du code, des logs et des commits. En CI : GitHub Actions Secrets.
+Tous hors du code, des logs et des commits — en CI, GitHub Actions Secrets :
+`API_FOOTBALL_KEY` (ou identifiant API en en-tête via l'environnement cloud), `FOOTYSTATS_KEY`,
+`BETFAIR_APP_KEY` / `BETFAIR_USERNAME` / `BETFAIR_PASSWORD` (échange), `EXCAPPER_KEY` / `EXCAPPER_API_URL`
+(% argent public), `WORM_SMTP_HOST` / `WORM_SMTP_USER` / `WORM_SMTP_PASS` + `WORM_EMAIL_TO` (email).
+`APEX_TIMEZONE` fixe le fuseau de la fenêtre.

@@ -224,6 +224,86 @@ def test_latest_by_fixture_dedups(tmp_path):
         W.SNAP = old_snap
 
 
+# ───────── échange Betfair : volume, confirmation, RLM ─────────
+
+def test_sharp_uses_exchange_volume_and_marks_observed():
+    exch = {"total_matched": 100000.0, "fair": [0.55, 0.28, 0.17], "money": [0.6, 0.2, 0.2]}
+    sc, comp = W.sharp_signal([0.52, 0.30, 0.18], [0.50, 0.31, 0.19], 2.0, 0.01, 0.02, exch)
+    assert comp["volume"]["provenance"] == W.OBSERVED
+    assert comp["volume"]["total_matched"] == 100000.0
+    assert comp["public_pct"]["provenance"] == W.OBSERVED
+    assert 0 <= sc <= 100
+
+
+def test_sharp_detects_reverse_line_movement():
+    # argent public majoritaire sur l'issue 0, mais sa proba a BAISSÉ (cote qui dérive) → RLM
+    exch = {"total_matched": 50000.0, "fair": [0.40, 0.30, 0.30], "money": [0.70, 0.15, 0.15]}
+    sc, comp = W.sharp_signal([0.40, 0.30, 0.30], [0.46, 0.29, 0.25], 3.0, 0.02, None, exch)
+    assert "rlm" in comp
+    assert comp["rlm"]["issue"] == 0
+
+
+def test_align_exchange_maps_runners_to_hda():
+    es = {"exchange_fair": {"Arsenal": 0.6, "The Draw": 0.25, "Leeds": 0.15},
+          "money_pct": {"Arsenal": 0.7, "The Draw": 0.1, "Leeds": 0.2}, "total_matched": 12345.0}
+    out = W.align_exchange(es, "Arsenal", "Leeds")
+    assert out["fair"][0] == 0.6 and out["fair"][2] == 0.15
+    assert out["money"][0] == 0.7
+    assert out["total_matched"] == 12345.0
+
+
+# ───────── décision de marché (spec §22, §44) ─────────
+
+def test_decision_present_for_signal():
+    rec = {"data_quality": 80, "blowout": 72, "upset": 10, "convergence": 30, "sharp": 20,
+           "odds": {"Pinnacle": {"1X2": [1.4, 4.5, 7.0]}}, "ev_best": None, "exchange_confirmation": False}
+    out = W.recommend(rec)
+    assert "decision" in out
+    assert out["decision"]["tier"] in ("JOUER", "JOUER_PETIT", "SURVEILLER")
+    assert out["decision"]["marche"] == out["primary_market"]
+
+
+def test_decision_jouer_needs_confirmation():
+    base = {"data_quality": 80, "blowout": 75, "upset": 10, "convergence": 30, "sharp": 20,
+            "odds": {"Pinnacle": {"1X2": [1.4, 4.5, 7.0]}}, "ev_best": None}
+    no_conf = W.recommend({**base, "exchange_confirmation": False, "rlm": None})
+    with_conf = W.recommend({**base, "exchange_confirmation": True, "rlm": None})
+    assert no_conf["decision"]["tier"] == "JOUER_PETIT"     # fort mais sans confirmation
+    assert with_conf["decision"]["tier"] == "JOUER"          # fort + confirmation d'échange
+
+
+def test_decision_no_bet_units_zero():
+    out = W.recommend({"data_quality": 20, "sharp": 0, "blowout": None, "upset": None,
+                       "convergence": None, "odds": {}})
+    assert out["decision"]["tier"] == "NO BET"
+    assert out["decision"]["unites_indicatives"] == 0.0
+
+
+# ───────── email digest ─────────
+
+def test_build_email_html(tmp_path):
+    import json
+    day = dt.date(2026, 9, 30)
+    old = W.SNAP
+    try:
+        W.SNAP = tmp_path
+        rec = {"fixture_id": 1, "home": "A", "away": "B", "league": "L", "country": "Eng",
+               "kickoff": "2026-09-30T18:00:00+00:00", "phase": "PREMATCH", "sharp": 20, "blowout": 75,
+               "upset": 10, "convergence": 30, "confidence": 70, "data_quality": 80,
+               "adjusted_prob_1x2": [0.6, 0.25, 0.15], "signal_stable": False,
+               "reco": {"primary_market": "AH -0.5 dom", "value": "NON CONFIRMÉE",
+                        "decision": {"tier": "JOUER_PETIT", "unites_indicatives": 0.5, "marche": "AH -0.5 dom",
+                                     "signal": "BLOWOUT 75/100", "confirmation_echange": False}}}
+        with open(tmp_path / f"{day.isoformat()}.jsonl", "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec) + "\n")
+        subject, html = W.build_email_html(day)
+        assert "APEX-WORM" in subject
+        assert "<html" in html and "JOUER_PETIT" in html
+        assert "A–B" in html
+    finally:
+        W.SNAP = old
+
+
 def _run_all():
     import types
     g = dict(globals())

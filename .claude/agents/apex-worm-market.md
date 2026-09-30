@@ -21,11 +21,18 @@ Tu lis ce que le moteur a écrit ; tu ne recalcules rien à la main.
 - **Sharp proxy** : `sharp_components` donne `line_move`, `velocity`, `consensus` (dispersion),
   `pinnacle_vs_median`. Un score élevé = convergence de ces éléments calculables.
 
+## Échange Betfair (quand `--exchange` est actif)
+
+Si `sharp_components` contient `volume` (provenance OBSERVED), l'échange Betfair est branché : tu disposes
+alors du **volume réel** matché, d'une **confirmation d'échange** (`exchange_confirmation`) et d'un
+**Reverse Line Movement RÉEL** (`rlm` : argent public majoritaire sur une issue dont la cote dérive). Ces
+composantes ont plus de poids qu'un simple mouvement de book. Cite le volume et le sens du RLM.
+
 ## Ce que tu ne dois PAS dire
 
-- Ne parle jamais de « sharp money » comme d'un fait : `volume`, `public_pct`, `exchange` sont
-  `UNAVAILABLE`. Le RLM complet (§14) exige le côté public → **non calculable ici**. Dis-le clairement.
-- Ne conclus jamais qu'un mouvement est sharp automatiquement (spec §14).
+- Si `volume`/`public_pct`/`exchange` valent `UNAVAILABLE` (échange non branché), ne parle jamais de
+  « sharp money » ni de RLM comme d'un fait : le côté public n'est pas connu. Dis-le clairement.
+- Ne conclus jamais qu'un mouvement est sharp automatiquement (spec §14), même avec l'échange.
 
 ## Sortie
 
