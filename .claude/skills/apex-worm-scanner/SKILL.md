@@ -19,6 +19,7 @@ Le moteur mécanique fait tout cela en un appel :
 
 ```bash
 python3 tools/apex_worm.py scan            # journée APEX courante, toutes compétitions
+python3 tools/apex_worm.py scan --money --email     # + volume excapper + notification email
 python3 tools/apex_worm.py scan --leagues 39,140,135 --max-calls 300
 python3 tools/apex_worm.py scan --date 2026-09-30 --max-fixtures 40
 python3 tools/apex_worm.py report          # régénère reports/worm/<jour>.md depuis le dernier snapshot
@@ -39,23 +40,30 @@ passage). La trajectoire des cotes entre relevés est elle-même une donnée (sp
 workflow GitHub Actions `.github/workflows/apex-worm.yml` lance le scan toutes les heures et publie le
 rapport + les snapshots en **artefacts** (pas 24 commits/jour, spec §30).
 
-## Échange Betfair + excapper (volume et argent public réels)
+## Argent public : excapper (public) + arbworld (sous réserve)
 
-Avec `--exchange`, le scan branche l'**échange Betfair** (API officielle, compte de l'utilisateur, creds en
-variables d'environnement, spec §33) : volume réellement matché par marché, prix d'échange (probabilité la
-plus « vraie »), et répartition d'argent par sélection. Cela alimente pour de vrai les composantes du moteur
-Sharp — `volume` (liquidité), confirmation d'échange, et un **Reverse Line Movement RÉEL** (argent public
-majoritaire sur une issue dont la cote dérive, §14). Connecteurs : `tools/apex_betfair.py`,
-`tools/apex_excapper.py` (% argent public via API autorisée uniquement, jamais de scraping).
+Avec `--money`, le scan collecte **excapper** (`tools/apex_excapper.py`) : le tableau « Betfair MoneyWay »
+de la page d'accueil est **rendu côté serveur, public, sans clé ni login**. Il donne le **volume d'argent
+réellement matché** par match sur l'échange Betfair — la donnée de volume que les bookmakers cachent.
+Chaque fixture API-Football est appariée par similarité de noms ; le volume réel alimente la composante
+`volume` du moteur Sharp (`OBSERVED`).
 
-Sans creds Betfair/excapper, ces composantes restent `UNAVAILABLE` — jamais estimées. Aucun contournement
-d'authentification ni de CAPTCHA (spec §6).
+Collecte éthique (spec §6) : uniquement des pages publiques, `robots.txt` respecté (excapper autorise
+tout), User-Agent identifiable, rythme raisonnable. **Aucun contournement de login, paywall ou CAPTCHA.**
+
+**arbworld** (`tools/apex_arbworld.py`) sert ses cotes via `/api/`, que son `robots.txt` **interdit** —
+donc pas de scraping. Il n'est utilisé que si tu fournis une **API autorisée** (`ARBWORLD_API_URL` +
+`ARBWORLD_KEY`) ; sinon la composante arbitrage reste `UNAVAILABLE`.
+
+Sans `--money`, ou si un match n'a pas de volume excapper, ces composantes restent `UNAVAILABLE` — jamais
+estimées (spec §34).
 
 ## Moteurs (spec §13-18)
 
 - **Sharp** : trajectoire de ligne entre nos relevés, consensus inter-books (dispersion), écart
-  Pinnacle↔médiane, et — quand l'échange est branché — volume réel, confirmation d'échange et RLM réel.
-  Sans échange, volume/public/RLM restent `UNAVAILABLE`.
+  Pinnacle↔médiane, et — avec `--money` — **volume d'argent réel** (excapper). La confirmation d'échange
+  et le RLM réel s'activent si la répartition d'argent par issue est connue ; sinon ils restent
+  `UNAVAILABLE`.
 - **Blowout** (§15) : supériorité multidimensionnelle (proba marché du favori, écart de points/match,
   écart de différence de buts, avantage terrain).
 - **Upset** (§16) : outsider sous-évalué (petit écart de niveau malgré une cote généreuse).
@@ -110,6 +118,6 @@ n'invente rien.
 
 Tous hors du code, des logs et des commits — en CI, GitHub Actions Secrets :
 `API_FOOTBALL_KEY` (ou identifiant API en en-tête via l'environnement cloud), `FOOTYSTATS_KEY`,
-`BETFAIR_APP_KEY` / `BETFAIR_USERNAME` / `BETFAIR_PASSWORD` (échange), `EXCAPPER_KEY` / `EXCAPPER_API_URL`
-(% argent public), `WORM_SMTP_HOST` / `WORM_SMTP_USER` / `WORM_SMTP_PASS` + `WORM_EMAIL_TO` (email).
-`APEX_TIMEZONE` fixe le fuseau de la fenêtre.
+`WORM_SMTP_HOST` / `WORM_SMTP_USER` / `WORM_SMTP_PASS` + `WORM_EMAIL_TO` (email), et — seulement si tu as
+un accès autorisé — `ARBWORLD_API_URL` / `ARBWORLD_KEY`. excapper ne demande **aucune** clé (données
+publiques). `APEX_TIMEZONE` fixe le fuseau de la fenêtre.

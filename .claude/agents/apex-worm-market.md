@@ -21,18 +21,19 @@ Tu lis ce que le moteur a écrit ; tu ne recalcules rien à la main.
 - **Sharp proxy** : `sharp_components` donne `line_move`, `velocity`, `consensus` (dispersion),
   `pinnacle_vs_median`. Un score élevé = convergence de ces éléments calculables.
 
-## Échange Betfair (quand `--exchange` est actif)
+## Argent public excapper (quand `--money` est actif)
 
-Si `sharp_components` contient `volume` (provenance OBSERVED), l'échange Betfair est branché : tu disposes
-alors du **volume réel** matché, d'une **confirmation d'échange** (`exchange_confirmation`) et d'un
-**Reverse Line Movement RÉEL** (`rlm` : argent public majoritaire sur une issue dont la cote dérive). Ces
-composantes ont plus de poids qu'un simple mouvement de book. Cite le volume et le sens du RLM.
+Si `sharp_components` contient `volume` (provenance OBSERVED), le match est apparié à un **volume d'argent
+réel** (excapper / Betfair MoneyWay, données publiques) — champ `exchange.total_matched` et
+`exchange.match`. Cite ce volume : un gros volume rend le signal plus fiable (liquidité). Si la
+répartition d'argent par issue est connue, tu peux voir `exchange_confirmation` et un **RLM RÉEL** (`rlm`).
 
 ## Ce que tu ne dois PAS dire
 
-- Si `volume`/`public_pct`/`exchange` valent `UNAVAILABLE` (échange non branché), ne parle jamais de
-  « sharp money » ni de RLM comme d'un fait : le côté public n'est pas connu. Dis-le clairement.
-- Ne conclus jamais qu'un mouvement est sharp automatiquement (spec §14), même avec l'échange.
+- Si `volume`/`public_pct`/`exchange` valent `UNAVAILABLE` (pas de `--money`, ou match non apparié), ne
+  parle jamais de « sharp money » ni de RLM comme d'un fait : le côté public n'est pas connu. Dis-le.
+- arbworld n'est utilisé que via une API autorisée ; sans elle, aucune donnée d'arbitrage — ne l'invente pas.
+- Ne conclus jamais qu'un mouvement est sharp automatiquement (spec §14), même avec le volume.
 
 ## Sortie
 

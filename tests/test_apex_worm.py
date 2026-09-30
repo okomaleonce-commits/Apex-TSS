@@ -224,7 +224,32 @@ def test_latest_by_fixture_dedups(tmp_path):
         W.SNAP = old_snap
 
 
-# ───────── échange Betfair : volume, confirmation, RLM ─────────
+# ───────── argent public (excapper) : volume, confirmation, RLM ─────────
+
+
+def test_excapper_parses_public_money_table():
+    import importlib
+    XC = importlib.import_module("apex_excapper")
+    html = (
+        '<tr class="a_link" game_id="123" data-game-link="x">'
+        '<td>30.09.2026 16:00</td><td><img alt="RS" title="RS"></td>'
+        '<td>Montenegrin 2nd League</td><td>FK Iskra - FK Grbalj</td><td>20 694 €</td></tr>'
+        '<tr class="a_link" game_id="456" data-game-link="y">'
+        '<td>30.09.2026 16:30</td><td><img alt="CZ" title="CZ"></td>'
+        '<td>Czech Cup</td><td>FC Vsetin - Bohemians 1905</td><td>68812 €</td></tr>')
+    rows = XC.parse_matches(html)
+    assert len(rows) == 2
+    assert rows[0]["home"] == "FK Iskra" and rows[0]["away"] == "FK Grbalj"
+    assert rows[0]["all_money_eur"] == 20694.0
+    assert rows[1]["all_money_eur"] == 68812.0
+
+
+def test_excapper_robots_blocks_disallowed():
+    import importlib
+    XC = importlib.import_module("apex_excapper")
+    XC._ROBOTS_CACHE["ex.test"] = ["/private/"]      # simule une règle Disallow
+    assert XC.robots_allows("https://ex.test/public/x") is True
+    assert XC.robots_allows("https://ex.test/private/y") is False
 
 def test_sharp_uses_exchange_volume_and_marks_observed():
     exch = {"total_matched": 100000.0, "fair": [0.55, 0.28, 0.17], "money": [0.6, 0.2, 0.2]}

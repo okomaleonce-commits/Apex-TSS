@@ -29,6 +29,7 @@ import datetime as dt
 import json
 import math
 import os
+import re
 import statistics
 import sys
 from pathlib import Path
@@ -37,13 +38,26 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import apex_apifootball as AF  # noqa: E402
 try:
-    import apex_betfair as BF  # noqa: E402
-except Exception:  # pragma: no cover
-    BF = None
-try:
-    import apex_excapper as XC  # noqa: E402
+    import apex_excapper as XC  # noqa: E402  (volume d'argent public, données publiques excapper)
 except Exception:  # pragma: no cover
     XC = None
+try:
+    import apex_arbworld as AW  # noqa: E402  (surebets, sous réserve d'API autorisée)
+except Exception:  # pragma: no cover
+    AW = None
+
+
+def norm_name(s):
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode().lower()
+    s = s.replace("manchester", "man").replace("united", "utd")
+    return re.sub(r"[^a-z]", "", re.sub(r"\b(fc|afc|cf|sc|ac|as|ss|us|club|de|the|w|women|u\d+)\b", "", s))
+
+
+def name_sim(a, b):
+    A = {a[i:i + 3] for i in range(max(1, len(a) - 2))}
+    B = {b[i:i + 3] for i in range(max(1, len(b) - 2))}
+    return len(A & B) / max(1, len(A | B))
 
 ROOT = Path(__file__).resolve().parent.parent
 SNAP = ROOT / "data" / "worm" / "snapshots"
@@ -95,9 +109,9 @@ def margin(odds):
 
 
 def align_exchange(es, home, away):
-    """Réaligne les probas/argent d'échange (clés = noms de coureurs Betfair) sur [dom, nul, ext].
+    """Réaligne des dictionnaires {nom_équipe/draw: valeur} sur le vecteur [dom, nul, ext].
     Renvoie {fair:[h,d,a]|None, money:[h,d,a]|None, total_matched}. None si l'appariement échoue."""
-    if not es or BF is None:
+    if not es:
         return None
 
     def to_vec(d):
@@ -108,8 +122,8 @@ def align_exchange(es, home, away):
         rest = [k for k in names if k != draw]
         if len(rest) < 2:
             return None
-        hn = max(rest, key=lambda k: BF.sim(home, k))
-        an = max(rest, key=lambda k: BF.sim(away, k))
+        hn = max(rest, key=lambda k: name_sim(norm_name(home), norm_name(k)))
+        an = max(rest, key=lambda k: name_sim(norm_name(away), norm_name(k)))
         if hn == an:
             return None
         return [d[hn], d.get(draw, 0.0) if draw else 0.0, d[an]]
@@ -205,10 +219,11 @@ def fmt_score(sc):
 
 
 def sharp_signal(fair_now, fair_prev, hours_between, dispersion, pinnacle_vs_median, exchange=None):
-    """SHARP (spec §13). Composantes calculables sans échange : trajectoire de ligne entre nos relevés,
-    consensus (dispersion), divergence Pinnacle↔médiane. Quand l'échange Betfair est fourni (`exchange` =
-    {fair:[h,d,a], money:[h,d,a], total_matched}), on ajoute le VOLUME réel, la confirmation d'échange et
-    un vrai Reverse Line Movement. Sans échange, volume/public/exchange restent UNAVAILABLE (spec §34)."""
+    """SHARP (spec §13). Composantes calculables sans argent public : trajectoire de ligne entre nos
+    relevés, consensus (dispersion), divergence Pinnacle↔médiane. Quand l'argent public est fourni
+    (`exchange` = {total_matched, money:[h,d,a]|None, fair:[h,d,a]|None}, ex. volume excapper), on ajoute
+    le VOLUME réel matché, et — si la répartition d'argent est connue — la confirmation et un vrai Reverse
+    Line Movement. Sans ces données, volume/public/exchange restent UNAVAILABLE (spec §34)."""
     comp = {"volume": UNAVAILABLE, "public_pct": UNAVAILABLE, "exchange": UNAVAILABLE}
     score = 0.0
     if fair_now and fair_prev and hours_between and hours_between > 0:
@@ -515,20 +530,21 @@ def cmd_scan(a):
     if a.max_fixtures:
         fixtures = fixtures[:a.max_fixtures]
 
-    # Échange Betfair (volume + prix + argent public) : relevé une fois pour toute la fenêtre.
-    bf_markets, bf_vols = [], {}
-    if a.exchange and BF is not None:
+    # Argent public : volume matché excapper (Betfair MoneyWay, données PUBLIQUES) — un seul appel.
+    money_index = {}
+    if a.money and XC is not None:
         try:
-            tok = BF.login()
-            d0 = start.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
-            d1 = end.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
-            bf_markets = BF.football_match_odds(tok, d0, d1)
-            bf_vols = BF.market_volumes(tok, [m["market_id"] for m in bf_markets])
-            print(f"ÉCHANGE Betfair : {len(bf_markets)} marchés Match Odds, "
-                  f"volume total {sum(v['total_matched'] for v in bf_vols.values()):,.0f} £")
+            ms = XC.list_matches()
+            for m in ms:
+                if m.get("all_money_eur") and m.get("home") and m.get("away"):
+                    key = (norm_name(m["home"]), norm_name(m["away"]))
+                    money_index[key] = m
+            print(f"ARGENT excapper : {len(ms)} matchs publics, {len(money_index)} avec volume "
+                  f"(total {sum(m['all_money_eur'] for m in ms if m.get('all_money_eur')):,.0f} €)")
         except Exception as e:  # noqa: BLE001
-            print(f"ÉCHANGE Betfair indisponible ({str(e)[:100]}) → composantes volume/public UNAVAILABLE.")
-            bf_markets = []
+            print(f"excapper indisponible ({str(e)[:100]}) → composante volume UNAVAILABLE.")
+    if a.money and AW is not None and not AW.available():
+        print("arbworld : API autorisée non configurée → composante arbitrage UNAVAILABLE (pas de scraping).")
 
     prev = prev_snapshot_index(day)
     SNAP.mkdir(parents=True, exist_ok=True)
@@ -626,15 +642,22 @@ def cmd_scan(a):
             if dpin and disp is not None and fair:
                 pin_vs_med = dpin[0] - fair[0]
 
-        # Échange Betfair apparié à ce match (volume, prix, argent public)
+        # Argent public excapper apparié à ce match (volume matché réel). Appariement noms + tolérance.
         exch = None
-        if bf_markets:
-            m_bf, sco = BF.match_fixture(rec["home"], rec["away"], rec["kickoff"], bf_markets)
-            if m_bf:
-                es = BF.exchange_signal(m_bf, bf_vols)
-                exch = align_exchange(es, rec["home"], rec["away"])
-                if exch:
-                    exch["appariement"] = {"event": m_bf["event_name"], "score": sco}
+        if money_index:
+            k = (norm_name(rec["home"]), norm_name(rec["away"]))
+            hit = money_index.get(k)
+            if not hit:  # appariement approché : meilleure similarité combinée dom+ext
+                best, bs = None, 0.0
+                for (hn, an), m in money_index.items():
+                    sc2 = (name_sim(k[0], hn) + name_sim(k[1], an)) / 2
+                    if sc2 > bs:
+                        best, bs = m, sc2
+                if best and bs >= 0.6:
+                    hit = best
+            if hit:
+                exch = {"total_matched": hit["all_money_eur"], "fair": None, "money": None,
+                        "source": "excapper", "match": f"{hit['home']} - {hit['away']}"}
         rec["exchange"] = exch
 
         # ANALYZE — moteurs d'anomalies
@@ -905,8 +928,8 @@ def build_email_html(day) -> tuple:
                  f"<td>{r.get('upset','–')}</td><td>{r.get('convergence','–')}</td>"
                  f"<td>{esc(reco.get('primary_market','?')[:30])}</td><td>{esc(val)}</td></tr>")
     H += ["</table>",
-          "<div class='muted'>Volume/argent public : réels quand l'échange Betfair est branché, sinon UNAVAILABLE "
-          "(jamais estimés). Détail complet dans reports/worm/.</div>",
+          "<div class='muted'>Volume d'argent : réel via excapper (Betfair MoneyWay, données publiques) quand "
+          "--money est actif, sinon UNAVAILABLE (jamais estimé). Détail complet dans reports/worm/.</div>",
           "</div></body></html>"]
     return subject, "\n".join(H)
 
@@ -971,7 +994,7 @@ def main():
     s = sp.add_parser("scan")
     s.add_argument("--date"); s.add_argument("--leagues"); s.add_argument("--max-calls", type=int, default=90)
     s.add_argument("--max-fixtures", type=int); s.add_argument("--odds-only", action="store_true")
-    s.add_argument("--exchange", action="store_true", help="brancher l'échange Betfair (volume + argent public + RLM réel)")
+    s.add_argument("--money", action="store_true", help="brancher l'argent public excapper (volume matché) + arbworld si API autorisée")
     s.add_argument("--email", action="store_true", help="envoyer le digest par email (SMTP via secrets)")
     r = sp.add_parser("report"); r.add_argument("--date"); r.add_argument("--email", action="store_true")
     sp.add_parser("window")

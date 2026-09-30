@@ -37,18 +37,15 @@ jobs:
       - name: Run tests (spec §31)
         run: python3 tests/test_apex_worm.py
 
-      - name: FULL SCAN (+ échange Betfair + email)
+      - name: FULL SCAN (+ argent public excapper + email)
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}   # jamais dans le code (spec §33)
           FOOTYSTATS_KEY: ${{ secrets.FOOTYSTATS_KEY }}
           APEX_TIMEZONE: ${{ vars.APEX_TIMEZONE || 'UTC' }}   # fuseau configurable (spec §2)
-          # Échange Betfair (volume + argent public + RLM réel) — compte de l'utilisateur, jamais en clair
-          BETFAIR_APP_KEY: ${{ secrets.BETFAIR_APP_KEY }}
-          BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
-          BETFAIR_PASSWORD: ${{ secrets.BETFAIR_PASSWORD }}
-          # excapper (% argent public) — API autorisée uniquement, sinon composante indisponible
-          EXCAPPER_KEY: ${{ secrets.EXCAPPER_KEY }}
-          EXCAPPER_API_URL: ${{ secrets.EXCAPPER_API_URL }}
+          # excapper = données PUBLIQUES (Betfair MoneyWay), aucune clé requise.
+          # arbworld = uniquement si tu as une API autorisée (sinon composante arbitrage indisponible)
+          ARBWORLD_API_URL: ${{ secrets.ARBWORLD_API_URL }}
+          ARBWORLD_KEY: ${{ secrets.ARBWORLD_KEY }}
           # Notification email (SMTP)
           WORM_SMTP_HOST: ${{ secrets.WORM_SMTP_HOST }}
           WORM_SMTP_PORT: ${{ vars.WORM_SMTP_PORT || '587' }}
@@ -59,7 +56,7 @@ jobs:
           python3 tools/apex_worm.py scan \
             --leagues "${{ github.event.inputs.leagues }}" \
             --max-calls "${{ github.event.inputs.max_calls || 400 }}" \
-            --exchange --email
+            --money --email
 
       - name: Upload report + snapshots (artefacts, pas de commit horaire — spec §30)
         if: always()
