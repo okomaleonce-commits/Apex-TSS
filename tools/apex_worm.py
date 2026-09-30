@@ -799,7 +799,7 @@ def write_report(day):
     if deci:
         L += ["| Palier | Match | Comp. | KO | Marché retenu | Signal | Éch. | Unités | Conf |",
               "|---|---|---|---|---|---|:--:|--:|--:|"]
-        for r in deci[:25]:
+        for r in deci:
             d = r["reco"]["decision"]
             L.append(f"| **{d['tier']}** | {r['home']}–{r['away']} | {(r.get('country') or '')[:3]} {r['league'][:12]} | "
                      f"{r['kickoff'][11:16]} | {d['marche'][:30]} | {d['signal']} | "
@@ -898,7 +898,7 @@ def build_email_html(day) -> tuple:
         H += ["<h2>Décisions du jour</h2>",
               "<table><tr><th>Palier</th><th>Match</th><th>Compét.</th><th>KO</th><th>Marché retenu</th>"
               "<th>Signal</th><th>Éch.</th><th class='r'>Unités</th><th class='r'>Conf</th></tr>"]
-        for r in deci[:25]:
+        for r in deci:
             d = r["reco"]["decision"]
             cls = "jouer" if d["tier"] == "JOUER" else "petit"
             H.append(f"<tr><td><span class='{cls}'>{d['tier']}</span></td><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
