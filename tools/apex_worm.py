@@ -958,9 +958,14 @@ def build_email_html(day) -> tuple:
     # Matchs imminents (coup d'envoi dans 0–60 min)
     H += ["<h2>Matchs imminents (coup d'envoi dans 0–60 min)</h2>"]
     if imminent:
-        H += ["<table><tr><th>Dans</th><th>Match</th><th>Compét.</th><th>KO</th><th>Décision</th>"
+        # priorité aux matchs porteurs d'une décision, puis par temps restant
+        imminent.sort(key=lambda x: (0 if (x[1].get("reco", {}).get("decision", {}) or {}).get("tier")
+                                     in ("JOUER", "JOUER_PETIT") else 1, x[0]))
+        total_imm = len(imminent)
+        H += [f"<div class='muted'>{total_imm} matchs débutent dans l'heure — {min(total_imm,40)} affichés (décisions en tête).</div>",
+              "<table><tr><th>Dans</th><th>Match</th><th>Compét.</th><th>KO</th><th>Décision</th>"
               "<th>Marché</th><th class='r'>Conf</th></tr>"]
-        for mk, r in imminent:
+        for mk, r in imminent[:40]:
             d = (r.get("reco", {}).get("decision", {}) or {})
             tier = d.get("tier", "—")
             cls = "jouer" if tier == "JOUER" else ("petit" if tier == "JOUER_PETIT" else "")
