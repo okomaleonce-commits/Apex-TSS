@@ -863,6 +863,52 @@ def write_report(day):
     print(f"REPORT : {path.relative_to(ROOT)}")
 
 
+# ───────────────────────── recoupement APEX-PROTOCOL (ledger) ─────────────────────────
+
+def ledger_index():
+    """Prévisions APEX-PROTOCOL (journal apex_bsm) indexées par (dom, ext) normalisés — la plus récente.
+    Lecture seule ; le ledger est append-only et n'est pas modifié ici."""
+    path = ROOT / "ledger" / "forecasts.jsonl"
+    idx = {}
+    if not path.exists():
+        return idx
+    for line in open(path, encoding="utf-8"):
+        try:
+            fc = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if fc.get("home") and fc.get("away"):
+            idx[(norm_name(fc["home"]), norm_name(fc["away"]))] = fc
+    return idx
+
+
+def apex_align(reco_market: str, fc: dict):
+    """Le marché recommandé par WORM s'aligne-t-il avec la prévision APEX-PROTOCOL du ledger ?
+    Renvoie (aligne: bool|None, resume: str). None si non comparable."""
+    if not fc or not reco_market:
+        return None, "—"
+    m = fc.get("marches") or {}
+    p1, px, p2 = m.get("1"), m.get("X"), m.get("2")
+    over = m.get("Over2.5")
+    deci = fc.get("decision", "")
+    rm = reco_market.lower()
+    aligned = None
+    if p1 is not None and p2 is not None:
+        if "domicile" in rm or "1x" in rm:
+            aligned = p1 >= p2
+        elif "extérieur" in rm or "exterieur" in rm or "x2" in rm:
+            aligned = p2 >= p1
+    if over is not None and ("over" in rm or "under" in rm):
+        aligned = (over > 0.5) if "over" in rm else (over < 0.5)
+    parts = []
+    if p1 is not None:
+        parts.append(f"1X2 {p1:.2f}/{px:.2f}/{p2:.2f}")
+    if over is not None:
+        parts.append(f"O2.5 {over:.2f}")
+    resume = " · ".join(parts) + (f" · {deci[:24]}" if deci else "")
+    return aligned, resume
+
+
 # ───────────────────────── EMAIL (notification mise en forme, spec §36-38) ─────────────────────────
 
 def build_email_html(day) -> tuple:
@@ -874,8 +920,23 @@ def build_email_html(day) -> tuple:
     deci.sort(key=lambda r: (r["reco"]["decision"]["tier"] != "JOUER", -relevance(r)))
     n_jouer = sum(1 for r in deci if r["reco"]["decision"]["tier"] == "JOUER")
     live = [r for r in rows if r.get("phase") == "LIVE"]
-    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%MZ")
+    now = dt.datetime.now(dt.timezone.utc)
+    stamp = now.strftime("%Y-%m-%d %H:%MZ")
     subject = f"APEX-WORM {day} · {len(deci)} décisions ({n_jouer} JOUER) · {len(rows)} matchs"
+
+    # matchs imminents : coup d'envoi dans 0 à 60 min (pré-match)
+    def mins_to_ko(r):
+        try:
+            ko = dt.datetime.fromisoformat(r["kickoff"].replace("Z", "+00:00"))
+            return (ko - now).total_seconds() / 60
+        except (ValueError, KeyError, AttributeError):
+            return None
+    imminent = []
+    for r in rows:
+        mk = mins_to_ko(r)
+        if r.get("phase") == "PREMATCH" and mk is not None and 0 <= mk <= 60:
+            imminent.append((mk, r))
+    imminent.sort(key=lambda x: x[0])
 
     def esc(x):
         return str(x).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -894,6 +955,24 @@ def build_email_html(day) -> tuple:
          f"<div class='muted'>Fenêtre 08:00→07:59 ({tz_name}) · généré {stamp} · {len(rows)} matchs · "
          f"{len(deci)} décisions dont {n_jouer} JOUER · {len(live)} en direct</div>"]
 
+    # Matchs imminents (coup d'envoi dans 0–60 min)
+    H += ["<h2>Matchs imminents (coup d'envoi dans 0–60 min)</h2>"]
+    if imminent:
+        H += ["<table><tr><th>Dans</th><th>Match</th><th>Compét.</th><th>KO</th><th>Décision</th>"
+              "<th>Marché</th><th class='r'>Conf</th></tr>"]
+        for mk, r in imminent:
+            d = (r.get("reco", {}).get("decision", {}) or {})
+            tier = d.get("tier", "—")
+            cls = "jouer" if tier == "JOUER" else ("petit" if tier == "JOUER_PETIT" else "")
+            badge = f"<span class='{cls}'>{tier}</span>" if cls else esc(tier)
+            H.append(f"<tr><td><b>{int(mk)} min</b></td><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
+                     f"<td>{esc((r.get('country') or '')[:3])} {esc(r['league'][:16])}</td><td>{r['kickoff'][11:16]}</td>"
+                     f"<td>{badge}</td><td>{esc((d.get('marche') or r.get('reco',{}).get('primary_market','?'))[:30])}</td>"
+                     f"<td class='r'>{r.get('confidence','?')}</td></tr>")
+        H += ["</table>"]
+    else:
+        H += ["<div class='muted'>Aucun match ne débute dans les 60 prochaines minutes.</div>"]
+
     if deci:
         H += ["<h2>Décisions du jour</h2>",
               "<table><tr><th>Palier</th><th>Match</th><th>Compét.</th><th>KO</th><th>Marché retenu</th>"
@@ -911,6 +990,30 @@ def build_email_html(day) -> tuple:
               "horodater avant tout pari ; le modèle structurel ne bat pas le marché.</div>"]
     else:
         H += ["<h2>Décisions du jour</h2><div class='muted'>Aucune décision JOUER/JOUER_PETIT ce passage.</div>"]
+
+    # Recoupement avec APEX-PROTOCOL (ledger apex_bsm)
+    lidx = ledger_index()
+    cross = []
+    for r in deci:
+        fc = lidx.get((norm_name(r["home"]), norm_name(r["away"])))
+        if not fc:
+            continue
+        aligned, resume = apex_align((r.get("reco", {}).get("decision", {}) or {}).get("marche", ""), fc)
+        cross.append((r, aligned, resume))
+    H += ["<h2>Recoupement APEX-PROTOCOL (football)</h2>"]
+    if cross:
+        H += ["<table><tr><th>Match</th><th>Marché WORM</th><th>Alignement</th><th>Prévision APEX-PROTOCOL</th></tr>"]
+        for r, aligned, resume in cross:
+            flag = "✅ aligné" if aligned else ("❌ divergent" if aligned is False else "— n/c")
+            H.append(f"<tr><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
+                     f"<td>{esc((r.get('reco',{}).get('decision',{}) or {}).get('marche','?')[:30])}</td>"
+                     f"<td>{flag}</td><td class='muted'>{esc(resume)}</td></tr>")
+        H += ["</table>",
+              "<div class='muted'>« Aligné » = le marché recommandé par WORM va dans le même sens que la "
+              "prévision APEX-PROTOCOL enregistrée au journal. Les deux protocoles restent indépendants.</div>"]
+    else:
+        H += ["<div class='muted'>Aucune décision du jour n'a de prévision APEX-PROTOCOL correspondante "
+              "au journal (ledger/forecasts.jsonl). Lance le protocole APEX sur ces matchs pour recouper.</div>"]
 
     if live:
         H += ["<h2>En direct</h2><table><tr><th>Match</th><th>Score</th><th>Statut</th></tr>"]
