@@ -962,10 +962,10 @@ def build_email_html(day) -> tuple:
         imminent.sort(key=lambda x: (0 if (x[1].get("reco", {}).get("decision", {}) or {}).get("tier")
                                      in ("JOUER", "JOUER_PETIT") else 1, x[0]))
         total_imm = len(imminent)
-        H += [f"<div class='muted'>{total_imm} matchs débutent dans l'heure — {min(total_imm,40)} affichés (décisions en tête).</div>",
+        H += [f"<div class='muted'>{total_imm} matchs débutent dans l'heure (liste complète, décisions en tête).</div>",
               "<table><tr><th>Dans</th><th>Match</th><th>Compét.</th><th>KO</th><th>Décision</th>"
               "<th>Marché</th><th class='r'>Conf</th></tr>"]
-        for mk, r in imminent[:40]:
+        for mk, r in imminent:
             d = (r.get("reco", {}).get("decision", {}) or {})
             tier = d.get("tier", "—")
             cls = "jouer" if tier == "JOUER" else ("petit" if tier == "JOUER_PETIT" else "")
