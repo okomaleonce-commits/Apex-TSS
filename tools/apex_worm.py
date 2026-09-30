@@ -916,7 +916,9 @@ def build_email_html(day) -> tuple:
     rows = latest_by_fixture(day)
     rows.sort(key=relevance, reverse=True)
     tz_name = os.environ.get("APEX_TIMEZONE", "UTC")
-    deci = [r for r in rows if (r.get("reco", {}).get("decision", {}) or {}).get("tier") in ("JOUER", "JOUER_PETIT")]
+    # Email : on écarte les matchs déjà terminés (ou annulés) — seuls pré-match et live sont utiles à parier.
+    active = [r for r in rows if r.get("phase") not in ("DONE", "DEAD")]
+    deci = [r for r in active if (r.get("reco", {}).get("decision", {}) or {}).get("tier") in ("JOUER", "JOUER_PETIT")]
     deci.sort(key=lambda r: (r["reco"]["decision"]["tier"] != "JOUER", -relevance(r)))
     n_jouer = sum(1 for r in deci if r["reco"]["decision"]["tier"] == "JOUER")
     live = [r for r in rows if r.get("phase") == "LIVE"]
@@ -1028,7 +1030,7 @@ def build_email_html(day) -> tuple:
 
     H += ["<h2>Meilleures anomalies</h2><table><tr><th>Match</th><th>Sharp</th><th>Blow</th><th>Upset</th>"
           "<th>Conv</th><th>Marché</th><th>Value</th></tr>"]
-    for r in rows[:15]:
+    for r in active[:15]:
         reco = r.get("reco", {})
         vd = reco.get("value_1x2_directe")
         val = f"1X2 {vd['issue'][0]} EV{vd['ev']:+.2f}" if vd else reco.get("value", "")
