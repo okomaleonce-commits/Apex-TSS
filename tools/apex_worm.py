@@ -1242,6 +1242,43 @@ def build_email_html(day) -> tuple:
           "<div class='muted'>Volume d'argent : réel via excapper (Betfair MoneyWay, données publiques) quand "
           "--money est actif, sinon UNAVAILABLE (jamais estimé). Détail complet dans reports/worm/.</div>"]
 
+    # ─── APEX-SYNC — file PROTOCOL (candidats priorisés par l'orchestrateur apex_sync) ───
+    sync_rows, sync_overflow, sync_err = [], 0, None
+    try:
+        import apex_sync as _S
+        _cfg = dict(_S.DEFAULT_CONFIG)
+        _sel = _S.select_candidates(rows, _cfg, now)
+        sync_rows = _sel.get("queued", [])
+        sync_overflow = len(_sel.get("overflow", []))
+    except Exception as e:  # noqa: BLE001 — le digest ne doit jamais casser si apex_sync évolue
+        sync_err = str(e)[:120]
+    H += ["<h2>APEX-SYNC — file PROTOCOL (candidats priorisés)</h2>",
+          "<div class='muted'>Orchestrateur <code>tools/apex_sync.py</code> : les anomalies WORM filtrées "
+          "(prématch, DQ ≥ 45, signal ≥ 45, cote 1X2 présente) et triées par priorité "
+          "(0.4·WORM + 0.2·liquidité + 0.2·temps + 0.2·tags). Candidats à transmettre au PROTOCOL (BSM) "
+          "pour validation — ce passage ne lance pas la simulation (file seule).</div>"]
+    if sync_err:
+        H += [f"<div class='muted warn'>APEX-SYNC indisponible ce passage : {esc(sync_err)}</div>"]
+    elif sync_rows:
+        H += ["<table><tr><th>#</th><th class='r'>Prio</th><th>Match</th><th>Compét.</th>"
+              "<th class='r'>KO (h)</th><th>Signal WORM</th><th>Marché WORM</th><th class='r'>DQ</th></tr>"]
+        for i, c in enumerate(sync_rows, 1):
+            h2k = c.get("hours_to_kickoff")
+            H.append(f"<tr><td>{i}</td><td class='r'>{c.get('priority','?')}</td>"
+                     f"<td><b>{esc(c.get('home',''))}–{esc(c.get('away',''))}</b></td>"
+                     f"<td>{esc((c.get('country') or '')[:3])} {esc((c.get('league') or '')[:16])}</td>"
+                     f"<td class='r'>{h2k if h2k is not None else '—'}</td>"
+                     f"<td class='tag'>{esc(c.get('worm_signal') or '—')}</td>"
+                     f"<td>{esc((c.get('worm_market') or '—')[:34])}</td>"
+                     f"<td class='r'>{c.get('data_quality','?')}</td></tr>")
+        H += ["</table>"]
+        if sync_overflow:
+            H += [f"<div class='muted'>+ {sync_overflow} candidats au-delà de la capacité de file "
+                  f"({_cfg['queue_capacity']}).</div>"]
+    else:
+        H += ["<div class='muted'>Aucun candidat éligible ce passage (anomalies trop faibles, "
+              "hors fenêtre de lead, ou cote 1X2 absente).</div>"]
+
     # ─── APEX-SYNC — architecture & synchronisation (rapport technique du passage) ───
     def _prov_volume(r):
         v = (r.get("sharp_components") or {}).get("volume")
