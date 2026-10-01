@@ -1240,8 +1240,63 @@ def build_email_html(day) -> tuple:
                  f"<td>{esc(reco.get('primary_market','?')[:30])}</td><td>{esc(val)}</td></tr>")
     H += ["</table>",
           "<div class='muted'>Volume d'argent : réel via excapper (Betfair MoneyWay, données publiques) quand "
-          "--money est actif, sinon UNAVAILABLE (jamais estimé). Détail complet dans reports/worm/.</div>",
-          "</div></body></html>"]
+          "--money est actif, sinon UNAVAILABLE (jamais estimé). Détail complet dans reports/worm/.</div>"]
+
+    # ─── APEX-SYNC — architecture & synchronisation (rapport technique du passage) ───
+    def _prov_volume(r):
+        v = (r.get("sharp_components") or {}).get("volume")
+        return isinstance(v, dict) and v.get("provenance") == "OBSERVED"
+    n_vol = sum(1 for r in rows if _prov_volume(r))
+    tot_vol = sum((r["sharp_components"]["volume"].get("total_matched") or 0)
+                  for r in rows if _prov_volume(r))
+    n_prematch = sum(1 for r in rows if r.get("phase") == "PREMATCH")
+    n_done = sum(1 for r in rows if r.get("phase") in ("DONE", "DEAD"))
+    money_on = n_vol > 0
+    arbworld_ok = bool(os.environ.get("ARBWORLD_API_URL") and os.environ.get("ARBWORLD_KEY"))
+    footystats_ok = bool(os.environ.get("FOOTYSTATS_KEY"))
+    gmail_mode = not bool(os.environ.get("WORM_SMTP_HOST"))
+
+    def _ok(label, state, detail=""):
+        color = {"OK": "#137333", "UNAVAILABLE": "#8a6d00", "OFF": "#b3261e"}.get(state, "#6b7280")
+        dash = f" — {esc(detail)}" if detail else ""
+        return (f"<tr><td>{esc(label)}</td><td style='color:{color};font-weight:700'>{state}</td>"
+                f"<td class='muted'>{dash}</td></tr>")
+
+    H += ["<h2>APEX-SYNC — architecture &amp; synchronisation</h2>",
+          "<div class='muted'>Boucle WORM : DISCOVER → COLLECT → NORMALIZE → STORE → COMPARE → ANALYZE → RANK → REPORT "
+          "(spec §28). État du pipeline à ce passage.</div>",
+          "<table><tr><th>Connecteur / source</th><th>État</th><th>Détail</th></tr>",
+          _ok("API-Football (fixtures, cotes, live)", "OK" if rows else "OFF",
+              f"{len(rows)} matchs dans la fenêtre"),
+          _ok("excapper (volume Betfair MoneyWay, public)", "OK" if money_on else "UNAVAILABLE",
+              f"{n_vol} matchs appariés · {tot_vol:,.0f} € matchés".replace(",", " ") if money_on
+              else "--money inactif ou aucun appariement"),
+          _ok("arbworld (arbitrage)", "OK" if arbworld_ok else "UNAVAILABLE",
+              "API autorisée configurée" if arbworld_ok else "pas d'API autorisée → aucun scraping (robots.txt)"),
+          _ok("FootyStats (xG historique)", "OK" if footystats_ok else "UNAVAILABLE",
+              "clé présente" if footystats_ok else "FOOTYSTATS_KEY absente"),
+          _ok("Notification e-mail", "OK",
+              "connecteur Gmail (session)" if gmail_mode else "SMTP (secrets CI)"),
+          "</table>",
+          "<table><tr><th>Moteur</th><th>Rôle</th></tr>"
+          "<tr><td>Sharp</td><td class='muted'>trajectoire de ligne + dispersion + Pinnacle↔médiane + volume réel</td></tr>"
+          "<tr><td>Blowout</td><td class='muted'>supériorité multidimensionnelle du favori</td></tr>"
+          "<tr><td>Upset</td><td class='muted'>outsider sous-évalué</td></tr>"
+          "<tr><td>StatsConvergence</td><td class='muted'>familles indépendantes Over/Under 2.5</td></tr>"
+          "<tr><td>Divergence</td><td class='muted'>contradiction stats ↔ marché</td></tr>"
+          "</table>",
+          "<div class='muted'>"
+          f"<b>Flux du passage :</b> {len(rows)} matchs ({n_prematch} pré-match · {len(live)} live · {n_done} terminés) · "
+          f"{len(deci)} décisions ({n_jouer} JOUER) · {len(imminent)} imminents · "
+          f"3 probabilités par match (MODEL / MARKET / ADJUSTED).<br>"
+          f"<b>Provenance :</b> chaque valeur porte OBSERVED / CALCULATED / INFERRED / UNCONFIRMED / UNAVAILABLE — "
+          f"aucune donnée inventée (spec §34).<br>"
+          f"<b>Persistance :</b> snapshots append-only data/worm/snapshots/{day}.jsonl · "
+          f"rapport reports/worm/{day}.md · ce digest reports/worm/{day}.email.html · "
+          f"fuseau {tz_name} · orchestré par trigger horaire (jour 07h–23h GMT)."
+          "</div>"]
+
+    H += ["</div></body></html>"]
     return subject, "\n".join(H)
 
 
