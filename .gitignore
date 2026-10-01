@@ -20,3 +20,7 @@ data/tsbase/
 data/worm/
 reports/worm/
 data/sync/
+
+# APEX-CHARACTER (sorties générées)
+data/character/
+backtests/character-*/

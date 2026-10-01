@@ -1181,21 +1181,35 @@ def build_email_html(day) -> tuple:
     else:
         H += ["<div class='muted'>Aucun match ne débute dans les 60 prochaines minutes.</div>"]
 
+    # Caractère attendu (APEX-CHARACTER) depuis les λ structurels — odds-free, jamais inventé
+    def _carac(r):
+        lam = r.get("lambdas")
+        if not lam or len(lam) != 2:
+            return "—"
+        try:
+            import apex_character as _CH
+            ep = _CH.expected_profile(lam[0], lam[1])
+            return f"{_CH.PROFIL_LABEL[ep['profil_attendu']].split(' ', 1)[0]} {ep['profil_attendu']} {int(ep['p_top']*100)}%"
+        except Exception:  # noqa: BLE001
+            return "—"
+
     if deci:
         H += ["<h2>Décisions du jour</h2>",
               "<table><tr><th>Palier</th><th>Match</th><th>Compét.</th><th>KO</th><th>Marché retenu</th>"
-              "<th>Signal</th><th>Éch.</th><th class='r'>Unités</th><th class='r'>Conf</th></tr>"]
+              "<th>Signal</th><th>Caractère attendu</th><th>Éch.</th><th class='r'>Unités</th><th class='r'>Conf</th></tr>"]
         for r in deci:
             d = r["reco"]["decision"]
             cls = "jouer" if d["tier"] == "JOUER" else "petit"
             H.append(f"<tr><td><span class='{cls}'>{d['tier']}</span></td><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
                      f"<td>{esc((r.get('country') or '')[:3])} {esc(r['league'][:16])}</td><td>{r['kickoff'][11:16]}</td>"
                      f"<td>{esc(d['marche'][:34])}</td><td class='tag'>{esc(d['signal'])}</td>"
+                     f"<td class='muted'>{esc(_carac(r))}</td>"
                      f"<td>{'✓' if d.get('confirmation_echange') else '—'}</td>"
                      f"<td class='r'>{d['unites_indicatives']}</td><td class='r'>{r.get('confidence','?')}</td></tr>")
         H += ["</table>",
               "<div class='muted warn'>Unités indicatives de suivi, pas un conseil de mise : cote à vérifier et "
-              "horodater avant tout pari ; le modèle structurel ne bat pas le marché.</div>"]
+              "horodater avant tout pari ; le modèle structurel ne bat pas le marché. « Caractère attendu » = "
+              "schéma de match prédit par les λ structurels (APEX-CHARACTER, sans cote).</div>"]
     else:
         H += ["<h2>Décisions du jour</h2><div class='muted'>Aucune décision JOUER/JOUER_PETIT ce passage.</div>"]
 

@@ -211,9 +211,24 @@ def candidate_of(rec: dict, cfg: dict, now: dt.datetime | None = None) -> dict:
         "data_quality": rec.get("data_quality"), "confidence": rec.get("confidence"),
         "worm_market": reco.get("primary_market"), "worm_tier": dec.get("tier"),
         "worm_signal": reco.get("signal_dominant"),
+        "caractere_attendu": _caractere(rec),
         "eligible": ok, "filter_reasons": reasons,
         **pr,
     }
+
+
+def _caractere(rec: dict):
+    """Schéma AVANT match (APEX-CHARACTER) depuis les λ structurels du snapshot — odds-free.
+    Renvoie {profil, p_top} ou None si les λ manquent (jamais inventé)."""
+    lam = rec.get("lambdas")
+    if not lam or len(lam) != 2:
+        return None
+    try:
+        import apex_character as CH
+        ep = CH.expected_profile(lam[0], lam[1])
+        return {"profil": ep["profil_attendu"], "p_top": ep["p_top"], "buts_attendus": ep["buts_attendus"]}
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def select_candidates(records: list[dict], cfg: dict, now: dt.datetime | None = None) -> dict:
