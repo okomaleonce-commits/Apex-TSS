@@ -450,7 +450,7 @@ def cmd_behavioral(a):
         print("ERREUR anti-hallucination : un fait/observation exige --url. Sans source -> --kind interpretation.")
         return 2
     val = clamp(float(a.value))
-    rec = {"id": f"{a.agent}:{a.index}:{now_utc()}", "match_id": meta.get("match_id"),
+    rec = {"id": f"{a.agent}:{a.index}:{now_utc()}:{uuid.uuid4().hex[:8]}", "match_id": meta.get("match_id"),
            "agent": a.agent, "level": a.level, "index": a.index, "value": round(val),
            "kind": kind, "weight": CONFIDENCE_W.get(a.confidence or "medium", 0.75) * (KIND_CAP.get(kind, 90) / 100.0),
            "confidence": a.confidence or "medium", "note": a.note, "team": a.team,
