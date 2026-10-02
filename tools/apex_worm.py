@@ -960,8 +960,16 @@ def compute_bilan(day):
             continue
         sc = r.get("score") or {}
         hg, ag = (sc.get("home"), sc.get("away")) if isinstance(sc, dict) else (None, None)
-        done = r.get("phase") == "DONE" and hg is not None and ag is not None
-        res = grade_market(d.get("marche"), hg, ag) if done else "non-terminé"
+        phase = r.get("phase")
+        done = phase == "DONE" and hg is not None and ag is not None
+        if done:
+            res = grade_market(d.get("marche"), hg, ag)
+        elif phase == "DEAD":
+            # match reporté/annulé/abandonné (PST/CANC/ABD/AWD/WO/SUSP) : terminé mais NON GRADABLE.
+            # Ne bloque pas la complétude de la journée (n_non_terminees), comme la gate CLI --only-if-complete.
+            res = "non-gradé"
+        else:
+            res = "non-terminé"
         graded.append({"match": f"{r['home']} – {r['away']}", "league": r.get("league"),
                        "tier": d["tier"], "signal": d.get("signal", ""),
                        "marche": d.get("marche"), "confidence": r.get("confidence"),
