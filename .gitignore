@@ -10,6 +10,7 @@ reports/*.md
 runs/.cache/
 runs_hockey/.cache/
 runs_turf/.cache/
+runs_mi/.cache/
 
 # cache historique football-data (retéléchargeable)
 data/history/*

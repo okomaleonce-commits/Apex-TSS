@@ -13,6 +13,14 @@ Toute analyse football, sans exception, applique le skill `apex-backtest-simulat
 
 Le hockey (`apex-hockey-team`) et le turf (`apex-turf-team`) ont leurs propres protocoles.
 
+## Cellule de bruit marché & comportement : APEX-MI
+
+La captation du **bruit informationnel et comportemental** du marché avant le coup d'envoi est une cellule **séparée** de la cellule statistique : le skill `apex-market-intel-team` (essaim `apex-mi-*` pour le marché, `apex-bi-*` pour le comportemental), outillé par `tools/apex_mi.py`.
+
+- Elle **ne price pas** et **n'émet jamais un pari seule** : `bet_authority=false`. Ses sorties alimentent le moteur statistique APEX (brique DATA) pour la convergence finale. Règle d'intégration : `BEHAVIORAL seul → WATCH` ; `BEHAVIORAL + MARKET → CANDIDATE` ; `+ DATA → CONFIRMED`.
+- Elle ne remplace **pas** le module BSM obligatoire ci-dessus : une décision de pari football passe toujours par le backtest + la simulation. APEX-MI est un apport de contexte marché, pas un raccourci.
+- Mêmes règles anti-invention : hiérarchie des sources honnête (un déplacement Pinnacle ≠ un post Telegram), RLM non calculable sans % public, donnée absente écrite comme absente. Le moteur score, les agents observent.
+
 ## Environnement
 
 - Dépendances Python du module : `pip install numpy scipy`.
