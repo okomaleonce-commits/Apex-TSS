@@ -985,6 +985,42 @@ def _mi_from_worm(fid, recs, cur, mk):
     else:
         status = "WATCH"
 
+    # ---- BLOWOUT (miroir de l'upset) : favori structurellement dominant (WORM) croisé
+    #      avec le MOUVEMENT du marché VERS le favori (argent qui le raccourcit en H-60). ----
+    blow = cur.get("blowout")
+    blc = cur.get("blowout_components") or {}
+    fav_idx, fav_side = None, None
+    if blc.get("home_edge") is True:
+        fav_idx, fav_side = 0, "home"
+    elif blc.get("fav") in ("extérieur", "exterieur"):
+        fav_idx, fav_side = 2, "away"
+    elif fair_now:
+        fav_idx = 0 if fair_now[0] >= fair_now[2] else 2
+        fav_side = "home" if fav_idx == 0 else "away"
+    fav_open = first_fair[fav_idx] if (first_fair and fav_idx is not None) else None
+    fav_now = fair_now[fav_idx] if (fair_now and fav_idx is not None) else None
+    fav_delta = round(fav_now - fav_open, 4) if (fav_open is not None and fav_now is not None) else None
+
+    blow_signal = None
+    if fav_delta is not None:
+        fam_b = "PRICE_COMPRESSION" if fav_delta > 0 else "PRICE_DRIFT"
+        mag_b = min(abs(fav_delta) / 0.05, 1.0)
+        tier_b = "sharp" if "Pinnacle" in (cur.get("odds") or {}) else "aggregator"
+        blow_signal = _score_signal(fam_b, tier_b, "LATE", mag_b, 0, "observation")
+    confirm_b = blow_signal["MARKET_SIGNAL_SCORE"] if (blow_signal and fav_delta and fav_delta > 0) else 0
+    if blow is not None:
+        blow_watch = round(0.55 * blow + 0.45 * confirm_b)
+    elif fav_delta is not None:
+        blow_watch = round(confirm_b)
+    else:
+        blow_watch = None
+    if blow is not None and fav_delta is not None and fav_delta > 0 and blow >= 50:
+        blow_status = "LIVE_BLOWOUT_WATCH"   # favori dominant + argent qui va vers lui
+    elif fav_delta is not None and fav_delta < 0:
+        blow_status = "BLOWOUT_FADING"       # le marché s'éloigne du favori
+    else:
+        blow_status = "WATCH"
+
     exch = cur.get("exchange")
     volume = exch.get("total_matched") if isinstance(exch, dict) else None
     if volume is None:
@@ -1000,11 +1036,17 @@ def _mi_from_worm(fid, recs, cur, mk):
         "dog_prob_open": dog_open, "dog_prob_now": dog_now, "dog_delta": dog_delta,
         "mi_move_family": mi_signal.get("family") if mi_signal else None,
         "mi_move_signal_score": mi_signal["MARKET_SIGNAL_SCORE"] if mi_signal else None,
-        "dispersion_max": cur.get("market_dispersion"),
-        "exchange_volume": volume,
         "upset_watch_score": watch,
         "upset_watch_band": band(watch),
         "status": status,
+        "fav_side": fav_side,
+        "worm_blowout": blow,
+        "fav_prob_open": fav_open, "fav_prob_now": fav_now, "fav_delta": fav_delta,
+        "blowout_watch_score": blow_watch,
+        "blowout_watch_band": band(blow_watch),
+        "blowout_status": blow_status,
+        "dispersion_max": cur.get("market_dispersion"),
+        "exchange_volume": volume,
         "rlm": "UNAVAILABLE (pas de % public)",
         "bet_authority": False,
         "missing": missing,
@@ -1012,25 +1054,30 @@ def _mi_from_worm(fid, recs, cur, mk):
 
 
 def _write_mi_md(day, artifact):
-    L = [f"## APEX-MI — bruit de marché H-60 (focus UPSET) · {day}", "",
+    L = [f"## APEX-MI — bruit de marché H-60 (focus UPSET + BLOWOUT) · {day}", "",
          f"_{artifact['n_selected']} match(s) imminent(s) · généré {artifact['generated_at_utc']} · "
          "cette cellule n'émet aucun pari, elle alimente le moteur statistique._", ""]
     items = artifact["items"]
     if not items:
         L.append("Aucun match dans la fenêtre H-60 à ce passage.")
     else:
-        L.append("| Dans | Match | Compét. | Outsider | ΔProb dog | Mouvement | UPSET WORM | UPSET WATCH | Statut |")
-        L.append("|---|---|---|---|---|---|---|---|---|")
+        L.append("| Dans | Match | Compét. | UPSET (dog, Δ) | UPSET WATCH | BLOWOUT (favori, Δ) | BLOWOUT WATCH | Statut |")
+        L.append("|---|---|---|---|---|---|---|---|")
         for it in items:
-            dd = it["dog_delta"]
-            dd_s = f"{dd:+.3f}" if dd is not None else "—"
+            dd = it.get("dog_delta"); dd_s = f"{dd:+.3f}" if dd is not None else "—"
+            fd = it.get("fav_delta"); fd_s = f"{fd:+.3f}" if fd is not None else "—"
+            uw = it.get("upset_watch_score"); bw = it.get("blowout_watch_score")
+            st = "LIVE_UPSET_WATCH" if it.get("status") == "LIVE_UPSET_WATCH" else (
+                 "LIVE_BLOWOUT_WATCH" if it.get("blowout_status") == "LIVE_BLOWOUT_WATCH" else it.get("status"))
             L.append(f"| {it['minutes_to_ko']}′ | {it['match']} | {(it.get('country') or '')[:3]} "
-                     f"{(it.get('league') or '')[:16]} | {it['dog_side'] or '—'} | {dd_s} | "
-                     f"{it['mi_move_family'] or '—'} | {it['worm_upset'] if it['worm_upset'] is not None else '—'} | "
-                     f"**{it['upset_watch_score'] if it['upset_watch_score'] is not None else '—'}** "
-                     f"({it['upset_watch_band']}) | {it['status']} |")
-        L += ["", "> UPSET WATCH = 0.55·UPSET structurel (WORM) + 0.45·confirmation de mouvement vers "
-              "l'outsider (APEX-MI). `LIVE_UPSET_WATCH` = outsider sous-évalué ET argent qui va vers lui. "
+                     f"{(it.get('league') or '')[:14]} | {it.get('dog_side') or '—'} {dd_s} "
+                     f"(WORM {it.get('worm_upset') if it.get('worm_upset') is not None else '—'}) | "
+                     f"**{uw if uw is not None else '—'}** | "
+                     f"{it.get('fav_side') or '—'} {fd_s} (WORM {it.get('worm_blowout') if it.get('worm_blowout') is not None else '—'}) | "
+                     f"**{bw if bw is not None else '—'}** | {st} |")
+        L += ["", "> UPSET WATCH = 0.55·UPSET structurel (WORM) + 0.45·confirmation de mouvement vers l'outsider. "
+              "BLOWOUT WATCH = 0.55·BLOWOUT structurel (WORM) + 0.45·confirmation de mouvement vers le favori. "
+              "`LIVE_UPSET_WATCH` / `LIVE_BLOWOUT_WATCH` = anomalie structurelle ET argent qui va dans le même sens. "
               "RLM non calculable sans % public ; volume réel seulement si excapper actif."]
     os.makedirs(WORM_REP, exist_ok=True)
     with open(os.path.join(WORM_REP, f"{day}.mi.md"), "w", encoding="utf-8") as fh:
@@ -1054,10 +1101,10 @@ def run_worm_hook(day, within=60.0, write=True):
         selected.append((mk, fid, recs, cur))
     selected.sort(key=lambda x: x[0])
     items = [_mi_from_worm(fid, recs, cur, mk) for mk, fid, recs, cur in selected]
-    items.sort(key=lambda it: (it.get("upset_watch_score") if it.get("upset_watch_score") is not None else -1),
+    items.sort(key=lambda it: max(it.get("upset_watch_score") or -1, it.get("blowout_watch_score") or -1),
                reverse=True)
     artifact = {"day": day, "generated_at_utc": now_utc(), "within_min": within,
-                "focus": "UPSET", "snapshot": os.path.relpath(path, ROOT),
+                "focus": "UPSET+BLOWOUT", "snapshot": os.path.relpath(path, ROOT),
                 "n_selected": len(items), "items": items,
                 "note": "APEX-MI ne price pas et n'émet aucun pari (bet_authority=false) ; "
                         "ses signaux alimentent le moteur statistique APEX."}
@@ -1070,11 +1117,11 @@ def run_worm_hook(day, within=60.0, write=True):
 def cmd_worm_hook(a):
     day = a.day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     art = run_worm_hook(day, float(a.within), write=not a.dry_run)
-    print(f"APEX-MI worm-hook {day} : {art['n_selected']} match(s) H-{int(a.within)} (focus UPSET)")
+    print(f"APEX-MI worm-hook {day} : {art['n_selected']} match(s) H-{int(a.within)} (focus UPSET + BLOWOUT)")
     for it in art["items"][:15]:
-        print(f"  {it['minutes_to_ko']:>3}′ {it['match'][:42]:42s} UPSET WATCH "
-              f"{it['upset_watch_score'] if it['upset_watch_score'] is not None else '—'} "
-              f"[{it['status']}] dogΔ {it['dog_delta'] if it['dog_delta'] is not None else '—'}")
+        uw = it.get("upset_watch_score"); bw = it.get("blowout_watch_score")
+        print(f"  {it['minutes_to_ko']:>3}′ {it['match'][:40]:40s} UPSET {uw if uw is not None else '—'} "
+              f"[{it['status']}] · BLOWOUT {bw if bw is not None else '—'} [{it.get('blowout_status')}]")
     if not a.dry_run:
         print(f"Artefact : data/worm/mi/{day}.json · reports/worm/{day}.mi.md")
     return 0

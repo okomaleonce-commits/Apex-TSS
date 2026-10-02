@@ -1327,11 +1327,12 @@ def build_email_html(day) -> tuple:
           "<div class='muted'>Volume d'argent : réel via excapper (Betfair MoneyWay, données publiques) quand "
           "--money est actif, sinon UNAVAILABLE (jamais estimé). Détail complet dans reports/worm/.</div>"]
 
-    # ─── APEX-MI — bruit de marché H-60 (focus UPSET) ───
-    H += ["<h2>APEX-MI — bruit de marché H-60 (focus UPSET)</h2>",
+    # ─── APEX-MI — bruit de marché H-60 (focus UPSET + BLOWOUT) ───
+    H += ["<h2>APEX-MI — bruit de marché H-60 (focus UPSET + BLOWOUT)</h2>",
           "<div class='muted'>Cellule <code>tools/apex_mi.py</code> activée sur les matchs dont le coup "
-          "d'envoi est dans l'heure. Elle croise l'UPSET structurel (WORM) avec le MOUVEMENT du marché "
-          "vers l'outsider. Elle ne price pas et n'émet aucun pari — à transmettre au moteur statistique.</div>"]
+          "d'envoi est dans l'heure. Elle croise l'UPSET (outsider sous-évalué) ET le BLOWOUT (favori dominant) "
+          "structurels de WORM avec le MOUVEMENT du marché. Elle ne price pas et n'émet aucun pari — à transmettre "
+          "au moteur statistique.</div>"]
     mi_art, mi_err = None, None
     try:
         import json as _json
@@ -1343,24 +1344,29 @@ def build_email_html(day) -> tuple:
     if mi_err:
         H += [f"<div class='muted warn'>APEX-MI indisponible ce passage : {esc(mi_err)}</div>"]
     elif mi_art and mi_art.get("items"):
-        H += ["<table><tr><th>Dans</th><th>Match</th><th>Compét.</th><th>Outsider</th><th class='r'>ΔProb dog</th>"
-              "<th>Mouvement</th><th class='r'>Upset WORM</th><th class='r'>Upset Watch</th><th>Statut</th></tr>"]
+        H += ["<table><tr><th>Dans</th><th>Match</th><th>Compét.</th><th>Outsider (Δ)</th><th class='r'>Upset Watch</th>"
+              "<th>Favori (Δ)</th><th class='r'>Blowout Watch</th><th>Statut</th></tr>"]
         for it in mi_art["items"][:15]:
-            dd = it.get("dog_delta")
-            dd_s = f"{dd:+.3f}" if dd is not None else "—"
-            uw = it.get("upset_watch_score")
-            is_live = it.get("status") == "LIVE_UPSET_WATCH"
-            badge = f"<span class='jouer'>{esc(it.get('status'))}</span>" if is_live else esc(it.get("status"))
+            dd = it.get("dog_delta"); dd_s = f"{dd:+.3f}" if dd is not None else "—"
+            fd = it.get("fav_delta"); fd_s = f"{fd:+.3f}" if fd is not None else "—"
+            uw = it.get("upset_watch_score"); bw = it.get("blowout_watch_score")
+            live_u = it.get("status") == "LIVE_UPSET_WATCH"
+            live_b = it.get("blowout_status") == "LIVE_BLOWOUT_WATCH"
+            st = it.get("status")
+            badge = (f"<span class='jouer'>{esc('LIVE_UPSET_WATCH')}</span>" if live_u
+                     else f"<span class='jouer'>{esc('LIVE_BLOWOUT_WATCH')}</span>" if live_b
+                     else esc(st))
             H.append(f"<tr><td><b>{it.get('minutes_to_ko','?')} min</b></td><td><b>{esc(it.get('match',''))}</b></td>"
-                     f"<td>{esc((it.get('country') or '')[:3])} {esc((it.get('league') or '')[:16])}</td>"
-                     f"<td>{esc(it.get('dog_side') or '—')}</td><td class='r'>{dd_s}</td>"
-                     f"<td class='tag'>{esc(it.get('mi_move_family') or '—')}</td>"
-                     f"<td class='r'>{it.get('worm_upset') if it.get('worm_upset') is not None else '–'}</td>"
-                     f"<td class='r'><b>{uw if uw is not None else '–'}</b></td><td>{badge}</td></tr>")
+                     f"<td>{esc((it.get('country') or '')[:3])} {esc((it.get('league') or '')[:14])}</td>"
+                     f"<td>{esc(it.get('dog_side') or '—')} {dd_s} <span class='muted'>(W{it.get('worm_upset') if it.get('worm_upset') is not None else '–'})</span></td>"
+                     f"<td class='r'><b>{uw if uw is not None else '–'}</b></td>"
+                     f"<td>{esc(it.get('fav_side') or '—')} {fd_s} <span class='muted'>(W{it.get('worm_blowout') if it.get('worm_blowout') is not None else '–'})</span></td>"
+                     f"<td class='r'><b>{bw if bw is not None else '–'}</b></td><td>{badge}</td></tr>")
         H += ["</table>",
-              "<div class='muted'>Upset Watch = 0.55·UPSET structurel (WORM) + 0.45·confirmation de mouvement "
-              "vers l'outsider (APEX-MI). <b>LIVE_UPSET_WATCH</b> = outsider sous-évalué ET argent qui va vers "
-              "lui. RLM non calculable sans % public ; volume réel seulement si <code>--money</code> actif.</div>"]
+              "<div class='muted'>Upset Watch = 0.55·UPSET (WORM) + 0.45·mouvement vers l'outsider. "
+              "Blowout Watch = 0.55·BLOWOUT (WORM) + 0.45·mouvement vers le favori. "
+              "<b>LIVE_UPSET_WATCH</b> / <b>LIVE_BLOWOUT_WATCH</b> = anomalie structurelle ET argent qui va dans "
+              "le même sens. RLM non calculable sans % public ; volume réel seulement si <code>--money</code> actif.</div>"]
     else:
         H += ["<div class='muted'>Aucun match dans la fenêtre H-60 à ce passage (ou APEX-MI non exécuté).</div>"]
 

@@ -204,21 +204,24 @@ python3 tools/apex_mi.py worm-hook --day <jour> --within 60   # lancé par WORM 
 ```
 
 Elle sélectionne les matchs du snapshot WORM **en PREMATCH dont le coup d'envoi est dans
-les 60 minutes** (la vague LATE / compositions), et pour chacun **croise l'UPSET structurel
-de WORM avec le MOUVEMENT du marché** vers l'outsider :
+les 60 minutes** (la vague LATE / compositions), et pour chacun **croise les anomalies
+structurelles de WORM (UPSET et BLOWOUT) avec le MOUVEMENT du marché** :
 
 ```
-UPSET_WATCH = 0.55 · UPSET structurel (WORM)  +  0.45 · confirmation de mouvement vers l'outsider (APEX-MI)
+UPSET_WATCH   = 0.55 · UPSET structurel (WORM)    +  0.45 · confirmation de mouvement vers l'outsider
+BLOWOUT_WATCH = 0.55 · BLOWOUT structurel (WORM)  +  0.45 · confirmation de mouvement vers le favori
 ```
 
 - `LIVE_UPSET_WATCH` : outsider structurellement sous-évalué **ET** argent qui se dirige vers
   lui (cote de l'outsider qui se raccourcit en H-60) — l'upset le plus crédible.
-- `UPSET_FADING` : le marché s'éloigne de l'outsider (cote qui dérive).
+- `LIVE_BLOWOUT_WATCH` : favori structurellement dominant **ET** argent qui se dirige vers lui
+  (cote du favori qui se raccourcit) — blowout confirmé par le marché.
+- `UPSET_FADING` / `BLOWOUT_FADING` : le marché s'éloigne de l'outsider / du favori.
 - `WATCH` : pas de confirmation de mouvement.
 
 Sorties : `data/worm/mi/<jour>.json` et `reports/worm/<jour>.mi.md`. **L'email WORM joint
-automatiquement** une section « APEX-MI — bruit de marché H-60 (focus UPSET) » lue depuis cet
-artefact. Honnêteté conservée : RLM non calculable sans % public, volume réel seulement si
+automatiquement** une section « APEX-MI — bruit de marché H-60 (focus UPSET + BLOWOUT) » lue
+depuis cet artefact. Honnêteté conservée : RLM non calculable sans % public, volume réel seulement si
 `--money` est actif. Cette activation automatique est **mécanique** (le moteur score) ; pour
 une lecture approfondie, lancer l'essaim complet (`apex-mi-conductor`) sur les matchs flaggés.
 
