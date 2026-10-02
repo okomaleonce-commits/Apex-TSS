@@ -524,6 +524,17 @@ def cmd_scan(a):
     leagues = {int(x) for x in a.leagues.split(",")} if a.leagues else None
     print(f"Fenêtre APEX {day} · {start.strftime('%d/%m %H:%M')} → {end.strftime('%d/%m %H:%M')} ({tz_name})")
 
+    # Rafraîchissement de clôture de la veille : finalise a posteriori les matchs de bord de
+    # fenêtre encore figés PREMATCH/LIVE, pour débloquer leur bilan de fin de journée.
+    try:
+        veille = day - dt.timedelta(days=1)
+        u, c, _ = closeout_refresh(veille)
+        if c:
+            print(f"CLÔTURE VEILLE {veille} : {u}/{c} match(s) finalisé(s) a posteriori."
+                  + ("" if u == c else " (reste des matchs non terminés)"))
+    except Exception as e:  # noqa: BLE001
+        print(f"Clôture veille ignorée ({str(e)[:80]}).")
+
     fixtures, calls = discover(tz_name, day, start, end, leagues)
     print(f"DISCOVER : {len(fixtures)} matchs dans la fenêtre ({calls} appels)"
           + (f" · ligues {sorted(leagues)}" if leagues else " · toutes compétitions"))
@@ -761,6 +772,44 @@ def latest_by_fixture(day):
             continue
         latest[r["fixture_id"]] = r  # le dernier relevé écrase (on veut l'état courant)
     return list(latest.values())
+
+
+def closeout_refresh(day, max_fixtures=25):
+    """Rafraîchissement de clôture : récupère le statut/score FINAL des matchs de `day` encore
+    figés en PREMATCH/LIVE dans le snapshot (matchs de bord de fenêtre APEX dont le passage
+    horaire a basculé sur la journée suivante avant d'avoir capté leur fin). Réécrit une ligne
+    append-only à jour par fixture résolu, en conservant reco/signaux/équipes du dernier relevé.
+    N'invente rien : seuls les matchs réellement passés en DONE/DEAD côté API sont réécrits ;
+    ceux encore en cours sont laissés tels quels. Retourne (n_mis_a_jour, n_verifies, n_appels)."""
+    path = SNAP / f"{day.isoformat()}.jsonl"
+    if not path.exists():
+        return 0, 0, 0
+    stale = [r for r in latest_by_fixture(day)
+             if r.get("phase") in ("PREMATCH", "LIVE") and r.get("fixture_id")][:max_fixtures]
+    if not stale:
+        return 0, 0, 0
+    scan_time = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    updated = calls = 0
+    for r in stale:
+        try:
+            resp = AF.api("fixtures", id=r["fixture_id"]).get("response", []); calls += 1
+        except AF.ApiError:
+            continue
+        if not resp:
+            continue
+        fx = resp[0]
+        status = fx["fixture"]["status"]["short"]
+        phase = ("LIVE" if status in LIVE_STATUS else "DONE" if status in DONE_STATUS
+                 else "DEAD" if status in DEAD_STATUS else "PREMATCH")
+        if phase in ("PREMATCH", "LIVE"):
+            continue  # toujours pas terminé → ne rien réécrire
+        nr = dict(r)
+        nr.update({"status": status, "phase": phase, "score": fx.get("goals"),
+                   "scan_time_utc": scan_time, "closeout": True})
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(nr, ensure_ascii=False) + "\n")
+        updated += 1
+    return updated, len(stale), calls
 
 
 def relevance(r):
@@ -1404,6 +1453,14 @@ def cmd_report(a):
         send_email_smtp(subject, html)
 
 
+def cmd_closeout(a):
+    tz = apex_tz()
+    base = dt.datetime.combine(dt.date.fromisoformat(a.date), dt.time(12, 0), tzinfo=tz) if a.date else dt.datetime.now(tz)
+    day, _, _ = apex_window(base)
+    u, c, nc = closeout_refresh(day, max_fixtures=a.max_fixtures)
+    print(f"CLÔTURE {day} : {u}/{c} match(s) finalisé(s) a posteriori · {nc} appel(s) API.")
+
+
 def cmd_window(a):
     tz = apex_tz()
     day, start, end = apex_window(dt.datetime.now(tz))
@@ -1424,10 +1481,13 @@ def main():
     r = sp.add_parser("report"); r.add_argument("--date"); r.add_argument("--email", action="store_true")
     bi = sp.add_parser("bilan"); bi.add_argument("--date"); bi.add_argument("--email", action="store_true")
     bi.add_argument("--only-if-complete", action="store_true", help="ne produit le bilan que si tous les matchs du jour sont terminés (une seule fois)")
+    co = sp.add_parser("closeout", help="finalise a posteriori les matchs d'une journée encore figés PREMATCH/LIVE (bord de fenêtre)")
+    co.add_argument("--date"); co.add_argument("--max-fixtures", type=int, default=25)
     sp.add_parser("window")
     a = p.parse_args()
     try:
-        {"scan": cmd_scan, "report": cmd_report, "bilan": cmd_bilan, "window": cmd_window}[a.cmd](a)
+        {"scan": cmd_scan, "report": cmd_report, "bilan": cmd_bilan,
+         "closeout": cmd_closeout, "window": cmd_window}[a.cmd](a)
     except AF.ApiError as e:
         sys.exit(f"Erreur API-Football : {e}")
 
