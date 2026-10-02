@@ -29,3 +29,10 @@ data/sync/
 # APEX-CHARACTER (sorties générées)
 data/character/
 backtests/character-*/
+
+# APEX-TURF-WORM / APEX-TURF-MI (meme convention que le WORM football :
+# snapshots et rapports partent en artefacts CI, pas en commits)
+data/turf_worm/
+reports/turf_worm/
+runs_turf_mi/*
+!runs_turf_mi/.gitkeep

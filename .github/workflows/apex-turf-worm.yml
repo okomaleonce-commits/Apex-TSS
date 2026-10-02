@@ -1,0 +1,71 @@
+name: APEX-TURF-WORM
+
+# Un passage par heure. Les snapshots et rapports partent en ARTEFACTS, pas en
+# commits : 24 commits par jour rendraient l'historique illisible.
+on:
+  schedule:
+    - cron: '17 * * * *'      # minute 17 : evite la bousculade de la minute 0
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "DDMMYYYY (vide = aujourd'hui)"
+        required: false
+      max_courses:
+        description: "limite de courses"
+        required: false
+
+concurrency:
+  group: apex-turf-worm
+  cancel-in-progress: false   # ne jamais annuler un passage en cours : on perdrait un releve
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      APEX_TIMEZONE: ${{ vars.APEX_TIMEZONE || 'Europe/Paris' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Les snapshots du passage precedent sont necessaires : sans eux il n'y a
+      # pas de COMPARE, et chaque passage repartirait de zero.
+      - name: Recuperer les snapshots du passage precedent
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: turf-worm-snapshots
+          path: data/turf_worm/snapshots
+
+      - name: Fenetre APEX
+        run: python3 tools/apex_turf_worm.py window
+
+      - name: Scan
+        run: |
+          ARGS=""
+          [ -n "${{ inputs.date }}" ] && ARGS="$ARGS --date ${{ inputs.date }}"
+          [ -n "${{ inputs.max_courses }}" ] && ARGS="$ARGS --max-courses ${{ inputs.max_courses }}"
+          python3 tools/apex_turf_worm.py scan $ARGS
+
+      - name: Activation APEX-TURF-MI (H-30)
+        run: python3 tools/apex_turf_mi.py worm-hook --within 30
+        continue-on-error: true
+
+      - name: Publier les snapshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: turf-worm-snapshots
+          path: data/turf_worm/snapshots
+          retention-days: 7
+          overwrite: true
+
+      - name: Publier les rapports
+        uses: actions/upload-artifact@v4
+        with:
+          name: turf-worm-reports
+          path: reports/turf_worm
+          retention-days: 14
+          overwrite: true

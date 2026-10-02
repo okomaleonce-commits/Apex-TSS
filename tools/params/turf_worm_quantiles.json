@@ -1,0 +1,58 @@
+{
+ "_source": "14861 courses reelles de /tmp/turf/hist.jsonl (sept 2024 - sept 2026)",
+ "_methode": "deciles empiriques ; le score WORM est le percentile, pas une formule",
+ "_calcule_le": "2026-10-02",
+ "trot": {
+  "p1": {
+   "q10": 0.2046,
+   "q25": 0.2421,
+   "q50": 0.2975,
+   "q75": 0.3706,
+   "q90": 0.4579,
+   "q95": 0.4998,
+   "q99": 0.5894
+  },
+  "ecart": {
+   "q10": 0.0163,
+   "q25": 0.0437,
+   "q50": 0.1003,
+   "q75": 0.19,
+   "q90": 0.2953,
+   "q95": 0.3609,
+   "q99": 0.4724
+  },
+  "derive": {
+   "q10": 6.25,
+   "q25": 15.7895,
+   "q50": 34.7826,
+   "q75": 69.0476,
+   "q90": 132.2034,
+   "q95": 196.0,
+   "q99": 633.3333
+  },
+  "_source_p1_ecart": "14861 courses de hist.jsonl (trot uniquement)",
+  "_derive_avertissement": "Les quantiles de derive sont mesures de la cote de REFERENCE DU MATIN a la cote FINALE, soit l'amplitude d'une journee entiere. Le WORM compare deux passages HORAIRES : l'echelle est plus petite. Ces quantiles sont donc une borne SUPERIEURE conservatrice et le score de derive SOUS-ESTIME le signal horaire. A re-estimer sur les snapshots du WORM lui-meme des que 200 paires de passages consecutifs existent."
+ },
+ "obst": {
+  "p1": {
+   "q10": 0.194,
+   "q25": 0.2312,
+   "q50": 0.2854,
+   "q75": 0.3634,
+   "q90": 0.445,
+   "q95": 0.4975,
+   "q99": 0.5932
+  },
+  "ecart": {
+   "q10": 0.0134,
+   "q25": 0.035,
+   "q50": 0.0811,
+   "q75": 0.1612,
+   "q90": 0.2701,
+   "q95": 0.3372,
+   "q99": 0.4481
+  },
+  "_source_p1_ecart": "2952 courses de /tmp/bt/races_obst.pkl (mai 2024 - sept 2026)",
+  "_derive": "ABSENT : aucune cote de reference du matin collectee en obstacle"
+ }
+}

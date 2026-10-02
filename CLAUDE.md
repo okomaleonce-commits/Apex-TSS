@@ -22,6 +22,35 @@ La captation du **bruit informationnel et comportemental** du marché avant le c
 - Mêmes règles anti-invention : hiérarchie des sources honnête (un déplacement Pinnacle ≠ un post Telegram), RLM non calculable sans % public, donnée absente écrite comme absente. Le moteur score, les agents observent.
 - **Branchée sur APEX-WORM** : chaque passage `apex_worm.py scan` active automatiquement APEX-MI H-60 sur les matchs dont le coup d'envoi est dans l'heure (`worm-hook`, focus **UPSET + BLOWOUT**), croise les anomalies structurelles WORM avec le mouvement du marché — `UPSET_WATCH` (argent vers l'outsider) et `BLOWOUT_WATCH` (argent vers le favori dominant) — et l'email WORM joint la section « APEX-MI — bruit de marché H-60 (focus UPSET + BLOWOUT) ». Désactivable par `--no-mi`.
 
+## Courses hippiques : trois cellules séparées, dont deux nouvelles
+
+Une course est un **classement de N partants**, pas un score entre deux équipes : aucun skill `apex-engine-*` ni moteur football ne doit être chargé. Trois cellules, qui ne se mélangent pas.
+
+- `apex-turf-team` (agents `apex-turf-*`, outil `tools/apex_turf_lead.py`) — cellule **statistique**. La seule qui price.
+- `apex-turf-worm-scanner` (agents `apex-turf-worm-*`, outil `tools/apex_turf_worm.py`) — scanner **d'anomalies** horaire, miroir d'APEX-WORM. Fenêtre APEX 08:00→07:59, snapshots `data/turf_worm/snapshots/<jour>.jsonl` append-only, comparaison au passage précédent. Cron `.github/workflows/apex-turf-worm.yml`.
+- `apex-turf-market-intel-team` (agents `apex-tmi-*` marché, `apex-tbi-*` comportemental, outil `tools/apex_turf_mi.py`) — cellule de **bruit**, miroir d'APEX-MI. `bet_authority=false`, `requires_statistical_convergence=true` ; règle d'intégration identique (`BEHAVIORAL seul → WATCH` ; `+ MARKET → CANDIDATE` ; `+ DATA → CONFIRMED`), la brique DATA venant d'`apex-turf-team`. Le maximum atteignable sans elle est donc `CANDIDATE`.
+
+### Quatre écarts imposés par le pari mutuel, à ne pas « corriger »
+
+1. **Le PMU n'a qu'une cote.** `SHARP_MOVE`, `STEAM_MOVE`, `RLM`, `BOOKMAKER_DIVERGENCE` et `LIQUIDITY_SPIKE` sortent `UNAVAILABLE_STRUCTUREL` et le moteur **refuse** de les enregistrer. Ce qui les remplace est propre au turf et publié par la source officielle, donc `OBSERVED` : `NON_PARTANT`, `DRIVER_CHANGE`, `DEFERRE_CHANGE`. L'essaim turf compte 13 agents et non 22 : les agents des familles disparues n'auraient rien à observer.
+2. **Palier maximal `SURVEILLER`, jamais `JOUER`.** Les deux gates de pari turf sont fermées par le backtest : trot ROI −4,58 % sur 118 paris IC95 [−44,04 % ; +42,06 %], obstacle −89,05 % sur 21.
+3. **Le plat sort `HORS_PERIMETRE`.** Aucun moteur calibré, et les coefficients ne sont pas transposables : `cf` vaut 0,0 en trot contre 0,4 en obstacle, la règle du top 3 change de camp. Hors discipline le résultat n'est pas moins précis, il est de signe faux. Même interdiction pour les quantiles de `tools/params/turf_worm_quantiles.json`.
+4. **Les scores sont des percentiles empiriques**, pas des formules — mesurés sur 14 861 courses de trot et 2 952 d'obstacle. Une première version en formule linéaire notait 100/100 presque partout, ce qui ne porte aucune information. Et le contexte structurel (`non_terminaison`) ne classe **pas** la course : constant à discipline et champ donnés, il mettait tout l'attelé à 51/100.
+
+### Pont WORM → MI, trois axes
+
+```
+OUTSIDER_WATCH    = 0,55 · outsider structurel + 0,45 · confirmation (l'outsider se raccourcit)
+FAVORI_WATCH      = 0,55 · favori dominant     + 0,45 · confirmation (le favori se raccourcit)
+NON_PARTANT_WATCH = 0,60 · retraits tardifs    + 0,40 · recomposition du marché
+```
+
+Les deux premiers sont les miroirs exacts d'`UPSET_WATCH` et `BLOWOUT_WATCH`. Le troisième n'a aucun équivalent football : un retrait à H-30 redistribue *tout* l'argent de la course. Tri par le maximum des trois. Seul un **raccourcissement** compte comme confirmation — une dérive est une infirmation (`*_FADING`). Fenêtre H-30 et non H-60 : en pari mutuel l'argent décisif arrive dans le dernier quart d'heure.
+
+### Email
+
+La règle ci-dessous s'applique aussi au turf. `apex_turf_worm.py scan` construit le digest en fin de passage (`reports/turf_worm/<jour>.email.html`, + `build_email_html(day)` importable) ; `apex_turf_mi.py finalize` construit toujours `email.html` / `email.txt` / `email.subject.txt` dans le run. Aucun des deux n'envoie : enchaîner avec `mcp__Gmail__send_message`.
+
 ## Envoi des emails APEX (WORM et MI) : connecteur Gmail (MCP), pas SMTP — OBLIGATOIRE À CHAQUE PASSAGE
 
 **Règle absolue : TOUT passage APEX se termine par l'envoi du digest par email. Un passage sans email envoyé est INCOMPLET.** Cela vaut pour tous les passages (WORM et MI), interactifs comme déclenchés. Le SMTP n'étant pas configuré, le canal est le connecteur Gmail (`mcp__Gmail__send_message`), appelé depuis la session (OAuth du connecteur, aucun secret manipulé).
