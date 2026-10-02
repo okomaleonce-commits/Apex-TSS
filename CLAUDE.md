@@ -22,9 +22,13 @@ La captation du **bruit informationnel et comportemental** du marché avant le c
 - Mêmes règles anti-invention : hiérarchie des sources honnête (un déplacement Pinnacle ≠ un post Telegram), RLM non calculable sans % public, donnée absente écrite comme absente. Le moteur score, les agents observent.
 - **Branchée sur APEX-WORM** : chaque passage `apex_worm.py scan` active automatiquement APEX-MI H-60 sur les matchs dont le coup d'envoi est dans l'heure (`worm-hook`, focus UPSET), croise l'UPSET structurel WORM avec le mouvement du marché vers l'outsider (`UPSET_WATCH`), et l'email WORM joint la section « APEX-MI — bruit de marché H-60 ». Désactivable par `--no-mi`.
 
-## Envoi des emails APEX (WORM et MI) : connecteur Gmail (MCP), pas SMTP
+## Envoi des emails APEX (WORM et MI) : connecteur Gmail (MCP), pas SMTP — OBLIGATOIRE À CHAQUE PASSAGE
 
-**À chaque passage interactif d'APEX-MI**, après `finalize`, envoyer systématiquement le digest par email, par la même méthode qu'APEX-WORM : `python3 tools/apex_mi.py email --run runs_mi/<run>` (écrit `email.html`/`email.txt`/`email.subject.txt`), puis `mcp__Gmail__send_message` avec `to=["okoma.leonce@gmail.com"]`, `subject` (= `email.subject.txt`), `htmlBody` (= `email.html`), `body` (= `email.txt`). Recharger l'outil via `ToolSearch` si le connecteur Gmail s'est déconnecté ; preuve = `id`/`threadId` Gmail. Envoi 100 % autonome par le cron = renseigner `WORM_SMTP_*`.
+**Règle absolue : TOUT passage APEX se termine par l'envoi du digest par email. Un passage sans email envoyé est INCOMPLET.** Cela vaut pour tous les passages (WORM et MI), interactifs comme déclenchés. Le SMTP n'étant pas configuré, le canal est le connecteur Gmail (`mcp__Gmail__send_message`), appelé depuis la session (OAuth du connecteur, aucun secret manipulé).
+
+- **APEX-MI** : `python3 tools/apex_mi.py finalize --run runs_mi/<run>` construit désormais TOUJOURS le digest (`email.html`/`email.txt`/`email.subject.txt`) et affiche une bannière « ENVOI EMAIL OBLIGATOIRE ». Enchaîner immédiatement avec `mcp__Gmail__send_message` : `to=["okoma.leonce@gmail.com"]`, `subject` (= `email.subject.txt`), `htmlBody` (= `email.html`), `body` (= `email.txt`).
+- **APEX-WORM** : `scan --email` écrit `reports/worm/<jour>.email.html` ; envoyer ce HTML via `mcp__Gmail__send_message` (sujet produit par le scan). La Routine horaire `trig_01Kh82cbpvCSCtGFMB9WrQ3M` le fait déjà à chaque passage.
+- Recharger l'outil via `ToolSearch` si le connecteur Gmail s'est déconnecté ; preuve d'envoi = `id`/`threadId` Gmail. Envoi 100 % autonome par un cron à session fraîche (sans modèle) = renseigner les secrets `WORM_SMTP_*`.
 
 
 

@@ -789,6 +789,21 @@ def cmd_finalize(a):
     print(f"Synthèse : {os.path.relpath(synth_path, ROOT)}")
     print(f"Journal : +{len(journal_rows)} ligne(s) -> {os.path.relpath(JOURNAL, ROOT)}")
     print("\n".join(tg) if tg else "(aucun match scoré)")
+
+    # Email OBLIGATOIRE à chaque passage : finalize construit toujours l'artefact du digest.
+    # L'envoi se fait ensuite via le connecteur Gmail (mcp__Gmail__send_message), SMTP absent.
+    subject, html_body, text_body = build_email_html(run_dir)
+    for fn, body in (("email.html", html_body), ("email.txt", text_body), ("email.subject.txt", subject)):
+        with open(os.path.join(run_dir, fn), "w", encoding="utf-8") as fh:
+            fh.write(body)
+    print("\n" + "=" * 70)
+    print("⚠ ENVOI EMAIL OBLIGATOIRE (règle : tout passage se termine par l'email).")
+    print(f"  SUJET : {subject}")
+    print(f"  Envoyer via mcp__Gmail__send_message → to=okoma.leonce@gmail.com")
+    print(f"  htmlBody = {os.path.relpath(os.path.join(run_dir, 'email.html'), ROOT)} · "
+          f"body = {os.path.relpath(os.path.join(run_dir, 'email.txt'), ROOT)}")
+    print("  SMTP non configuré → canal Gmail MCP (recharger via ToolSearch si déconnecté). Preuve = threadId.")
+    print("=" * 70)
     return 0
 
 
