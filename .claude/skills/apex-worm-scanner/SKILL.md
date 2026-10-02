@@ -102,6 +102,22 @@ Avec `--email`, le scan écrit `reports/worm/<jour>.email.html` (digest mis en f
 matchs en direct, meilleures anomalies) et l'envoie par SMTP si `WORM_SMTP_HOST/USER/PASS` + `WORM_EMAIL_TO`
 sont configurés (secrets CI). En session interactive, le même HTML peut être envoyé via le connecteur Gmail.
 
+### Canal d'envoi réel dans cette installation : connecteur Gmail (MCP), pas SMTP
+
+Les secrets `WORM_SMTP_*` **ne sont pas configurés** dans cet environnement : `--email` écrit donc le HTML
+(`reports/worm/<jour>.email.html`) mais **n'envoie rien** par SMTP (il affiche « Email non envoyé :
+WORM_SMTP_* non configurés »). L'envoi réel se fait **en session interactive via le connecteur Gmail**
+(outil `mcp__Gmail__send_message`), depuis l'adresse du compte (`okoma.leonce@gmail.com`), auth OAuth gérée
+par le connecteur — aucun mot de passe ni token manipulé dans le code ou le chat.
+
+Procédure à chaque passage, en session :
+1. `python3 tools/apex_worm.py scan --money --email` → snapshot + `reports/worm/<jour>.email.html` (sans envoi SMTP).
+2. En Python, `apex_worm.build_email_html("<jour>")` → renvoie `(sujet, html)` (décisions, live, caractère, APEX-SYNC, et la section APEX-MI UPSET).
+3. `mcp__Gmail__send_message` avec `to=["okoma.leonce@gmail.com"]`, `subject=<sujet>`, `htmlBody=<html>` (+ un `body` texte court en repli). Si le connecteur Gmail s'est déconnecté (« MCP server disconnected »), recharger l'outil via `ToolSearch` avant d'envoyer.
+4. Preuve d'envoi = l'`id`/`threadId` Gmail renvoyé par l'outil.
+
+Pour un envoi **100 % autonome sans modèle** (par ex. depuis le cron GitHub Actions ou une Routine à session fraîche sans connecteur), il faut renseigner les secrets `WORM_SMTP_*` ; le script enverra alors seul.
+
 L'email joint automatiquement une section **« APEX-MI — bruit de marché H-60 (focus UPSET) »** : à chaque
 passage, le scan active la cellule `apex-market-intel-team` sur les matchs en PREMATCH dont le coup d'envoi
 est dans l'heure (`python3 tools/apex_mi.py worm-hook`, désactivable par `--no-mi`, fenêtre réglable par

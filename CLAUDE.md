@@ -22,6 +22,10 @@ La captation du **bruit informationnel et comportemental** du marché avant le c
 - Mêmes règles anti-invention : hiérarchie des sources honnête (un déplacement Pinnacle ≠ un post Telegram), RLM non calculable sans % public, donnée absente écrite comme absente. Le moteur score, les agents observent.
 - **Branchée sur APEX-WORM** : chaque passage `apex_worm.py scan` active automatiquement APEX-MI H-60 sur les matchs dont le coup d'envoi est dans l'heure (`worm-hook`, focus UPSET), croise l'UPSET structurel WORM avec le mouvement du marché vers l'outsider (`UPSET_WATCH`), et l'email WORM joint la section « APEX-MI — bruit de marché H-60 ». Désactivable par `--no-mi`.
 
+## Envoi de l'email APEX-WORM : connecteur Gmail (MCP), pas SMTP
+
+Les secrets `WORM_SMTP_*` ne sont pas configurés dans l'environnement : `tools/apex_worm.py scan --email` **génère** seulement le HTML (`reports/worm/<jour>.email.html`) et affiche « Email non envoyé : WORM_SMTP_* non configurés ». L'envoi réel se fait **en session interactive via le connecteur Gmail** (`mcp__Gmail__send_message`), depuis `okoma.leonce@gmail.com` (OAuth géré par le connecteur, aucun secret manipulé). Procédure : (1) `scan --money --email`, (2) `apex_worm.build_email_html("<jour>")` → `(sujet, html)`, (3) `mcp__Gmail__send_message` avec `to`, `subject`, `htmlBody` (recharger l'outil via `ToolSearch` si le connecteur s'est déconnecté), (4) preuve = `id`/`threadId` Gmail. Pour un envoi 100 % autonome par le cron (GitHub Actions ou Routine à session fraîche), il faudrait renseigner les secrets `WORM_SMTP_*`.
+
 ## Environnement
 
 - Dépendances Python du module : `pip install numpy scipy`.
