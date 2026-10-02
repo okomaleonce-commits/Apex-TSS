@@ -20,6 +20,7 @@ La captation du **bruit informationnel et comportemental** du marché avant le c
 - Elle **ne price pas** et **n'émet jamais un pari seule** : `bet_authority=false`. Ses sorties alimentent le moteur statistique APEX (brique DATA) pour la convergence finale. Règle d'intégration : `BEHAVIORAL seul → WATCH` ; `BEHAVIORAL + MARKET → CANDIDATE` ; `+ DATA → CONFIRMED`.
 - Elle ne remplace **pas** le module BSM obligatoire ci-dessus : une décision de pari football passe toujours par le backtest + la simulation. APEX-MI est un apport de contexte marché, pas un raccourci.
 - Mêmes règles anti-invention : hiérarchie des sources honnête (un déplacement Pinnacle ≠ un post Telegram), RLM non calculable sans % public, donnée absente écrite comme absente. Le moteur score, les agents observent.
+- **Branchée sur APEX-WORM** : chaque passage `apex_worm.py scan` active automatiquement APEX-MI H-60 sur les matchs dont le coup d'envoi est dans l'heure (`worm-hook`, focus UPSET), croise l'UPSET structurel WORM avec le mouvement du marché vers l'outsider (`UPSET_WATCH`), et l'email WORM joint la section « APEX-MI — bruit de marché H-60 ». Désactivable par `--no-mi`.
 
 ## Environnement
 

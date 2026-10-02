@@ -174,6 +174,35 @@ python3 tools/apex_mi.py finalize --run runs_mi/<run>
 Produit `SYNTHESE.md` (format Market Synthesizer + bloc Behavioral Context), `telegram.txt`
 et les lignes de `journal/apex_mi_journal.csv` (append-only).
 
+## Intégration APEX-WORM — activation H-60 (focus UPSET)
+
+APEX-MI est **branché sur APEX-WORM**. À chaque passage du scanner
+(`python3 tools/apex_worm.py scan`), après l'écriture du rapport, WORM appelle
+automatiquement l'activation H-60 d'APEX-MI :
+
+```bash
+python3 tools/apex_mi.py worm-hook --day <jour> --within 60   # lancé par WORM (désactivable via --no-mi)
+```
+
+Elle sélectionne les matchs du snapshot WORM **en PREMATCH dont le coup d'envoi est dans
+les 60 minutes** (la vague LATE / compositions), et pour chacun **croise l'UPSET structurel
+de WORM avec le MOUVEMENT du marché** vers l'outsider :
+
+```
+UPSET_WATCH = 0.55 · UPSET structurel (WORM)  +  0.45 · confirmation de mouvement vers l'outsider (APEX-MI)
+```
+
+- `LIVE_UPSET_WATCH` : outsider structurellement sous-évalué **ET** argent qui se dirige vers
+  lui (cote de l'outsider qui se raccourcit en H-60) — l'upset le plus crédible.
+- `UPSET_FADING` : le marché s'éloigne de l'outsider (cote qui dérive).
+- `WATCH` : pas de confirmation de mouvement.
+
+Sorties : `data/worm/mi/<jour>.json` et `reports/worm/<jour>.mi.md`. **L'email WORM joint
+automatiquement** une section « APEX-MI — bruit de marché H-60 (focus UPSET) » lue depuis cet
+artefact. Honnêteté conservée : RLM non calculable sans % public, volume réel seulement si
+`--money` est actif. Cette activation automatique est **mécanique** (le moteur score) ; pour
+une lecture approfondie, lancer l'essaim complet (`apex-mi-conductor`) sur les matchs flaggés.
+
 ## Format de sortie par match (Market Synthesizer)
 
 ```

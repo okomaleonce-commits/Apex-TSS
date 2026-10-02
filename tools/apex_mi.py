@@ -51,6 +51,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUNS = os.path.join(ROOT, "runs_mi")
 SNAPSHOTS = os.path.join(ROOT, "data", "apifootball", "snapshots")
 JOURNAL = os.path.join(ROOT, "journal", "apex_mi_journal.csv")
+# Pont avec APEX-WORM : le scanner écrit ses relevés horodatés ici ; l'activation H-60
+# d'APEX-MI les lit, produit un rapport orienté UPSET et le dépose pour l'email WORM.
+WORM_SNAP = os.path.join(ROOT, "data", "worm", "snapshots")
+WORM_MI = os.path.join(ROOT, "data", "worm", "mi")
+WORM_REP = os.path.join(ROOT, "reports", "worm")
 
 # ───────────────────────── Hiérarchie des sources ─────────────────────────
 # Fiabilité 0..100. Un déplacement Pinnacle et un post Telegram n'ont pas le même poids.
@@ -765,6 +770,186 @@ def cmd_finalize(a):
     return 0
 
 
+# ───────────────────── Pont APEX-WORM — activation H-60 (focus UPSET) ─────────────────────
+def _worm_series(day):
+    """Relevés WORM du jour groupés par fixture_id et triés chronologiquement."""
+    path = os.path.join(WORM_SNAP, f"{day}.jsonl")
+    series = {}
+    if not os.path.exists(path):
+        return series, path
+    for line in open(path, encoding="utf-8"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        series.setdefault(r.get("fixture_id"), []).append(r)
+    for fid in series:
+        series[fid].sort(key=lambda r: r.get("scan_time_utc", ""))
+    return series, path
+
+
+def _mins_to_ko(kickoff, now):
+    try:
+        k = datetime.fromisoformat((kickoff or "").replace("Z", "+00:00"))
+        return (k - now).total_seconds() / 60.0
+    except (ValueError, AttributeError):
+        return None
+
+
+def _mi_from_worm(fid, recs, cur, mk):
+    """Lecture APEX-MI d'un match imminent à partir des relevés WORM. Focus UPSET.
+
+    WORM a déjà démarginé le marché (`market_prob_1x2`) et calculé le score `upset`
+    (outsider structurellement sous-évalué). APEX-MI ajoute la LECTURE DE MOUVEMENT :
+    l'argent se dirige-t-il vers l'outsider dans la fenêtre H-60 (confirmation), ou s'en
+    éloigne-t-il (upset qui refroidit) ? La valeur vient du croisement des deux.
+    """
+    missing = []
+    fair_now = cur.get("market_prob_1x2")
+    first_fair = next((r["market_prob_1x2"] for r in recs if r.get("market_prob_1x2")), None)
+    up = cur.get("upset")
+    upc = cur.get("upset_components") or {}
+
+    dog_idx, dog_side = None, None
+    if upc.get("dog_at_home") is True:
+        dog_idx, dog_side = 0, "home"
+    elif upc.get("dog") in ("extérieur", "exterieur"):
+        dog_idx, dog_side = 2, "away"
+    elif fair_now:
+        dog_idx = 0 if fair_now[0] < fair_now[2] else 2
+        dog_side = "home" if dog_idx == 0 else "away"
+
+    dog_open = first_fair[dog_idx] if (first_fair and dog_idx is not None) else None
+    dog_now = fair_now[dog_idx] if (fair_now and dog_idx is not None) else None
+    dog_delta = round(dog_now - dog_open, 4) if (dog_open is not None and dog_now is not None) else None
+
+    mi_signal = None
+    if dog_delta is not None:
+        shortening = dog_delta > 0  # l'outsider se raccourcit = argent vers le dog
+        family = "PRICE_COMPRESSION" if shortening else "PRICE_DRIFT"
+        magnitude = min(abs(dog_delta) / 0.05, 1.0)  # 5 pts de proba = mouvement fort en H-60
+        tier = "sharp" if "Pinnacle" in (cur.get("odds") or {}) else "aggregator"
+        mi_signal = _score_signal(family, tier, "LATE", magnitude, 0, "observation")
+        mi_signal.update({"family": family, "direction": dog_side, "dog_delta": dog_delta,
+                          "source_tier": tier})
+    else:
+        missing.append("trajectoire outsider non calculable (cote juste absente)")
+
+    # confirmation d'upset = mouvement DU MARCHÉ VERS l'outsider seulement
+    confirm = mi_signal["MARKET_SIGNAL_SCORE"] if (mi_signal and dog_delta and dog_delta > 0) else 0
+    if up is not None:
+        watch = round(0.55 * up + 0.45 * confirm)
+    elif dog_delta is not None:
+        watch = round(confirm)
+        missing.append("score UPSET WORM absent (classement indisponible)")
+    else:
+        watch = None
+
+    if up is not None and dog_delta is not None and dog_delta > 0 and up >= 50:
+        status = "LIVE_UPSET_WATCH"      # upset structurel + argent qui va vers l'outsider
+    elif dog_delta is not None and dog_delta < 0:
+        status = "UPSET_FADING"          # le marché s'éloigne de l'outsider
+    else:
+        status = "WATCH"
+
+    exch = cur.get("exchange")
+    volume = exch.get("total_matched") if isinstance(exch, dict) else None
+    if volume is None:
+        missing.append("volume réel indisponible (excapper/--money inactif)")
+
+    return {
+        "fixture_id": fid,
+        "match": f"{cur.get('home')} – {cur.get('away')}",
+        "league": cur.get("league"), "country": cur.get("country"),
+        "kickoff": cur.get("kickoff"), "minutes_to_ko": round(mk),
+        "dog_side": dog_side,
+        "worm_upset": up, "worm_upset_components": upc,
+        "dog_prob_open": dog_open, "dog_prob_now": dog_now, "dog_delta": dog_delta,
+        "mi_move_family": mi_signal.get("family") if mi_signal else None,
+        "mi_move_signal_score": mi_signal["MARKET_SIGNAL_SCORE"] if mi_signal else None,
+        "dispersion_max": cur.get("market_dispersion"),
+        "exchange_volume": volume,
+        "upset_watch_score": watch,
+        "upset_watch_band": band(watch),
+        "status": status,
+        "rlm": "UNAVAILABLE (pas de % public)",
+        "bet_authority": False,
+        "missing": missing,
+    }
+
+
+def _write_mi_md(day, artifact):
+    L = [f"## APEX-MI — bruit de marché H-60 (focus UPSET) · {day}", "",
+         f"_{artifact['n_selected']} match(s) imminent(s) · généré {artifact['generated_at_utc']} · "
+         "cette cellule n'émet aucun pari, elle alimente le moteur statistique._", ""]
+    items = artifact["items"]
+    if not items:
+        L.append("Aucun match dans la fenêtre H-60 à ce passage.")
+    else:
+        L.append("| Dans | Match | Compét. | Outsider | ΔProb dog | Mouvement | UPSET WORM | UPSET WATCH | Statut |")
+        L.append("|---|---|---|---|---|---|---|---|---|")
+        for it in items:
+            dd = it["dog_delta"]
+            dd_s = f"{dd:+.3f}" if dd is not None else "—"
+            L.append(f"| {it['minutes_to_ko']}′ | {it['match']} | {(it.get('country') or '')[:3]} "
+                     f"{(it.get('league') or '')[:16]} | {it['dog_side'] or '—'} | {dd_s} | "
+                     f"{it['mi_move_family'] or '—'} | {it['worm_upset'] if it['worm_upset'] is not None else '—'} | "
+                     f"**{it['upset_watch_score'] if it['upset_watch_score'] is not None else '—'}** "
+                     f"({it['upset_watch_band']}) | {it['status']} |")
+        L += ["", "> UPSET WATCH = 0.55·UPSET structurel (WORM) + 0.45·confirmation de mouvement vers "
+              "l'outsider (APEX-MI). `LIVE_UPSET_WATCH` = outsider sous-évalué ET argent qui va vers lui. "
+              "RLM non calculable sans % public ; volume réel seulement si excapper actif."]
+    os.makedirs(WORM_REP, exist_ok=True)
+    with open(os.path.join(WORM_REP, f"{day}.mi.md"), "w", encoding="utf-8") as fh:
+        fh.write("\n".join(L))
+
+
+def run_worm_hook(day, within=60.0, write=True):
+    """Activation H-60 : sélectionne les matchs WORM en PREMATCH dont le coup d'envoi est
+    dans `within` minutes, en produit une lecture APEX-MI orientée UPSET, et dépose un
+    artefact que l'email WORM joint. Retourne l'artefact (dict)."""
+    series, path = _worm_series(day)
+    now = datetime.now(timezone.utc)
+    selected = []
+    for fid, recs in series.items():
+        cur = recs[-1]
+        if cur.get("phase") != "PREMATCH":
+            continue
+        mk = _mins_to_ko(cur.get("kickoff"), now)
+        if mk is None or not (0 <= mk <= within):
+            continue
+        selected.append((mk, fid, recs, cur))
+    selected.sort(key=lambda x: x[0])
+    items = [_mi_from_worm(fid, recs, cur, mk) for mk, fid, recs, cur in selected]
+    items.sort(key=lambda it: (it.get("upset_watch_score") if it.get("upset_watch_score") is not None else -1),
+               reverse=True)
+    artifact = {"day": day, "generated_at_utc": now_utc(), "within_min": within,
+                "focus": "UPSET", "snapshot": os.path.relpath(path, ROOT),
+                "n_selected": len(items), "items": items,
+                "note": "APEX-MI ne price pas et n'émet aucun pari (bet_authority=false) ; "
+                        "ses signaux alimentent le moteur statistique APEX."}
+    if write:
+        write_json(os.path.join(WORM_MI, f"{day}.json"), artifact)
+        _write_mi_md(day, artifact)
+    return artifact
+
+
+def cmd_worm_hook(a):
+    day = a.day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    art = run_worm_hook(day, float(a.within), write=not a.dry_run)
+    print(f"APEX-MI worm-hook {day} : {art['n_selected']} match(s) H-{int(a.within)} (focus UPSET)")
+    for it in art["items"][:15]:
+        print(f"  {it['minutes_to_ko']:>3}′ {it['match'][:42]:42s} UPSET WATCH "
+              f"{it['upset_watch_score'] if it['upset_watch_score'] is not None else '—'} "
+              f"[{it['status']}] dogΔ {it['dog_delta'] if it['dog_delta'] is not None else '—'}")
+    if not a.dry_run:
+        print(f"Artefact : data/worm/mi/{day}.json · reports/worm/{day}.mi.md")
+    return 0
+
+
 # ───────────────────────── CLI ─────────────────────────
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -818,11 +1003,16 @@ def main():
     pf = sp.add_parser("finalize", help="SYNTHESE.md + telegram + journal")
     pf.add_argument("--run", required=True)
 
+    pw = sp.add_parser("worm-hook", help="Activation H-60 depuis un scan WORM, rapport UPSET pour l'email")
+    pw.add_argument("--day", help="jour de la fenêtre WORM (défaut aujourd'hui UTC)")
+    pw.add_argument("--within", default=60, help="fenêtre H-N minutes avant le coup d'envoi (défaut 60)")
+    pw.add_argument("--dry-run", action="store_true", help="n'écrit pas l'artefact (affiche seulement)")
+
     a = p.parse_args()
     return {
         "window": cmd_window, "init": cmd_init, "oddsflow": cmd_oddsflow,
         "signal": cmd_signal, "behavioral": cmd_behavioral, "check": cmd_check,
-        "score": cmd_score, "finalize": cmd_finalize,
+        "score": cmd_score, "finalize": cmd_finalize, "worm-hook": cmd_worm_hook,
     }[a.cmd](a)
 
 

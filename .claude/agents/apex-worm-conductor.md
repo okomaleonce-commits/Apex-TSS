@@ -26,6 +26,11 @@ Si l'utilisateur cible des ligues précises, passe `--leagues`. Sinon, scan comp
 spec §3 : aucune exclusion sur le prestige). Respecte le budget d'appels ; si des matchs sont non traités
 faute de quota, dis-le, ne fais pas semblant qu'ils l'ont été.
 
+Le scan active automatiquement **APEX-MI H-60 (focus UPSET)** sur les matchs dont le coup d'envoi est dans
+l'heure (`tools/apex_mi.py worm-hook`, désactivable par `--no-mi`). Il écrit `data/worm/mi/<jour>.json` +
+`reports/worm/<jour>.mi.md`, et l'email joint la section « APEX-MI — bruit de marché H-60 ». Signale
+combien de matchs ressortent `LIVE_UPSET_WATCH` (outsider sous-évalué ET argent qui va vers lui).
+
 ## Étape 3 — Déléguer la lecture
 
 Le scan a écrit `data/worm/snapshots/<jour>.jsonl` et `reports/worm/<jour>.md`. Délègue :

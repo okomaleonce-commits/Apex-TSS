@@ -102,6 +102,13 @@ Avec `--email`, le scan écrit `reports/worm/<jour>.email.html` (digest mis en f
 matchs en direct, meilleures anomalies) et l'envoie par SMTP si `WORM_SMTP_HOST/USER/PASS` + `WORM_EMAIL_TO`
 sont configurés (secrets CI). En session interactive, le même HTML peut être envoyé via le connecteur Gmail.
 
+L'email joint automatiquement une section **« APEX-MI — bruit de marché H-60 (focus UPSET) »** : à chaque
+passage, le scan active la cellule `apex-market-intel-team` sur les matchs en PREMATCH dont le coup d'envoi
+est dans l'heure (`python3 tools/apex_mi.py worm-hook`, désactivable par `--no-mi`, fenêtre réglable par
+`--mi-within`). Elle croise l'UPSET structurel de WORM avec le mouvement du marché vers l'outsider
+(`UPSET_WATCH = 0.55·UPSET + 0.45·confirmation`), produit `data/worm/mi/<jour>.json` +
+`reports/worm/<jour>.mi.md`, et ne price jamais — ses signaux alimentent le moteur statistique.
+
 ## Sortie
 
 - `data/worm/snapshots/<jour>.jsonl` — historique horodaté append-only (non versionné).

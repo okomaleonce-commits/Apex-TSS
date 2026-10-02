@@ -717,6 +717,20 @@ def cmd_scan(a):
 
     print(f"STORE : {out_path.relative_to(ROOT)} (append-only)")
     write_report(day)
+
+    # APEX-MI : activation H-60 min sur les matchs imminents (focus UPSET). Produit un
+    # artefact que l'email WORM joint. Ne doit jamais faire échouer le passage WORM.
+    if getattr(a, "mi", True):
+        try:
+            import apex_mi as _MI
+            within = float(getattr(a, "mi_within", 60))
+            art = _MI.run_worm_hook(day.isoformat(), within)
+            live = sum(1 for it in art["items"] if it.get("status") == "LIVE_UPSET_WATCH")
+            print(f"APEX-MI H-{int(within)} (focus UPSET) : {art['n_selected']} match(s) imminents · "
+                  f"{live} LIVE_UPSET_WATCH → data/worm/mi/{day}.json")
+        except Exception as e:  # noqa: BLE001 — le passage WORM ne doit pas casser si APEX-MI évolue
+            print(f"APEX-MI ignoré ce passage ({str(e)[:100]}).")
+
     if getattr(a, "email", False):
         subject, html = build_email_html(day)
         out_html = REP / f"{day.isoformat()}.email.html"
@@ -1313,6 +1327,43 @@ def build_email_html(day) -> tuple:
           "<div class='muted'>Volume d'argent : réel via excapper (Betfair MoneyWay, données publiques) quand "
           "--money est actif, sinon UNAVAILABLE (jamais estimé). Détail complet dans reports/worm/.</div>"]
 
+    # ─── APEX-MI — bruit de marché H-60 (focus UPSET) ───
+    H += ["<h2>APEX-MI — bruit de marché H-60 (focus UPSET)</h2>",
+          "<div class='muted'>Cellule <code>tools/apex_mi.py</code> activée sur les matchs dont le coup "
+          "d'envoi est dans l'heure. Elle croise l'UPSET structurel (WORM) avec le MOUVEMENT du marché "
+          "vers l'outsider. Elle ne price pas et n'émet aucun pari — à transmettre au moteur statistique.</div>"]
+    mi_art, mi_err = None, None
+    try:
+        import json as _json
+        mi_path = ROOT / "data" / "worm" / "mi" / f"{day.isoformat()}.json"
+        if mi_path.exists():
+            mi_art = _json.loads(mi_path.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001 — le digest ne doit jamais casser
+        mi_err = str(e)[:120]
+    if mi_err:
+        H += [f"<div class='muted warn'>APEX-MI indisponible ce passage : {esc(mi_err)}</div>"]
+    elif mi_art and mi_art.get("items"):
+        H += ["<table><tr><th>Dans</th><th>Match</th><th>Compét.</th><th>Outsider</th><th class='r'>ΔProb dog</th>"
+              "<th>Mouvement</th><th class='r'>Upset WORM</th><th class='r'>Upset Watch</th><th>Statut</th></tr>"]
+        for it in mi_art["items"][:15]:
+            dd = it.get("dog_delta")
+            dd_s = f"{dd:+.3f}" if dd is not None else "—"
+            uw = it.get("upset_watch_score")
+            is_live = it.get("status") == "LIVE_UPSET_WATCH"
+            badge = f"<span class='jouer'>{esc(it.get('status'))}</span>" if is_live else esc(it.get("status"))
+            H.append(f"<tr><td><b>{it.get('minutes_to_ko','?')} min</b></td><td><b>{esc(it.get('match',''))}</b></td>"
+                     f"<td>{esc((it.get('country') or '')[:3])} {esc((it.get('league') or '')[:16])}</td>"
+                     f"<td>{esc(it.get('dog_side') or '—')}</td><td class='r'>{dd_s}</td>"
+                     f"<td class='tag'>{esc(it.get('mi_move_family') or '—')}</td>"
+                     f"<td class='r'>{it.get('worm_upset') if it.get('worm_upset') is not None else '–'}</td>"
+                     f"<td class='r'><b>{uw if uw is not None else '–'}</b></td><td>{badge}</td></tr>")
+        H += ["</table>",
+              "<div class='muted'>Upset Watch = 0.55·UPSET structurel (WORM) + 0.45·confirmation de mouvement "
+              "vers l'outsider (APEX-MI). <b>LIVE_UPSET_WATCH</b> = outsider sous-évalué ET argent qui va vers "
+              "lui. RLM non calculable sans % public ; volume réel seulement si <code>--money</code> actif.</div>"]
+    else:
+        H += ["<div class='muted'>Aucun match dans la fenêtre H-60 à ce passage (ou APEX-MI non exécuté).</div>"]
+
     # ─── APEX-SYNC — file PROTOCOL (candidats priorisés par l'orchestrateur apex_sync) ───
     sync_rows, sync_overflow, sync_err = [], 0, None
     try:
@@ -1478,6 +1529,9 @@ def main():
     s.add_argument("--max-fixtures", type=int); s.add_argument("--odds-only", action="store_true")
     s.add_argument("--money", action="store_true", help="brancher l'argent public excapper (volume matché) + arbworld si API autorisée")
     s.add_argument("--email", action="store_true", help="envoyer le digest par email (SMTP via secrets)")
+    s.add_argument("--no-mi", dest="mi", action="store_false", help="désactiver l'activation APEX-MI H-60 (focus UPSET)")
+    s.add_argument("--mi-within", dest="mi_within", type=int, default=60, help="fenêtre H-N min pour APEX-MI (défaut 60)")
+    s.set_defaults(mi=True)
     r = sp.add_parser("report"); r.add_argument("--date"); r.add_argument("--email", action="store_true")
     bi = sp.add_parser("bilan"); bi.add_argument("--date"); bi.add_argument("--email", action="store_true")
     bi.add_argument("--only-if-complete", action="store_true", help="ne produit le bilan que si tous les matchs du jour sont terminés (une seule fois)")
