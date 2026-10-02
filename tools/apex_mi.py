@@ -38,6 +38,7 @@ Aucune donnée inventée. Si une donnée manque, elle est écrite comme manquant
 from __future__ import annotations
 
 import argparse
+import html as _html
 import json
 import os
 import sys
@@ -791,6 +792,99 @@ def cmd_finalize(a):
     return 0
 
 
+# ───────────────────── Email du passage (digest HTML) ─────────────────────
+def build_email_html(run_dir):
+    """(sujet, html, texte) du passage. Même esprit que apex_worm.build_email_html :
+    le moteur produit le digest, l'envoi réel se fait via le connecteur Gmail (mcp__Gmail__send_message),
+    SMTP non configuré. Ne price pas, n'émet aucun pari."""
+    req = read_json(os.path.join(run_dir, "request.json")) or {}
+    rows = []
+    for name in sorted(os.listdir(run_dir)):
+        d = os.path.join(run_dir, name)
+        ms = read_json(os.path.join(d, "90_market_synthesis.json"))
+        if not ms:
+            continue
+        meta = read_json(os.path.join(d, "meta.json")) or {}
+        bh = read_json(os.path.join(d, "91_behavioral.json")) or {}
+        itg = read_json(os.path.join(d, "92_integration.json")) or {}
+        rows.append((meta, ms, bh, itg))
+    rows.sort(key=lambda r: (r[3].get("integration_status") != "CANDIDATE",
+                             -(r[1].get("market_signal_score") or 0)))
+    now = now_utc().replace("T", " ")
+    nc = sum(1 for r in rows if r[3].get("integration_status") == "CANDIDATE")
+    subject = f"APEX-MI — bruit marché pré-match · {nc} CANDIDATE / {len(rows)} matchs · {now}"
+
+    def esc(x):
+        return _html.escape(str(x if x is not None else "—"))
+
+    css = ("body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1a1a2e;background:#f4f5f7;margin:0;padding:16px}"
+           ".card{background:#fff;border-radius:12px;padding:16px 18px;max-width:860px;margin:0 auto 14px;box-shadow:0 1px 4px rgba(0,0,0,.08)}"
+           "h1{font-size:19px;margin:0 0 4px}h2{font-size:15px;margin:16px 0 8px;color:#3b3b58}.muted{color:#6b7280;font-size:12px}"
+           "table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:6px 8px;border-bottom:1px solid #eee;text-align:left}"
+           "th{background:#fafafe;color:#555}.cand{background:#e7f6ec;color:#137333;font-weight:700;border-radius:6px;padding:1px 7px}"
+           ".watch{color:#6b7280}.r{text-align:right}.tag{color:#4338ca}")
+    H = [f"<html><head><meta charset='utf-8'><style>{css}</style></head><body><div class='card'>",
+         "<h1>APEX-MI — bruit de marché &amp; comportement (pré-match)</h1>",
+         f"<div class='muted'>Run <b>{esc(req.get('run_id') or os.path.basename(run_dir))}</b> · {len(rows)} matchs · "
+         f"{nc} CANDIDATE · généré {esc(now)}</div>",
+         "<div class='muted'>Cellule séparée de la cellule statistique : capte le bruit marché/comportement, "
+         "<b>ne price pas</b> et <b>n'émet aucun pari</b> (bet_authority=false). Les CANDIDATE sont à transmettre "
+         "au moteur statistique APEX (brique DATA).</div>",
+         "<h2>Synthèse de la slate</h2>",
+         "<table><tr><th>Match</th><th>État</th><th>Dominant</th><th class='r'>Signal</th><th>Source</th>"
+         "<th>Behav.</th><th>Priced-in</th><th>Net edge</th><th>Intégration</th></tr>"]
+    tg = [f"APEX-MI — {nc} CANDIDATE / {len(rows)} matchs ({now})", ""]
+    for meta, S, B, I in rows:
+        integ = I.get("integration_status", "WATCH")
+        badge = (f"<span class='cand'>{esc(integ)}</span>" if integ == "CANDIDATE"
+                 else f"<span class='watch'>{esc(integ)}</span>")
+        H.append("<tr>"
+                 f"<td><b>{esc(meta.get('home'))} – {esc(meta.get('away'))}</b></td>"
+                 f"<td>{esc(S.get('market_state'))}</td><td class='tag'>{esc(S.get('dominant_signal'))}</td>"
+                 f"<td class='r'>{esc(S.get('market_signal_score'))}</td><td>{esc(S.get('source_quality'))}</td>"
+                 f"<td>{esc(B.get('behavioral_signal'))}</td><td>{esc(B.get('market_priced_in'))}</td>"
+                 f"<td>{esc(B.get('net_behavioral_edge'))}</td><td>{badge}</td></tr>")
+        tg.append(f"- {meta.get('home')} - {meta.get('away')}: {S.get('market_state')}/{S.get('dominant_signal')} "
+                  f"{S.get('market_signal_score')} [{integ}]")
+    H.append("</table>")
+    cands = [r for r in rows if r[3].get("integration_status") == "CANDIDATE"]
+    if cands:
+        H.append("<h2>Détail des signaux CANDIDATE</h2>")
+        for meta, S, B, I in cands:
+            H.append("<div style='margin:10px 0;padding:10px 12px;background:#f8fbf9;border-left:3px solid #137333;border-radius:6px'>"
+                     f"<b>{esc(meta.get('home'))} – {esc(meta.get('away'))}</b> · {esc(meta.get('competition'))} · "
+                     f"KO {esc((meta.get('kickoff_utc') or '')[11:16])}Z<br>"
+                     f"<span class='muted'>{esc(S.get('main_observation'))}</span><br>"
+                     f"<b>{esc(S.get('market_state'))} / {esc(S.get('dominant_signal'))} {esc(S.get('market_signal_score'))}/100</b> · "
+                     f"source {esc(S.get('source_quality'))} · {esc(S.get('interpretation'))}<br>"
+                     f"Behavioral {esc(B.get('behavioral_signal'))} · priced-in {esc(B.get('market_priced_in'))} · "
+                     f"net edge {esc(B.get('net_behavioral_edge'))}</div>")
+    H.append("<div class='muted'>RLM non calculable sans % public ; volume réel seulement si exchange actif. "
+             "Convergence = agents indépendants (un même mouvement vu deux fois ne compte qu'une fois). "
+             "Rien d'inventé : donnée absente = écrite comme absente.</div></div></body></html>")
+    tg.append("\nCellule APEX-MI : ne price pas, n'émet aucun pari. À transmettre au moteur statistique.")
+    return subject, "\n".join(H), "\n".join(tg)
+
+
+def cmd_email(a):
+    run_dir = a.run
+    subject, html_body, text_body = build_email_html(run_dir)
+    hp = os.path.join(run_dir, "email.html")
+    tp = os.path.join(run_dir, "email.txt")
+    with open(hp, "w", encoding="utf-8") as fh:
+        fh.write(html_body)
+    with open(tp, "w", encoding="utf-8") as fh:
+        fh.write(text_body)
+    # le sujet est écrit à part pour un envoi scripté/automatique
+    with open(os.path.join(run_dir, "email.subject.txt"), "w", encoding="utf-8") as fh:
+        fh.write(subject)
+    print(f"SUBJECT: {subject}")
+    print(f"HTML: {os.path.relpath(hp, ROOT)} · TXT: {os.path.relpath(tp, ROOT)}")
+    print("Envoi : via le connecteur Gmail (mcp__Gmail__send_message), to=okoma.leonce@gmail.com, "
+          "htmlBody=email.html, body=email.txt. SMTP non configuré.")
+    return 0
+
+
 # ───────────────────── Pont APEX-WORM — activation H-60 (focus UPSET) ─────────────────────
 def _worm_series(day):
     """Relevés WORM du jour groupés par fixture_id et triés chronologiquement."""
@@ -1024,6 +1118,9 @@ def main():
     pf = sp.add_parser("finalize", help="SYNTHESE.md + telegram + journal")
     pf.add_argument("--run", required=True)
 
+    pe = sp.add_parser("email", help="Construit le digest HTML du passage (à envoyer via Gmail MCP)")
+    pe.add_argument("--run", required=True)
+
     pw = sp.add_parser("worm-hook", help="Activation H-60 depuis un scan WORM, rapport UPSET pour l'email")
     pw.add_argument("--day", help="jour de la fenêtre WORM (défaut aujourd'hui UTC)")
     pw.add_argument("--within", default=60, help="fenêtre H-N minutes avant le coup d'envoi (défaut 60)")
@@ -1033,7 +1130,8 @@ def main():
     return {
         "window": cmd_window, "init": cmd_init, "oddsflow": cmd_oddsflow,
         "signal": cmd_signal, "behavioral": cmd_behavioral, "check": cmd_check,
-        "score": cmd_score, "finalize": cmd_finalize, "worm-hook": cmd_worm_hook,
+        "score": cmd_score, "finalize": cmd_finalize, "email": cmd_email,
+        "worm-hook": cmd_worm_hook,
     }[a.cmd](a)
 
 

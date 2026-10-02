@@ -174,6 +174,25 @@ python3 tools/apex_mi.py finalize --run runs_mi/<run>
 Produit `SYNTHESE.md` (format Market Synthesizer + bloc Behavioral Context), `telegram.txt`
 et les lignes de `journal/apex_mi_journal.csv` (append-only).
 
+### Phase email — envoi systématique à chaque passage interactif (comme APEX-WORM)
+
+Après `finalize`, **toujours** construire et envoyer le digest par email, par la **même méthode
+qu'APEX-WORM** (le SMTP n'étant pas configuré, on passe par le connecteur Gmail) :
+
+```bash
+python3 tools/apex_mi.py email --run runs_mi/<run>   # écrit email.html, email.txt, email.subject.txt + affiche le sujet
+```
+
+Puis envoyer avec l'outil `mcp__Gmail__send_message` :
+- `to = ["okoma.leonce@gmail.com"]`
+- `subject` = la ligne `SUBJECT:` affichée (ou le contenu de `email.subject.txt`)
+- `htmlBody` = le contenu de `runs_mi/<run>/email.html`
+- `body` = le contenu de `runs_mi/<run>/email.txt` (repli texte)
+
+Si le connecteur Gmail s'est déconnecté (« MCP server disconnected »), le recharger via
+`ToolSearch` avant d'envoyer. La preuve d'envoi est l'`id`/`threadId` Gmail renvoyé. Pour un
+envoi 100 % autonome par le cron (sans modèle), il faudrait renseigner les secrets `WORM_SMTP_*`.
+
 ## Intégration APEX-WORM — activation H-60 (focus UPSET)
 
 APEX-MI est **branché sur APEX-WORM**. À chaque passage du scanner
