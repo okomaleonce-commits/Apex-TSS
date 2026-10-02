@@ -153,7 +153,9 @@ def _fixtures_from_snapshot(date, leagues):
     if not os.path.exists(path):
         return []
     want = {int(x) for x in leagues.split(",")} if leagues else None
-    out = []
+    # Dédup par fixture_id : le snapshot contient plusieurs relevés par match sur la journée ;
+    # on ne garde que le dernier (par retrieved_at_utc) pour n'avoir qu'un dossier par match.
+    latest = {}
     for line in open(path, encoding="utf-8"):
         line = line.strip()
         if not line:
@@ -161,9 +163,13 @@ def _fixtures_from_snapshot(date, leagues):
         r = json.loads(line)
         if want and r.get("league_id") not in want:
             continue
-        out.append({"home": r["home"], "away": r["away"], "kickoff_utc": r["kickoff_utc"],
-                    "competition": r.get("league"), "fixture_id": r.get("fixture_id")})
-    return out
+        fid = r.get("fixture_id")
+        prev = latest.get(fid)
+        if prev is None or (r.get("retrieved_at_utc") or "") >= (prev.get("retrieved_at_utc") or ""):
+            latest[fid] = r
+    return [{"home": r["home"], "away": r["away"], "kickoff_utc": r["kickoff_utc"],
+             "competition": r.get("league"), "fixture_id": r.get("fixture_id")}
+            for r in latest.values()]
 
 
 def cmd_init(a):
