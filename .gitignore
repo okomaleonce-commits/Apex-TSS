@@ -12,6 +12,10 @@ runs_hockey/.cache/
 runs_turf/.cache/
 runs_mi/.cache/
 
+# sorties de run APEX-MI (éphémères, par exécution) — on ne versionne que le .gitkeep
+runs_mi/*
+!runs_mi/.gitkeep
+
 # cache historique football-data (retéléchargeable)
 data/history/*
 !data/history/intl_supplement.csv

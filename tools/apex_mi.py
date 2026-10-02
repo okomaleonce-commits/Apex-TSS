@@ -41,6 +41,7 @@ import argparse
 import json
 import os
 import sys
+import uuid
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -422,7 +423,7 @@ def cmd_signal(a):
               "Sans source, utiliser --kind interpretation.")
         return 2
     scored = _score_signal(a.family, a.source_tier, a.wave, a.magnitude, a.cross, kind)
-    rec = {"id": f"{a.agent}:{a.family}:{now_utc()}", "match_id": meta.get("match_id"),
+    rec = {"id": f"{a.agent}:{a.family}:{now_utc()}:{uuid.uuid4().hex[:8]}", "match_id": meta.get("match_id"),
            "agent": a.agent, "family": a.family, "source_tier": a.source_tier,
            "wave": a.wave, "direction": a.direction, "magnitude": float(a.magnitude),
            "cross_cited": int(a.cross), "kind": kind, "note": a.note,
@@ -632,9 +633,23 @@ def cmd_score(a):
     bout["indices"] = agg
 
     narrative = agg.get("NARRATIVE_STRENGTH", 0)
-    # priced-in proxy : un mouvement marché cohérent et fort => la narration est probablement déjà payée
+    # priced-in : la narration est-elle DÉJÀ payée par le marché ? Deux voies indépendantes :
+    #  (a) un signal marché fort la valide (argent informé déjà entré), OU
+    #  (b) le marché est DÉJÀ tranché — favori court et ligne figée — donc l'histoire est
+    #      dans le prix même sans mouvement frais. NE PAS confondre « pas de mouvement » avec
+    #      « pas intégré » : un favori à 1.45 stable = narration pleinement pricée (piège du faux edge).
     ms = out.get("market_signal_score", 0)
-    priced_in = "LIKELY" if ms >= 65 else ("PARTIAL" if ms >= 40 else "UNLIKELY")
+    of = read_json(os.path.join(mdir, "00_oddsflow.json")) or {}
+    cur_fair = (of.get("current") or {}).get("fair_prob_1x2") or []
+    fav_prob = max(cur_fair) if cur_fair else None
+    move_mag = of.get("move_magnitude")
+    market_decided = fav_prob is not None and fav_prob >= 0.60 and (move_mag is None or move_mag < 0.30)
+    if ms >= 65 or market_decided:
+        priced_in = "LIKELY"
+    elif ms >= 40 or (fav_prob is not None and fav_prob >= 0.50):
+        priced_in = "PARTIAL"
+    else:
+        priced_in = "UNLIKELY"
     priced_val = {"LIKELY": 70, "PARTIAL": 40, "UNLIKELY": 10}[priced_in]
     net_edge_val = clamp(narrative - priced_val, -100, 100)
     net_edge = "HIGH" if net_edge_val >= 40 else ("MED" if net_edge_val >= 15 else "LOW")
