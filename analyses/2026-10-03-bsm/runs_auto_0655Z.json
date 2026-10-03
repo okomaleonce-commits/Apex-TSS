@@ -1,0 +1,200 @@
+[
+ {
+  "fixture_id": 1563781,
+  "match": "Chesterfield – Tranmere",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1638598,
+  "forecast_id": "5b9ea2f4d3e2",
+  "league": "Friendlies",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528932,
+  "forecast_id": "22e4600f7182",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1563779,
+  "match": "Accrington ST – Cheltenham",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1563780,
+  "match": "Barnet – York",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1563783,
+  "match": "Crewe – Bristol Rovers",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1563784,
+  "match": "Exeter City – Rotherham",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1563785,
+  "match": "Gillingham – Newport County",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1563786,
+  "match": "Grimsby – Shrewsbury",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1563788,
+  "match": "Rochdale – Swindon Town",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1563789,
+  "match": "Salford City – Fleetwood Town",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1564335,
+  "match": "Burton Albion – Huddersfield",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1564336,
+  "match": "Leyton Orient – Plymouth",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1564340,
+  "match": "Reading – Bradford",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1585269,
+  "match": "Aldershot Town – Carlisle",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1585270,
+  "match": "Barrow – Wealdstone",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1585271,
+  "match": "Boreham Wood – Altrincham",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1585272,
+  "match": "Eastleigh – Woking",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1585273,
+  "match": "Gateshead – Worthing",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1585274,
+  "match": "Harrogate Town – AFC Hornchurch",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1585275,
+  "match": "Hartlepool – Tamworth",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1585276,
+  "match": "Kidderminster Harriers – Sutton Utd",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1585277,
+  "match": "Scunthorpe – Forest Green",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1585278,
+  "match": "Solihull Moors – FC Halifax Town",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1585279,
+  "match": "Southend – AFC Fylde",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1585280,
+  "match": "Yeovil Town – Boston United",
+  "erreur": "correspondance de noms incertaine (None, None)"
+ },
+ {
+  "fixture_id": 1632355,
+  "forecast_id": "d0118a155723",
+  "league": "Friendlies",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1640076,
+  "forecast_id": "47e59279b819",
+  "league": "Friendlies",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528933,
+  "forecast_id": "ff8a2923e09e",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528934,
+  "forecast_id": "6bdbedf9d1b9",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528935,
+  "forecast_id": "d53721871486",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1545609,
+  "forecast_id": "5c709808fbb8",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1610879,
+  "forecast_id": "236867e20ded",
+  "league": "Friendlies",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528936,
+  "forecast_id": "96d658eff320",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1545653,
+  "forecast_id": "6a39ee0f875a",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1545660,
+  "forecast_id": "960ea0dbcdbc",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1640077,
+  "forecast_id": "999ea970699b",
+  "league": "Friendlies",
+  "kind": "intl"
+ }
+]
