@@ -382,6 +382,69 @@ def test_build_email_html(tmp_path):
         W.SNAP = old
 
 
+def test_movement_history_tracks_trajectory(tmp_path):
+    import json
+    day = dt.date(2026, 9, 30)
+    old = W.SNAP
+    try:
+        W.SNAP = tmp_path
+        p = tmp_path / f"{day.isoformat()}.jsonl"
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"fixture_id": 7, "home": "A", "away": "B", "phase": "PREMATCH",
+                                 "scan_time_utc": "2026-09-30T08:00:00+00:00",
+                                 "sharp": 10, "blowout": 10, "upset": 10, "convergence": 60}) + "\n")
+            fh.write(json.dumps({"fixture_id": 7, "home": "A", "away": "B", "phase": "PREMATCH",
+                                 "scan_time_utc": "2026-09-30T09:00:00+00:00",
+                                 "sharp": 10, "blowout": 10, "upset": 10, "convergence": 40}) + "\n")
+            fh.write(json.dumps({"fixture_id": 7, "home": "A", "away": "B", "phase": "LIVE",
+                                 "scan_time_utc": "2026-09-30T10:00:00+00:00",
+                                 "sharp": 10, "blowout": 10, "upset": 10, "convergence": 40}) + "\n")
+        hist = W.movement_history(day)
+        assert 7 in hist
+        kinds = [t for _, t, _ in hist[7]]
+        assert "SIGNAL WEAKENED" in kinds and "SIGNAL INVALIDATED" in kinds  # convergence 60→40
+        assert "PHASE" in kinds                                              # PREMATCH→LIVE
+        # filtre par fixture
+        assert W.movement_history(day, {999}) == {}
+    finally:
+        W.SNAP = old
+
+
+def test_email_has_character_market_live_ko_and_history(tmp_path):
+    import json
+    day = dt.date(2026, 9, 30)
+    old = W.SNAP
+    try:
+        W.SNAP = tmp_path
+        base = {"fixture_id": 3, "home": "Big", "away": "Small", "league": "L", "country": "Eng",
+                "kickoff": "2026-09-30T18:00:00+00:00", "sharp": 20, "blowout": 80, "upset": 10,
+                "convergence": 30, "confidence": 70, "data_quality": 80, "lambdas": [2.6, 0.5],
+                "reco": {"primary_market": "Handicap asiatique -0.5/-1 domicile", "value": "NON CONFIRMÉE",
+                         "decision": {"tier": "JOUER", "unites_indicatives": 1.0,
+                                      "marche": "Handicap asiatique -0.5/-1 domicile",
+                                      "signal": "BLOWOUT 80/100", "confirmation_echange": True}}}
+        live = {"fixture_id": 4, "home": "C", "away": "D", "league": "L", "country": "Fra",
+                "kickoff": "2026-09-30T17:00:00+00:00", "phase": "LIVE", "status": "2H",
+                "score": {"home": 1, "away": 0}, "sharp": 10, "blowout": 10, "upset": 10, "convergence": 10,
+                "reco": {"primary_market": "NO BET", "decision": {"tier": "NO BET"}}}
+        with open(tmp_path / f"{day.isoformat()}.jsonl", "w", encoding="utf-8") as fh:
+            # deux relevés du match à décision → historique (blowout 60→80)
+            fh.write(json.dumps({**base, "phase": "PREMATCH", "blowout": 60,
+                                 "scan_time_utc": "2026-09-30T08:00:00+00:00"}) + "\n")
+            fh.write(json.dumps({**base, "phase": "PREMATCH",
+                                 "scan_time_utc": "2026-09-30T09:00:00+00:00"}) + "\n")
+            fh.write(json.dumps(live) + "\n")
+        subject, html = W.build_email_html(day)
+        assert "Marché (caractère)" in html            # nouvelle colonne caractère→marché
+        assert "DEMONSTRATION" in html                 # λ 2.6/0.5 → démonstration
+        assert "Over 2.5 + Handicap favori" in html    # mapping du profil
+        assert "<h2>En direct</h2>" in html and "17:00" in html   # KO en direct
+        assert "Historique des mouvements" in html
+        assert "Blowout 60→80" in html or "blowout 60→80" in html  # trajectoire du signal
+    finally:
+        W.SNAP = old
+
+
 # ───────── bilan : notation des marchés ─────────
 
 def test_grade_over_under():

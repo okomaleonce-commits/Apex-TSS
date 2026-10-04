@@ -812,6 +812,36 @@ def detect_changes(prev, rec):
     return out
 
 
+def movement_history(day, fixture_ids=None, max_events=6):
+    """Historique des mouvements notables d'un match au fil des passages de la journée.
+    Rejoue detect_changes sur les relevés consécutifs du snapshot (append-only) et horodate chaque
+    événement par l'heure du passage. Retourne {fixture_id: [(heure, type, détail), …]} (au plus
+    `max_events` par match, du plus ancien au plus récent). N'invente rien : uniquement les relevés
+    réellement enregistrés."""
+    path = SNAP / f"{day.isoformat()}.jsonl"
+    if not path.exists():
+        return {}
+    series = {}
+    for line in open(path, encoding="utf-8"):
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        series.setdefault(r["fixture_id"], []).append(r)
+    hist = {}
+    for fid, recs in series.items():
+        if fixture_ids is not None and fid not in fixture_ids:
+            continue
+        events = []
+        for prev, cur in zip(recs, recs[1:]):
+            t = (cur.get("scan_time_utc") or "")[11:16]
+            for c in detect_changes(prev, cur):
+                events.append((t, c["type"], c["detail"]))
+        if events:
+            hist[fid] = events[-max_events:]
+    return hist
+
+
 # ───────────────────────── REPORT (spec §36-38) ─────────────────────────
 
 def latest_by_fixture(day):
@@ -1292,37 +1322,77 @@ def build_email_html(day) -> tuple:
     else:
         H += ["<div class='muted'>Aucun match ne débute dans les 60 prochaines minutes.</div>"]
 
-    # Caractère attendu (APEX-CHARACTER) depuis les λ structurels — odds-free, jamais inventé
+    # Caractère attendu (APEX-CHARACTER) depuis les λ structurels — odds-free, jamais inventé.
+    # Marché « cohérent » avec chaque profil : simple aide de lecture (PAS un pari, PAS une value) —
+    # le caractère est descriptif, il indique vers quel type de marché le schéma de match penche.
+    _CARAC_MARCHE = {
+        "VERROU": "Under 2.5 / Under 1.5",
+        "MATCH_FERME": "Under 2.5",
+        "EQUILIBRE": "pas de marché net",
+        "BATAILLE_OUVERTE": "Over 2.5 / BTTS",
+        "VICTOIRE_NETTE": "Handicap favori -1",
+        "DEMONSTRATION": "Over 2.5 + Handicap favori",
+    }
+
     def _carac(r):
+        """(libellé affiché, clé de profil) ou ('—', None)."""
         lam = r.get("lambdas")
         if not lam or len(lam) != 2:
-            return "—"
+            return "—", None
         try:
             import apex_character as _CH
             ep = _CH.expected_profile(lam[0], lam[1])
-            return f"{_CH.PROFIL_LABEL[ep['profil_attendu']].split(' ', 1)[0]} {ep['profil_attendu']} {int(ep['p_top']*100)}%"
+            pk = ep["profil_attendu"]
+            return f"{_CH.PROFIL_LABEL[pk].split(' ', 1)[0]} {pk} {int(ep['p_top']*100)}%", pk
         except Exception:  # noqa: BLE001
-            return "—"
+            return "—", None
 
     if deci:
         H += ["<h2>Décisions du jour</h2>",
               "<table><tr><th>Palier</th><th>Match</th><th>Compét.</th><th>KO</th><th>Marché retenu</th>"
-              "<th>Signal</th><th>Caractère attendu</th><th>Éch.</th><th class='r'>Unités</th><th class='r'>Conf</th></tr>"]
+              "<th>Signal</th><th>Caractère attendu</th><th>Marché (caractère)</th><th>Éch.</th>"
+              "<th class='r'>Unités</th><th class='r'>Conf</th></tr>"]
         for r in deci:
             d = r["reco"]["decision"]
             cls = "jouer" if d["tier"] == "JOUER" else "petit"
+            carac_str, carac_pk = _carac(r)
+            carac_mkt = _CARAC_MARCHE.get(carac_pk, "—")
             H.append(f"<tr><td><span class='{cls}'>{d['tier']}</span></td><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
                      f"<td>{esc((r.get('country') or '')[:3])} {esc(r['league'][:16])}</td><td>{r['kickoff'][11:16]}</td>"
                      f"<td>{esc(d['marche'][:34])}</td><td class='tag'>{esc(d['signal'])}</td>"
-                     f"<td class='muted'>{esc(_carac(r))}</td>"
+                     f"<td class='muted'>{esc(carac_str)}</td><td class='muted'>{esc(carac_mkt)}</td>"
                      f"<td>{'✓' if d.get('confirmation_echange') else '—'}</td>"
                      f"<td class='r'>{d['unites_indicatives']}</td><td class='r'>{r.get('confidence','?')}</td></tr>")
         H += ["</table>",
               "<div class='muted warn'>Unités indicatives de suivi, pas un conseil de mise : cote à vérifier et "
               "horodater avant tout pari ; le modèle structurel ne bat pas le marché. « Caractère attendu » = "
-              "schéma de match prédit par les λ structurels (APEX-CHARACTER, sans cote).</div>"]
+              "schéma de match prédit par les λ structurels (APEX-CHARACTER, sans cote). « Marché (caractère) » = "
+              "type de marché cohérent avec ce schéma (aide de lecture, pas un pari) : Verrou/Match fermé → Under · "
+              "Bataille ouverte → Over/BTTS · Victoire nette/Démonstration → Over et/ou Handicap favori · "
+              "Équilibré → pas de marché net. La « Convergence » (signal WORM) pointe déjà, elle, vers Over 2.5 ou "
+              "Under 2.5 dans la colonne « Marché retenu ».</div>"]
     else:
         H += ["<h2>Décisions du jour</h2><div class='muted'>Aucune décision JOUER/JOUER_PETIT ce passage.</div>"]
+
+    # ─── Historique des mouvements sur les matchs suivis (passages précédents) ───
+    tracked = list(deci) + [r for r in live if r not in deci]
+    hist = movement_history(day, {r["fixture_id"] for r in tracked if r.get("fixture_id")})
+    H += ["<h2>Historique des mouvements (passages précédents)</h2>"]
+    if any(hist.get(r.get("fixture_id")) for r in tracked):
+        H += ["<div class='muted'>Trajectoire des signaux/cotes/phases relevée aux passages antérieurs de la "
+              "journée, du plus ancien au plus récent (horaires UTC).</div>",
+              "<table><tr><th>Match</th><th>KO</th><th>Mouvements</th></tr>"]
+        for r in tracked:
+            ev = hist.get(r.get("fixture_id"))
+            if not ev:
+                continue
+            trail = " · ".join(f"{t} {typ.replace('SIGNAL ', '').title()} {det}" for t, typ, det in ev)
+            H.append(f"<tr><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
+                     f"<td>{esc((r.get('kickoff') or '')[11:16])}</td><td class='muted'>{esc(trail)}</td></tr>")
+        H += ["</table>"]
+    else:
+        H += ["<div class='muted'>Aucun mouvement notable enregistré sur les matchs suivis "
+              "(premier passage de la journée, ou signaux stables).</div>"]
 
     # Recoupement avec APEX-PROTOCOL (ledger apex_bsm)
     lidx = ledger_index()
@@ -1349,18 +1419,20 @@ def build_email_html(day) -> tuple:
               "au journal (ledger/forecasts.jsonl). Lance le protocole APEX sur ces matchs pour recouper.</div>"]
 
     if live:
-        H += ["<h2>En direct</h2><table><tr><th>Match</th><th>Score</th><th>Statut</th></tr>"]
+        H += ["<h2>En direct</h2><table><tr><th>Match</th><th>KO</th><th>Score</th><th>Statut</th></tr>"]
         for r in live[:10]:
-            H.append(f"<tr><td>{esc(r['home'])}–{esc(r['away'])}</td><td>{esc(fmt_score(r.get('score')))}</td><td>{esc(r['status'])}</td></tr>")
+            H.append(f"<tr><td>{esc(r['home'])}–{esc(r['away'])}</td><td>{esc((r.get('kickoff') or '')[11:16])}</td>"
+                     f"<td>{esc(fmt_score(r.get('score')))}</td><td>{esc(r['status'])}</td></tr>")
         H += ["</table>"]
 
-    H += ["<h2>Meilleures anomalies</h2><table><tr><th>Match</th><th>Sharp</th><th>Blow</th><th>Upset</th>"
+    H += ["<h2>Meilleures anomalies</h2><table><tr><th>Match</th><th>KO</th><th>Sharp</th><th>Blow</th><th>Upset</th>"
           "<th>Conv</th><th>Marché</th><th>Value</th></tr>"]
     for r in active[:15]:
         reco = r.get("reco", {})
         vd = reco.get("value_1x2_directe")
         val = f"1X2 {vd['issue'][0]} EV{vd['ev']:+.2f}" if vd else reco.get("value", "")
-        H.append(f"<tr><td>{esc(r['home'])}–{esc(r['away'])}</td><td>{r.get('sharp','–')}</td><td>{r.get('blowout','–')}</td>"
+        H.append(f"<tr><td>{esc(r['home'])}–{esc(r['away'])}</td><td>{esc((r.get('kickoff') or '')[11:16])}</td>"
+                 f"<td>{r.get('sharp','–')}</td><td>{r.get('blowout','–')}</td>"
                  f"<td>{r.get('upset','–')}</td><td>{r.get('convergence','–')}</td>"
                  f"<td>{esc(reco.get('primary_market','?')[:30])}</td><td>{esc(val)}</td></tr>")
     H += ["</table>",
