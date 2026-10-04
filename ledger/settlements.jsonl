@@ -181,3 +181,5 @@
 {"forecast_id": "6a39ee0f875a", "enregistre_utc": "2026-10-04T06:54:13+00:00", "statut": "JOUE", "score": "2-1", "mise_executee": null, "cote_executee": null, "observations": "réglé automatiquement (API-Football, statut FT)"}
 {"forecast_id": "960ea0dbcdbc", "enregistre_utc": "2026-10-04T06:54:14+00:00", "statut": "JOUE", "score": "0-2", "mise_executee": null, "cote_executee": null, "observations": "réglé automatiquement (API-Football, statut FT)"}
 {"forecast_id": "999ea970699b", "enregistre_utc": "2026-10-04T06:54:15+00:00", "statut": "JOUE", "score": "0-1", "mise_executee": null, "cote_executee": null, "observations": "réglé automatiquement (API-Football, statut FT)"}
+{"forecast_id": "fba0ed8388b0", "enregistre_utc": "2026-10-04T16:47:56+00:00", "statut": "JOUE", "score": "1-0", "mise_executee": null, "cote_executee": null, "observations": "réglé automatiquement (API-Football, statut FT)"}
+{"forecast_id": "cf208e2b9961", "enregistre_utc": "2026-10-04T16:47:57+00:00", "statut": "JOUE", "score": "0-1", "mise_executee": null, "cote_executee": null, "observations": "réglé automatiquement (API-Football, statut FT)"}
