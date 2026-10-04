@@ -218,9 +218,10 @@ def fmt_score(sc):
     return "—" if sc is None else str(sc)
 
 
-def sharp_signal(fair_now, fair_prev, hours_between, dispersion, pinnacle_vs_median, exchange=None):
+def sharp_signal(fair_now, fair_prev, hours_between, dispersion, sharp_vs_median, exchange=None):
     """SHARP (spec §13). Composantes calculables sans argent public : trajectoire de ligne entre nos
-    relevés, consensus (dispersion), divergence Pinnacle↔médiane. Quand l'argent public est fourni
+    relevés, consensus (dispersion), divergence books sharp↔médiane (Pinnacle + book asiatique SBO
+    quand présent). Quand l'argent public est fourni
     (`exchange` = {total_matched, money:[h,d,a]|None, fair:[h,d,a]|None}, ex. volume excapper), on ajoute
     le VOLUME réel matché, et — si la répartition d'argent est connue — la confirmation et un vrai Reverse
     Line Movement. Sans ces données, volume/public/exchange restent UNAVAILABLE (spec §34)."""
@@ -238,9 +239,9 @@ def sharp_signal(fair_now, fair_prev, hours_between, dispersion, pinnacle_vs_med
     if dispersion is not None:
         comp["consensus"] = {"dispersion": dispersion, "provenance": CALCULATED}
         score += max(0, 20 - dispersion * 400)  # faible dispersion = consensus serré
-    if pinnacle_vs_median is not None:
-        comp["pinnacle_vs_median"] = {"valeur": round(pinnacle_vs_median, 4), "provenance": CALCULATED}
-        score += min(20, abs(pinnacle_vs_median) * 200)
+    if sharp_vs_median is not None:
+        comp["sharp_vs_median"] = {"valeur": round(sharp_vs_median, 4), "provenance": CALCULATED}
+        score += min(20, abs(sharp_vs_median) * 200)
 
     if exchange:
         tm = exchange.get("total_matched")
@@ -410,6 +411,57 @@ def confidence(rec, dispersion) -> int:
         if top_tag == "STATSCONVERGENCE" and rec.get("convergence_dir") == "Under 2.5":
             c -= 8
     return clamp(c)
+
+
+# ───────────────────────── marchés asiatiques : sharp & intégrité ─────────────────────────
+
+# Books réputés « sharp » (prix informatifs) présents dans le flux : Pinnacle + le book asiatique
+# SBO (SBOBet). Leur consensus sert de référence face à la médiane du marché (signal Sharp).
+SHARP_BOOKS = ("Pinnacle", "SBO")
+# Seuil d'intégrité : un déplacement du handicap asiatique PRINCIPAL d'au moins 0,5 but entre deux
+# relevés est anormal (les lignes bougent normalement par pas de 0,25, lentement). Au-delà, on lève un
+# drapeau « suspect » — jamais un pari, c'est un signal d'intégrité (possible match arrangé).
+AH_INTEGRITY_SHIFT = 0.5
+
+
+def _ah_main_line(ah):
+    """Handicap asiatique PRINCIPAL côté domicile : la ligne dont le prix est le plus proche de 2.0
+    (quasi pick-em = marge attendue du marché). Retourne un float (ex. -0.75) ou None."""
+    if not isinstance(ah, dict):
+        return None
+    dom = ah.get("dom") or {}
+    best, best_d = None, 1e9
+    for k, v in dom.items():
+        try:
+            h, p = float(k), float(v)
+        except (TypeError, ValueError):
+            continue
+        d = abs(p - 2.0)
+        if d < best_d:
+            best, best_d = h, d
+    return best
+
+
+def asian_integrity(rec, prev):
+    """Détecte un mouvement SUSPECT du handicap asiatique principal entre le relevé précédent et
+    l'actuel (même book de référence). Ne price rien, n'invente rien : si l'AH manque à l'un des deux
+    relevés, renvoie None. Un décalage ≥ AH_INTEGRITY_SHIFT buts lève le drapeau d'intégrité."""
+    if not prev:
+        return None
+    bk_now, ah_now = AF.pick_book(rec.get("odds", {}), "AH")
+    bk_prev, ah_prev = AF.pick_book(prev.get("odds", {}), "AH")
+    if not ah_now or not ah_prev:
+        return None
+    ln_now, ln_prev = _ah_main_line(ah_now), _ah_main_line(ah_prev)
+    if ln_now is None or ln_prev is None:
+        return None
+    shift = round(ln_now - ln_prev, 2)
+    if abs(shift) < AH_INTEGRITY_SHIFT:
+        return None
+    sens = "vers le favori (ligne qui se creuse)" if shift < 0 else "vers l'outsider (ligne qui se réduit)"
+    return {"suspect": True, "ligne_prec": ln_prev, "ligne_now": ln_now, "shift": shift,
+            "book": bk_now, "sens": sens, "provenance": OBSERVED,
+            "note": "mouvement AH anormal entre deux relevés — drapeau d'intégrité, JAMAIS un pari"}
 
 
 # ───────────────────────── recommandation de marché (spec §22) ─────────────────────────
@@ -686,12 +738,20 @@ def cmd_scan(a):
             hours_between = max(0.0, (t1 - t0).total_seconds() / 3600)
         rec["signal_stable"] = bool(fair_prev and fair and max(abs(x - y) for x, y in zip(fair, fair_prev)) < 0.01)
 
-        # pinnacle vs médiane
-        pin_vs_med = None
-        if "Pinnacle" in rec["odds"] and "1X2" in rec["odds"]["Pinnacle"]:
-            dpin = demargin(rec["odds"]["Pinnacle"]["1X2"])
-            if dpin and disp is not None and fair:
-                pin_vs_med = dpin[0] - fair[0]
+        # consensus des books sharp (Pinnacle + asiatique SBO) vs médiane du marché
+        sharp_vs_med, sharp_books_used = None, []
+        sharp_fairs = []
+        for bname in SHARP_BOOKS:
+            bk = rec["odds"].get(bname)
+            if isinstance(bk, dict) and bk.get("1X2"):
+                df = demargin(bk["1X2"])
+                if df:
+                    sharp_fairs.append(df)
+                    sharp_books_used.append(bname)
+        if sharp_fairs and disp is not None and fair:
+            avg_home = sum(f[0] for f in sharp_fairs) / len(sharp_fairs)
+            sharp_vs_med = avg_home - fair[0]
+        rec["sharp_books_used"] = sharp_books_used
 
         # Argent public excapper apparié à ce match (volume matché réel). Appariement noms + tolérance.
         exch = None
@@ -712,7 +772,7 @@ def cmd_scan(a):
         rec["exchange"] = exch
 
         # ANALYZE — moteurs d'anomalies
-        rec["sharp"], rec["sharp_components"] = sharp_signal(fair, fair_prev, hours_between, disp, pin_vs_med, exch)
+        rec["sharp"], rec["sharp_components"] = sharp_signal(fair, fair_prev, hours_between, disp, sharp_vs_med, exch)
         rec["exchange_confirmation"] = "exchange_confirmation" in rec["sharp_components"]
         rec["rlm"] = rec["sharp_components"].get("rlm")
         rec["blowout"], rec["blowout_components"] = blowout_engine(fair, strength, rec["home_id"], rec["away_id"])
@@ -740,6 +800,17 @@ def cmd_scan(a):
         rec["data_quality"] = data_quality(rec)
         rec["confidence"] = confidence(rec, disp)
         rec["reco"] = recommend(rec)
+
+        # Intégrité des marchés asiatiques : un handicap qui bouge anormalement entre deux relevés
+        # est un drapeau d'intégrité (possible match arrangé) → on NEUTRALISE la décision (jamais parier).
+        integ = asian_integrity(rec, p)
+        if integ:
+            rec["asian_integrity"] = integ
+            if (rec["reco"].get("decision", {}) or {}).get("tier") in ("JOUER", "JOUER_PETIT"):
+                rec["reco"]["decision"] = {"tier": "NO BET", "unites_indicatives": 0.0,
+                                           "marche": "NO BET",
+                                           "note": "neutralisé — intégrité AH suspecte (mouvement de ligne anormal)"}
+                rec["reco"]["integrity_blocked"] = True
 
         # détection de changements (spec §27)
         for ch in detect_changes(p, rec):
@@ -1439,6 +1510,30 @@ def build_email_html(day) -> tuple:
           "<div class='muted'>Volume d'argent : réel via excapper (Betfair MoneyWay, données publiques) quand "
           "--money est actif, sinon UNAVAILABLE (jamais estimé). Détail complet dans reports/worm/.</div>"]
 
+    # ─── Marchés asiatiques suspects (intégrité) : mouvements AH anormaux ───
+    suspects = [r for r in rows if (r.get("asian_integrity") or {}).get("suspect")]
+    H += ["<h2>Marchés asiatiques suspects (intégrité)</h2>"]
+    if suspects:
+        H += ["<div class='muted'>Handicap asiatique principal qui a bougé anormalement entre deux relevés "
+              "(≥ 0,5 but). <b>Drapeau d'intégrité — ces matchs sont NEUTRALISÉS (jamais pariés)</b>, pas une "
+              "opportunité.</div>",
+              "<table><tr><th>Match</th><th>KO</th><th>Compét.</th><th>Ligne AH (avant → après)</th>"
+              "<th>Δ</th><th>Sens</th><th>Book</th></tr>"]
+        for r in sorted(suspects, key=lambda r: abs((r.get("asian_integrity") or {}).get("shift") or 0), reverse=True)[:15]:
+            ig = r["asian_integrity"]
+            H.append(f"<tr><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
+                     f"<td>{esc((r.get('kickoff') or '')[11:16])}</td>"
+                     f"<td>{esc((r.get('country') or '')[:3])} {esc((r.get('league') or '')[:16])}</td>"
+                     f"<td>{ig['ligne_prec']:+.2f} → {ig['ligne_now']:+.2f}</td>"
+                     f"<td class='warn'><b>{ig['shift']:+.2f}</b></td><td class='muted'>{esc(ig['sens'])}</td>"
+                     f"<td>{esc(ig.get('book') or '—')}</td></tr>")
+        H += ["</table>",
+              "<div class='muted'>« Suspect » = mouvement de ligne qui ne reflète pas un simple ajustement de "
+              "marché. On le SIGNALE et on l'ÉCARTE des décisions ; on ne parie jamais dessus.</div>"]
+    else:
+        H += ["<div class='muted'>Aucun mouvement de handicap asiatique anormal relevé ce passage "
+              "(ou pas de second relevé pour comparer).</div>"]
+
     # ─── APEX-MI — bruit de marché H-60 (focus UPSET + BLOWOUT) ───
     H += ["<h2>APEX-MI — bruit de marché H-60 (focus UPSET + BLOWOUT)</h2>",
           "<div class='muted'>Cellule <code>tools/apex_mi.py</code> activée sur les matchs dont le coup "
@@ -1556,7 +1651,7 @@ def build_email_html(day) -> tuple:
               "connecteur Gmail (session)" if gmail_mode else "SMTP (secrets CI)"),
           "</table>",
           "<table><tr><th>Moteur</th><th>Rôle</th></tr>"
-          "<tr><td>Sharp</td><td class='muted'>trajectoire de ligne + dispersion + Pinnacle↔médiane + volume réel</td></tr>"
+          "<tr><td>Sharp</td><td class='muted'>trajectoire de ligne + dispersion + consensus books sharp (Pinnacle + SBO asiatique)↔médiane + volume réel</td></tr>"
           "<tr><td>Blowout</td><td class='muted'>supériorité multidimensionnelle du favori</td></tr>"
           "<tr><td>Upset</td><td class='muted'>outsider sous-évalué</td></tr>"
           "<tr><td>StatsConvergence</td><td class='muted'>familles indépendantes Over/Under 2.5</td></tr>"

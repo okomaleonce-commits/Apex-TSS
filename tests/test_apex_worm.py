@@ -297,6 +297,41 @@ def test_decision_jouer_needs_confirmation():
     assert with_conf["decision"]["tier"] == "JOUER"          # fort + confirmation d'échange
 
 
+def test_ah_main_line_picks_near_even():
+    ah = {"dom": {"-0.25": 1.55, "-0.75": 2.02, "-1.00": 2.45},
+          "ext": {"+0.25": 2.45, "+0.75": 1.85, "+1.00": 1.55}}
+    assert W._ah_main_line(ah) == -0.75   # prix le plus proche de 2.0
+    assert W._ah_main_line({}) is None
+    assert W._ah_main_line(None) is None
+
+
+def test_asian_integrity_flags_abnormal_shift():
+    prev = {"odds": {"Pinnacle": {"AH": {"dom": {"-0.25": 2.0}, "ext": {"+0.25": 1.8}}}}}
+    rec = {"odds": {"Pinnacle": {"AH": {"dom": {"-1.00": 2.0}, "ext": {"+1.00": 1.8}}}}}
+    ig = W.asian_integrity(rec, prev)
+    assert ig and ig["suspect"] is True
+    assert ig["shift"] == -0.75          # -1.00 - (-0.25), creuse vers le favori
+    assert ig["book"] == "Pinnacle"
+
+
+def test_asian_integrity_ignores_normal_shift():
+    prev = {"odds": {"Pinnacle": {"AH": {"dom": {"-0.25": 2.0}}}}}
+    rec = {"odds": {"Pinnacle": {"AH": {"dom": {"-0.50": 2.0}}}}}
+    assert W.asian_integrity(rec, prev) is None   # 0.25 < seuil 0.5
+
+
+def test_asian_integrity_none_without_ah_or_prev():
+    assert W.asian_integrity({"odds": {}}, {"odds": {}}) is None
+    assert W.asian_integrity({"odds": {"Pinnacle": {"AH": {"dom": {"-0.5": 2.0}}}}}, None) is None
+
+
+def test_sharp_vs_median_component_key():
+    # la composante sharp s'appelle désormais sharp_vs_median (consensus books sharp)
+    sc, comp = W.sharp_signal([0.5, 0.3, 0.2], [0.5, 0.3, 0.2], 2.0, 0.01, 0.05)
+    assert "sharp_vs_median" in comp
+    assert 0 <= sc <= 100
+
+
 def test_decision_no_bet_units_zero():
     out = W.recommend({"data_quality": 20, "sharp": 0, "blowout": None, "upset": None,
                        "convergence": None, "odds": {}})
