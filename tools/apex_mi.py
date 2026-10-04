@@ -53,6 +53,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUNS = os.path.join(ROOT, "runs_mi")
 SNAPSHOTS = os.path.join(ROOT, "data", "apifootball", "snapshots")
 JOURNAL = os.path.join(ROOT, "journal", "apex_mi_journal.csv")
+# Journal des veilles H-60 actionnables (LIVE_UPSET_WATCH / LIVE_BLOWOUT_WATCH), append-only.
+# Enregistre le CÔTÉ pricé et la cote juste-implicite H-60 pour rendre la cellule AUDITABLE a
+# posteriori (reco d'audit). `settle` la règle contre le score final du snapshot WORM.
+WATCH_JOURNAL = os.path.join(ROOT, "journal", "apex_mi_watch.csv")
+WATCH_HEADER = ["day", "fixture_id", "match", "league", "kind", "side", "market",
+                "side_prob_h60", "fair_odd_h60", "watch_score", "status",
+                "logged_at_utc", "settled_at_utc", "score", "result"]
 # Pont avec APEX-WORM : le scanner écrit ses relevés horodatés ici ; l'activation H-60
 # d'APEX-MI les lit, produit un rapport orienté UPSET et le dépose pour l'email WORM.
 WORM_SNAP = os.path.join(ROOT, "data", "worm", "snapshots")
@@ -1084,6 +1091,124 @@ def _write_mi_md(day, artifact):
         fh.write("\n".join(L))
 
 
+def _watch_market(kind, side):
+    """Marché directionnel implicite d'une veille, dans la convention de grade_market (APEX-WORM)."""
+    if kind == "UPSET":
+        return "Double chance 1X / +0.5 AH domicile" if side == "home" else "Double chance X2 / +0.5 AH extérieur"
+    if kind == "BLOWOUT":
+        return "Handicap asiatique -0.5/-1 domicile" if side == "home" else "Handicap asiatique -0.5/-1 extérieur"
+    return None
+
+
+def _watch_picks(day, artifact):
+    """Extrait les veilles H-60 ACTIONNABLES (LIVE_UPSET_WATCH / LIVE_BLOWOUT_WATCH) en lignes
+    de journal : côté pricé + cote juste-implicite H-60 (dé-marginée, INDICATIVE — ce n'est pas une
+    cote bookmaker horodatée) pour être réglées ensuite contre le score final."""
+    rows = []
+    for it in artifact.get("items", []):
+        if it.get("status") == "LIVE_UPSET_WATCH":
+            kind, side, prob = "UPSET", it.get("dog_side"), it.get("dog_prob_now")
+            watch = it.get("upset_watch_score")
+        elif it.get("blowout_status") == "LIVE_BLOWOUT_WATCH":
+            kind, side, prob = "BLOWOUT", it.get("fav_side"), it.get("fav_prob_now")
+            watch = it.get("blowout_watch_score")
+        else:
+            continue
+        market = _watch_market(kind, side)
+        fair_odd = round(1.0 / prob, 2) if (prob and prob > 0) else ""
+        rows.append([day, it.get("fixture_id"), it.get("match"), it.get("league"), kind, side or "",
+                     market or "", round(prob, 4) if prob is not None else "", fair_odd,
+                     watch if watch is not None else "",
+                     it.get("status") if kind == "UPSET" else it.get("blowout_status"),
+                     now_utc(), "", "", ""])
+    return rows
+
+
+def _journal_watches(day, artifact):
+    """Append-only : n'ajoute une veille que si (fixture_id, kind) n'est pas déjà journalisé ce jour
+    (évite les doublons entre passages horaires). Retourne le nombre de lignes ajoutées."""
+    picks = _watch_picks(day, artifact)
+    if not picks:
+        return 0
+    import csv
+    seen = set()
+    if os.path.exists(WATCH_JOURNAL):
+        with open(WATCH_JOURNAL, encoding="utf-8", newline="") as fh:
+            for r in csv.DictReader(fh):
+                seen.add((r.get("day"), str(r.get("fixture_id")), r.get("kind")))
+    fresh = [p for p in picks if (p[0], str(p[1]), p[4]) not in seen]
+    if not fresh:
+        return 0
+    os.makedirs(os.path.dirname(WATCH_JOURNAL), exist_ok=True)
+    new = not os.path.exists(WATCH_JOURNAL)
+    with open(WATCH_JOURNAL, "a", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        if new:
+            w.writerow(WATCH_HEADER)
+        w.writerows(fresh)
+    return len(fresh)
+
+
+def _final_scores_from_snapshot(day):
+    """{fixture_id: (hg, ag)} pour les matchs DONE du snapshot WORM du jour (dernier relevé par fixture)."""
+    path = os.path.join(WORM_SNAP, f"{day}.jsonl")
+    finals = {}
+    if not os.path.exists(path):
+        return finals
+    for line in open(path, encoding="utf-8"):
+        try:
+            r = json.loads(line)
+        except (ValueError, json.JSONDecodeError):
+            continue
+        if r.get("phase") == "DONE":
+            sc = r.get("score") or {}
+            hg, ag = sc.get("home"), sc.get("away")
+            if hg is not None and ag is not None:
+                finals[str(r.get("fixture_id"))] = (hg, ag)
+    return finals
+
+
+def cmd_settle(a):
+    """Règle les veilles H-60 non encore réglées contre le score final (snapshot WORM).
+    Réutilise grade_market d'APEX-WORM pour une notation cohérente avec le scanner."""
+    import csv
+    if not os.path.exists(WATCH_JOURNAL):
+        print("Aucun journal de veille à régler.")
+        return 0
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import apex_worm as W
+    with open(WATCH_JOURNAL, encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    finals_by_day = {}
+    settled = 0
+    for r in rows:
+        if r.get("result"):
+            continue
+        d = r.get("day")
+        if d not in finals_by_day:
+            finals_by_day[d] = _final_scores_from_snapshot(d)
+        fin = finals_by_day[d].get(str(r.get("fixture_id")))
+        if not fin:
+            continue
+        hg, ag = fin
+        res = W.grade_market(r.get("market"), hg, ag)
+        r["score"] = f"{hg}-{ag}"
+        r["result"] = res
+        r["settled_at_utc"] = now_utc()
+        settled += 1
+    with open(WATCH_JOURNAL, "w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=WATCH_HEADER)
+        w.writeheader()
+        w.writerows(rows)
+    graded = [r for r in rows if r.get("result") and r["result"] not in ("non-gradé",)]
+    wins = sum(1 for r in graded if r["result"] == "gagné") + 0.5 * sum(1 for r in graded if r["result"] == "demi-gagné")
+    n = sum(1 for r in graded if r["result"] != "push")
+    taux = (wins / n) if n else None
+    print(f"APEX-MI settle : {settled} veille(s) réglée(s) ce passage · "
+          f"{len(graded)} gradées au total" + (f" · réussite {taux:.0%}" if taux is not None else ""))
+    return 0
+
+
 def run_worm_hook(day, within=60.0, write=True):
     """Activation H-60 : sélectionne les matchs WORM en PREMATCH dont le coup d'envoi est
     dans `within` minutes, en produit une lecture APEX-MI orientée UPSET, et dépose un
@@ -1111,6 +1236,8 @@ def run_worm_hook(day, within=60.0, write=True):
     if write:
         write_json(os.path.join(WORM_MI, f"{day}.json"), artifact)
         _write_mi_md(day, artifact)
+        added = _journal_watches(day, artifact)
+        artifact["watches_journaled"] = added
     return artifact
 
 
@@ -1188,12 +1315,14 @@ def main():
     pw.add_argument("--within", default=60, help="fenêtre H-N minutes avant le coup d'envoi (défaut 60)")
     pw.add_argument("--dry-run", action="store_true", help="n'écrit pas l'artefact (affiche seulement)")
 
+    sp.add_parser("settle", help="Règle les veilles H-60 journalisées contre le score final (snapshot WORM)")
+
     a = p.parse_args()
     return {
         "window": cmd_window, "init": cmd_init, "oddsflow": cmd_oddsflow,
         "signal": cmd_signal, "behavioral": cmd_behavioral, "check": cmd_check,
         "score": cmd_score, "finalize": cmd_finalize, "email": cmd_email,
-        "worm-hook": cmd_worm_hook,
+        "worm-hook": cmd_worm_hook, "settle": cmd_settle,
     }[a.cmd](a)
 
 

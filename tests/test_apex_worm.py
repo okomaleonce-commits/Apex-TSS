@@ -304,6 +304,59 @@ def test_decision_no_bet_units_zero():
     assert out["decision"]["unites_indicatives"] == 0.0
 
 
+# ───────── recalibration : seuils par signal (reco audit) ─────────
+
+def test_statsconvergence_below_min_is_no_bet():
+    # convergence 50 : au-dessus de l'ancien seuil global (45) mais sous le nouveau seuil
+    # STATSCONVERGENCE (60) → plus de pari officiel.
+    rec = {"data_quality": 80, "blowout": None, "upset": None, "convergence": 50, "sharp": None,
+           "convergence_dir": "Over 2.5", "odds": {"Pinnacle": {"1X2": [2.0, 3.3, 3.6]}}, "ev_best": None}
+    assert W.recommend(rec)["primary_market"] == "NO BET"
+
+
+def test_statsconvergence_over_at_60_is_actionable():
+    rec = {"data_quality": 80, "blowout": None, "upset": None, "convergence": 60, "sharp": None,
+           "convergence_dir": "Over 2.5", "odds": {"Pinnacle": {"1X2": [2.0, 3.3, 3.6]}}, "ev_best": None}
+    assert W.recommend(rec)["primary_market"] == "Over 2.5"
+
+
+def test_statsconvergence_under_needs_higher_bar():
+    # Under 2.5 à 60 : sous le seuil renforcé (67) → NO BET ; à 67 → actionnable.
+    base = {"data_quality": 80, "blowout": None, "upset": None, "sharp": None,
+            "convergence_dir": "Under 2.5", "odds": {"Pinnacle": {"1X2": [2.0, 3.3, 3.6]}}, "ev_best": None}
+    assert W.recommend({**base, "convergence": 60})["primary_market"] == "NO BET"
+    assert W.recommend({**base, "convergence": 67})["primary_market"] == "Under 2.5"
+
+
+def test_blowout_threshold_unchanged():
+    # BLOWOUT reste actionnable dès 45 (barre basse inchangée).
+    rec = {"data_quality": 80, "blowout": 45, "upset": None, "convergence": None, "sharp": None,
+           "odds": {"Pinnacle": {"1X2": [1.4, 4.5, 7.0]}}, "ev_best": None}
+    assert "Handicap" in W.recommend(rec)["primary_market"]
+
+
+# ───────── recalibration : confiance pondérée par fiabilité du signal ─────────
+
+def test_confidence_blowout_outranks_statsconvergence():
+    base = {"data_quality": 80, "min_played": 8, "compositions": None, "signal_stable": True}
+    blow = W.confidence({**base, "blowout": 80, "convergence": None}, 0.01)
+    conv = W.confidence({**base, "blowout": None, "convergence": 80, "convergence_dir": "Over 2.5"}, 0.01)
+    assert blow > conv   # même contexte, BLOWOUT plus fiable → confiance plus haute
+
+
+def test_confidence_under_malus():
+    base = {"data_quality": 80, "min_played": 8, "compositions": None, "signal_stable": True,
+            "blowout": None, "convergence": 80}
+    over = W.confidence({**base, "convergence_dir": "Over 2.5"}, 0.01)
+    under = W.confidence({**base, "convergence_dir": "Under 2.5"}, 0.01)
+    assert under < over   # Under 2.5 pénalisé (marché le plus faible en bilan)
+
+
+def test_confidence_bounds_still_0_100():
+    assert 0 <= W.confidence({"data_quality": 100, "min_played": 20, "compositions": [{"x": 1}],
+                              "signal_stable": True, "blowout": 100}, 0.0) <= 100
+
+
 # ───────── email digest ─────────
 
 def test_build_email_html(tmp_path):

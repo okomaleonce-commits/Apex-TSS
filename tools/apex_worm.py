@@ -379,6 +379,13 @@ def data_quality(rec) -> int:
     return clamp(q)
 
 
+# Fiabilité empirique par signal, mesurée sur les bilans cumulés 2026-09-30→10-02
+# (BLOWOUT ~83 %, UPSET ~83 % mais N très faible, STATSCONVERGENCE ~66 %, SHARP non encore
+# jugé en avant). 1.0 = neutre. Sert à recalibrer la confiance : l'audit a montré que la tranche
+# conf≥70 ne surperformait pas, car la confiance ignorait la fiabilité du signal dominant.
+SIGNAL_RELIABILITY = {"BLOWOUT": 1.12, "UPSET": 1.0, "STATSCONVERGENCE": 0.85, "SHARP": 0.95}
+
+
 def confidence(rec, dispersion) -> int:
     c = 0.4 * rec["data_quality"]
     if dispersion is not None:
@@ -391,10 +398,40 @@ def confidence(rec, dispersion) -> int:
         c += 15                                # certitude compositions
     if rec.get("signal_stable"):
         c += 10
+    # Recalibration empirique : pondère par la fiabilité historique du signal dominant, et pénalise
+    # explicitement la branche Under 2.5 (marché le plus faible et en baisse dans les bilans). Ainsi
+    # la confiance discrimine enfin les signaux solides (BLOWOUT) des signaux fragiles.
+    sig_scores = {"BLOWOUT": rec.get("blowout"), "UPSET": rec.get("upset"),
+                  "STATSCONVERGENCE": rec.get("convergence"), "SHARP": rec.get("sharp")}
+    present = [(k, v) for k, v in sig_scores.items() if v is not None]
+    if present:
+        top_tag = max(present, key=lambda kv: kv[1])[0]
+        c *= SIGNAL_RELIABILITY.get(top_tag, 1.0)
+        if top_tag == "STATSCONVERGENCE" and rec.get("convergence_dir") == "Under 2.5":
+            c -= 8
     return clamp(c)
 
 
 # ───────────────────────── recommandation de marché (spec §22) ─────────────────────────
+
+# Seuils d'activation PAR SIGNAL (recalibrés sur les bilans cumulés 2026-09-30→10-02).
+# BLOWOUT ~83 % stable sur 3 jours → barre basse inchangée (45). STATSCONVERGENCE ~66 % et en
+# baisse (76→65→57 %) → barre relevée à 60. Sa branche Under 2.5 est la plus faible (80→63→33 %)
+# → barre encore plus haute (67). L'objectif est de couper le bas de gamme de STATSCONVERGENCE,
+# pas de toucher BLOWOUT/handicap qui porte la valeur du système.
+SIGNAL_MIN = {"BLOWOUT": 45, "UPSET": 45, "SHARP": 45, "STATSCONVERGENCE": 60}
+STATSCONV_UNDER_MIN = 67
+
+
+def _signal_eligible(tag, score, rec):
+    """Un signal est actionnable si son score dépasse le seuil propre à sa famille (et, pour
+    STATSCONVERGENCE→Under 2.5, un seuil renforcé). Sous le seuil, il n'est pas retenu comme
+    marché officiel : on ne joue pas un signal que le bilan montre peu fiable."""
+    mn = SIGNAL_MIN.get(tag, 45)
+    if tag == "STATSCONVERGENCE" and rec.get("convergence_dir") == "Under 2.5":
+        mn = max(mn, STATSCONV_UNDER_MIN)
+    return score >= mn
+
 
 def recommend(rec):
     """Traduit l'anomalie la plus forte en PRIMARY MARKET, ou NO BET. Marque VALUE: NON CONFIRMÉE
@@ -403,11 +440,14 @@ def recommend(rec):
     scores = {"BLOWOUT": rec.get("blowout"), "UPSET": rec.get("upset"), "STATSCONVERGENCE": rec.get("convergence"),
               "SHARP": rec.get("sharp")}
     ranked = sorted(((k, v) for k, v in scores.items() if v is not None), key=lambda kv: kv[1], reverse=True)
-    if not ranked or ranked[0][1] < 45 or rec["data_quality"] < 40:
+    # Filtre par seuil propre à chaque signal : un score élevé sur un signal peu fiable (p.ex.
+    # STATSCONVERGENCE Under 2.5 à 60) ne suffit plus à déclencher un marché officiel.
+    eligible = [(k, v) for k, v in ranked if _signal_eligible(k, v, rec)]
+    if not eligible or rec["data_quality"] < 40:
         return {"primary_market": "NO BET", "raison": "aucune anomalie assez nette ou données insuffisantes",
                 "value": "NON CONFIRMÉE",
                 "decision": {"tier": "NO BET", "unites_indicatives": 0.0, "marche": "NO BET"}}
-    tag, sc = ranked[0]
+    tag, sc = eligible[0]
     _, o1 = AF.pick_book(rec.get("odds", {}), "1X2")
     fair = demargin(o1) if o1 else None
     fav_home = fair[0] >= fair[2] if fair else None
