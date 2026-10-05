@@ -1,3 +1,6 @@
 day,fixture_id,match,league,kind,side,market,side_prob_h60,fair_odd_h60,watch_score,status,logged_at_utc,settled_at_utc,score,result
 2026-10-04,1636939,Pyrgos 1968 – Panionios,Super League 2,BLOWOUT,away,Handicap asiatique -0.5/-1 extérieur,0.6236,1.6,67,LIVE_BLOWOUT_WATCH,2026-10-04T11:37:28Z,2026-10-04T14:37:35Z,2-0,perdu
 2026-10-05,1350194,Montenegro U21 – Armenia U21,UEFA U21 Championship - Qualification,BLOWOUT,home,Handicap asiatique -0.5/-1 domicile,0.6878,1.45,65,LIVE_BLOWOUT_WATCH,2026-10-05T13:38:27Z,,,
+2026-10-05,1545611,Cyprus – Latvia,UEFA Nations League,BLOWOUT,home,Handicap asiatique -0.5/-1 domicile,0.6141,1.63,58,LIVE_BLOWOUT_WATCH,2026-10-05T15:37:27Z,,,
+2026-10-05,1554181,TSC Backa Topola – Grafičar,Prva Liga,BLOWOUT,home,Handicap asiatique -0.5/-1 domicile,0.7116,1.41,58,LIVE_BLOWOUT_WATCH,2026-10-05T15:37:27Z,,,
+2026-10-05,1642031,SAT Moreno – Deportivo Metalurgico,Torneo Promocional Amateur,UPSET,home,Double chance 1X / +0.5 AH domicile,0.2895,3.45,58,LIVE_UPSET_WATCH,2026-10-05T15:37:27Z,,,
