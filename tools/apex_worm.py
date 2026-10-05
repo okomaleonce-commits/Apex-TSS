@@ -1531,10 +1531,10 @@ def build_email_html(day) -> tuple:
             H.append(f"<tr><td>{esc(r['home'])}–{esc(r['away'])}</td><td>{esc((r.get('kickoff') or '')[11:16])}</td>"
                      f"<td>{esc(fmt_score(r.get('score')))}</td><td>{esc(r['status'])}</td>"
                      f"<td class='muted'>{esc(live_emerging_market(r.get('score'), r.get('status')))}</td></tr>")
+        H += ["</table>"]
         H += ["<div class='muted'>« Marché qui se dessine » = lecture descriptive de la tendance "
               "déduite du score et de la phase en direct (mécanique, aucune donnée inventée). "
               "Ce n'est pas un conseil de pari : le live n'est pas backtesté par le module BSM.</div>"]
-        H += ["</table>"]
 
     H += ["<h2>Meilleures anomalies</h2><table><tr><th>Match</th><th>KO</th><th>Sharp</th><th>Blow</th><th>Upset</th>"
           "<th>Conv</th><th>Marché</th><th>Value</th></tr>"]
