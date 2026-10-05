@@ -411,7 +411,12 @@ def test_build_email_html(tmp_path):
             fh.write(json.dumps(rec) + "\n")
         subject, html = W.build_email_html(day)
         assert "APEX-WORM" in subject
-        assert "<html" in html and "JOUER_PETIT" in html
+        # Gel de promotion (audit 2026-10-05) : le palier JOUER_PETIT est affiché « candidat− (gelé) »,
+        # jamais en surbrillance verte, et une bannière de gel est présente.
+        assert "<html" in html
+        assert "candidat− (gelé)" in html
+        assert "JOUER_PETIT" not in html
+        assert "Promotion JOUER/VERT GELÉE" in html
         assert "A–B" in html
     finally:
         W.SNAP = old

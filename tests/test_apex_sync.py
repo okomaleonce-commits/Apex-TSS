@@ -128,7 +128,8 @@ def test_build_protocol_command_not_runnable_without_lambdas():
 # ───────── traduction d'un forecast BSM (plan §3.9) ─────────
 
 def test_summarize_forecast_selection():
-    fc = {"forecast_id": "abc", "statut_mise": "PROPOSÉE", "statut_modele": "NON VALIDÉ",
+    # Chemin heureux : modèle VALIDÉ → une sélection est possible.
+    fc = {"forecast_id": "abc", "statut_mise": "PROPOSÉE", "statut_modele": "VALIDÉ",
           "decision": "SÉLECTION INDICATIVE : Over 2.5 @ 1.95",
           "ev": [{"marche": "1X2 1", "p": 0.60, "cote": 1.55, "ev": 0.01},
                  {"marche": "Over 2.5", "p": 0.58, "cote": 1.95, "ev": 0.05}]}
@@ -136,6 +137,18 @@ def test_summarize_forecast_selection():
     assert out["status"] == "selection"
     assert out["official"]["marche"] == "Over 2.5"
     assert out["official"]["full_settle"] is True
+
+
+def test_summarize_forecast_unvalidated_never_selects():
+    # DÉFAUT AUDIT (BSM NON VALIDÉ → VERT) : un modèle NON VALIDÉ, même avec une EV forte proposée,
+    # ne doit JAMAIS produire de sélection (donc jamais de feu VERT ni de mise autorisée).
+    fc = {"forecast_id": "nv", "statut_mise": "PROPOSÉE", "statut_modele": "NON VALIDÉ — λ structurels",
+          "decision": "SÉLECTION INDICATIVE : Over 2.5 @ 1.95",
+          "ev": [{"marche": "Over 2.5", "p": 0.58, "cote": 1.95, "ev": 0.05}]}
+    out = S.summarize_forecast(fc)
+    assert out["status"] == "unvalidated"
+    assert out["official"] is None
+    assert S.traffic_light(True, out, {"approved": True}) == S.ORANGE   # jamais VERT
 
 
 def test_summarize_forecast_abstention_and_wait():
@@ -148,7 +161,7 @@ def test_summarize_forecast_abstention_and_wait():
 
 
 def test_summarize_forecast_rejects_suspect_and_low_ev():
-    fc = {"statut_mise": "PROPOSÉE", "decision": "SÉLECTION",
+    fc = {"statut_mise": "PROPOSÉE", "statut_modele": "VALIDÉ", "decision": "SÉLECTION",
           "ev": [{"marche": "Over 2.5", "p": 0.7, "cote": 1.6, "ev": 0.12, "suspect": True},
                  {"marche": "1X2 1", "p": 0.5, "cote": 2.0, "ev": 0.0}]}
     assert S.summarize_forecast(fc)["status"] == "abstention"
@@ -210,6 +223,39 @@ def test_traffic_light_rules():
     assert S.traffic_light(True, {"status": "wait"}, None) == S.ORANGE
     assert S.traffic_light(True, {"status": "selection"}, {"approved": False}) == S.ORANGE
     assert S.traffic_light(True, {"status": "selection"}, {"approved": True}) == S.GREEN
+    assert S.traffic_light(True, {"status": "unvalidated"}, {"approved": True}) == S.ORANGE  # audit
+
+
+# ───────── verrous de décision (audit 2026-10-05) ─────────
+
+def test_basic_filters_veto_integrity_neutralised():
+    # DÉFAUT AUDIT : un match NEUTRALISÉ pour intégrité AH passait encore les filtres de candidature.
+    r = _rec(reco={"primary_market": "Handicap asiatique -0.5/-1 domicile",
+                   "signal_dominant": "BLOWOUT 72/100", "decision": {"tier": "NO BET"},
+                   "integrity_blocked": True},
+             asian_integrity={"suspect": True, "shift": -0.75})
+    ok, reasons = S.basic_filters(r, S.DEFAULT_CONFIG, now=NOW)
+    assert ok is False
+    assert any("intégrité" in x for x in reasons)
+
+
+def test_risk_rejects_ev_below_threshold():
+    # DÉFAUT AUDIT : le Risk autonome acceptait une EV ~2 % (sous le seuil 3 %).
+    cfg = {**S.DEFAULT_CONFIG, "bankroll": 1000.0}
+    # p=0.52, cote=1.96 → EV = 0.52·1.96 − 1 = +1.9 % < 3 %
+    r = S.risk_decision({"match_id": "m1", "league": "L", "market": "Over 2.5", "p": 0.52, "odds": 1.96}, cfg)
+    assert r["approved"] is False
+    assert any("EV" in x for x in r["reasons"])
+
+
+def test_risk_rejects_partial_settle_handicap():
+    # DÉFAUT AUDIT : un handicap à règlement partiel passait le Kelly binaire.
+    cfg = {**S.DEFAULT_CONFIG, "bankroll": 1000.0}
+    # EV largement positive, mais marché à règlement partiel → doit être refusé
+    r = S.risk_decision({"match_id": "m1", "league": "L",
+                         "market": "Handicap asiatique -0.5/-1 extérieur", "p": 0.60, "odds": 2.0}, cfg)
+    assert r["approved"] is False
+    assert any("règlement partiel" in x for x in r["reasons"])
 
 
 def _run_all():

@@ -509,6 +509,24 @@ def asian_integrity(rec, prev):
 SIGNAL_MIN = {"BLOWOUT": 45, "UPSET": 45, "SHARP": 45, "STATSCONVERGENCE": 60}
 STATSCONV_UNDER_MIN = 67
 
+# ───────────────────────── gel de promotion (audit 2026-10-05) ─────────────────────────
+# Le digest WORM est un RADAR DE RECHERCHE, pas une autorité de mise : le modèle structurel ne bat
+# pas le marché (ROI backtest négatif, log-loss > marché). Tant que les verrous de décision et la
+# validation de stratégie ne sont pas en place, les paliers JOUER/JOUER_PETIT sont affichés comme
+# CANDIDAT (gelé), SANS surbrillance « jouer », et aucune mise n'est autorisée par ce canal.
+PROMOTION_FROZEN = True
+_TIER_DISPLAY_FROZEN = {"JOUER": "CANDIDAT (gelé)", "JOUER_PETIT": "candidat− (gelé)"}
+
+
+def tier_badge_html(tier):
+    """Badge HTML du palier pour le digest. Sous gel, JOUER/JOUER_PETIT deviennent des libellés
+    CANDIDAT neutres (classe 'petit', jamais la surbrillance verte 'jouer'). Les libellés sont des
+    constantes contrôlées (aucune donnée externe) — pas d'échappement nécessaire."""
+    if PROMOTION_FROZEN and tier in _TIER_DISPLAY_FROZEN:
+        return f"<span class='petit'>{_TIER_DISPLAY_FROZEN[tier]}</span>"
+    cls = "jouer" if tier == "JOUER" else ("petit" if tier == "JOUER_PETIT" else "")
+    return f"<span class='{cls}'>{tier}</span>" if cls else str(tier)
+
 
 def _signal_eligible(tag, score, rec):
     """Un signal est actionnable si son score dépasse le seuil propre à sa famille (et, pour
@@ -1418,8 +1436,7 @@ def build_email_html(day) -> tuple:
         for mk, r in imminent:
             d = (r.get("reco", {}).get("decision", {}) or {})
             tier = d.get("tier", "—")
-            cls = "jouer" if tier == "JOUER" else ("petit" if tier == "JOUER_PETIT" else "")
-            badge = f"<span class='{cls}'>{tier}</span>" if cls else esc(tier)
+            badge = tier_badge_html(tier)
             H.append(f"<tr><td><b>{int(mk)} min</b></td><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
                      f"<td>{esc((r.get('country') or '')[:3])} {esc(r['league'][:16])}</td><td>{r['kickoff'][11:16]}</td>"
                      f"<td>{badge}</td><td>{esc((d.get('marche') or r.get('reco',{}).get('primary_market','?'))[:30])}</td>"
@@ -1454,16 +1471,20 @@ def build_email_html(day) -> tuple:
             return "—", None
 
     if deci:
-        H += ["<h2>Décisions du jour</h2>",
-              "<table><tr><th>Palier</th><th>Match</th><th>Compét.</th><th>KO</th><th>Marché retenu</th>"
+        H += ["<h2>Décisions du jour</h2>"]
+        if PROMOTION_FROZEN:
+            H += ["<div class='muted warn'><b>⚠ Promotion JOUER/VERT GELÉE</b> (audit 2026-10-05) : "
+                  "radar de recherche uniquement. Les paliers sont affichés « CANDIDAT (gelé) » ; aucune "
+                  "mise n'est autorisée par ce canal tant que les verrous de décision (veto, intégrité, "
+                  "modèle non validé) et la validation de stratégie ne sont pas en place.</div>"]
+        H += ["<table><tr><th>Palier</th><th>Match</th><th>Compét.</th><th>KO</th><th>Marché retenu</th>"
               "<th>Signal</th><th>Caractère attendu</th><th>Marché (caractère)</th><th>Éch.</th>"
               "<th class='r'>Unités</th><th class='r'>Conf</th></tr>"]
         for r in deci:
             d = r["reco"]["decision"]
-            cls = "jouer" if d["tier"] == "JOUER" else "petit"
             carac_str, carac_pk = _carac(r)
             carac_mkt = _CARAC_MARCHE.get(carac_pk, "—")
-            H.append(f"<tr><td><span class='{cls}'>{d['tier']}</span></td><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
+            H.append(f"<tr><td>{tier_badge_html(d['tier'])}</td><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
                      f"<td>{esc((r.get('country') or '')[:3])} {esc(r['league'][:16])}</td><td>{r['kickoff'][11:16]}</td>"
                      f"<td>{esc(d['marche'][:34])}</td><td class='tag'>{esc(d['signal'])}</td>"
                      f"<td class='muted'>{esc(carac_str)}</td><td class='muted'>{esc(carac_mkt)}</td>"

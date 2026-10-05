@@ -191,6 +191,10 @@ def basic_filters(rec: dict, cfg: dict, now: dt.datetime | None = None):
     reco = rec.get("reco") or {}
     if reco.get("primary_market") in (None, "NO BET"):
         reasons.append("WORM : NO BET (aucune anomalie exploitable)")
+    # Veto d'intégrité : un match dont le handicap asiatique a bougé anormalement est NEUTRALISÉ par
+    # WORM (jamais parié). SYNC doit propager ce veto et refuser la candidature (audit 2026-10-05).
+    if reco.get("integrity_blocked") or (rec.get("asian_integrity") or {}).get("suspect"):
+        reasons.append("intégrité AH suspecte — match NEUTRALISÉ (jamais candidat)")
     _, o1 = W.AF.pick_book(rec.get("odds") or {}, "1X2")
     if not o1:
         reasons.append("aucune cote 1X2 (liquidité/marché indisponible)")
@@ -296,6 +300,15 @@ def run_protocol(argv: list[str], home: str, away: str, kickoff: str) -> dict:
     return summarize_forecast(fc)
 
 
+def _model_validated(fc: dict) -> bool:
+    """Un forecast n'autorise une SÉLECTION (et donc un feu VERT) que si son modèle est VALIDÉ.
+    Les λ structurels WORM transmis au BSM sont marqués « NON VALIDÉ » par le moteur : ils ne
+    peuvent donc jamais produire de VERT par ce chemin (audit 2026-10-05). statut_modele absent ⇒
+    non validé (conservateur)."""
+    sm = (fc.get("statut_modele") or "").upper()
+    return bool(sm) and "NON VALID" not in sm
+
+
 def summarize_forecast(fc: dict, min_ev: float = DEFAULT_CONFIG["min_ev"]) -> dict:
     """Traduit un forecast BSM en statut PROTOCOL + meilleure sélection exploitable (plan §3.9)."""
     decision = fc.get("decision", "")
@@ -306,6 +319,11 @@ def summarize_forecast(fc: dict, min_ev: float = DEFAULT_CONFIG["min_ev"]) -> di
             out["status"] = "wait"
         else:
             out["status"] = "abstention"
+        return out
+    # Garde-fou d'autorisation : un modèle NON VALIDÉ ne produit JAMAIS de sélection (donc jamais VERT
+    # ni mise autorisée), quel que soit le reste du forecast (audit 2026-10-05).
+    if not _model_validated(fc):
+        out["status"] = "unvalidated"
         return out
     # sélection proposée : retenir l'EV éligible la plus forte (EV ≥ seuil, stable, non suspecte)
     ok = [e for e in fc.get("ev", []) if e.get("ev", -1) >= min_ev and not e.get("suspect")]
@@ -387,6 +405,25 @@ def risk_decision(sel: dict, cfg: dict, exposure: dict | None = None,
     if mid and exposure["matchs"].get(mid, 0.0) > 0:
         reasons.append("corrélation : un pari est déjà engagé sur ce match")
 
+    # EV minimale (CLAUDE.md §4) : fournie si disponible, sinon dérivée de p & cote. Le mode Risk
+    # autonome doit refuser une EV sous le seuil (audit 2026-10-05 : une EV de 2 % passait).
+    p_ = C.as_float(sel.get("p"))
+    o_ = C.as_float(sel.get("odds"))
+    ev = sel.get("ev")
+    if ev is None and p_ is not None and o_ is not None:
+        ev = p_ * o_ - 1.0
+    if ev is not None and ev < cfg["min_ev"]:
+        reasons.append(f"EV {ev * 100:.2f} % < seuil {cfg['min_ev'] * 100:.0f} %")
+
+    # Type de règlement : le Kelly binaire (p, cote) suppose un règlement plein. Un handicap/split à
+    # règlement partiel est refusé ici (audit 2026-10-05). full_settle explicite prime, sinon déduit du marché.
+    mkt = sel.get("market")
+    full_settle = sel.get("full_settle")
+    if full_settle is None and mkt is not None:
+        full_settle = str(mkt).startswith(FULL_SETTLE_PREFIX)
+    if full_settle is False:
+        reasons.append("règlement partiel (handicap/split) incompatible avec le Kelly binaire")
+
     base_pct = kelly_stake_pct(sel.get("p"), sel.get("odds"), cfg["kelly_fraction"], cfg["max_stake_pct"])
     if base_pct <= 0:
         reasons.append("Kelly ≤ 0 (aucun bord exploitable)")
@@ -427,8 +464,8 @@ def traffic_light(eligible: bool, protocol: dict | None, risk: dict | None) -> s
     st = protocol.get("status")
     if st in ("abstention", "error"):
         return RED
-    if st == "wait":
-        return ORANGE
+    if st in ("wait", "unvalidated"):
+        return ORANGE                         # modèle non validé → jamais VERT (audit 2026-10-05)
     if st == "selection":
         return GREEN if (risk and risk.get("approved")) else ORANGE
     return ORANGE
