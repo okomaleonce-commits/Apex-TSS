@@ -179,10 +179,17 @@ def poisson_over(lh, la, line=2.5, max_goals=12):
     return round(1 - under, 4)
 
 
+def _has_standings(s, *keys):
+    """Vrai si le classement existe, a des matchs joués, et porte toutes les
+    valeurs numériques demandées (points/gf/ga peuvent être None en début de
+    saison ou sur un flux incomplet — on marque alors NON VALIDÉ, jamais de crash)."""
+    return bool(s) and s.get("played") and all(s.get(k) is not None for k in keys)
+
+
 def team_rates(strength, tid, avg_gf):
     """(buts marqués/match, buts encaissés/match) d'une équipe depuis le classement, ou None."""
     s = strength.get(tid)
-    if not s or not s.get("played"):
+    if not _has_standings(s, "gf", "ga"):
         return None
     return s["gf"] / s["played"], s["ga"] / s["played"]
 
@@ -274,7 +281,7 @@ def blowout_engine(fair_1x2, strength, home_id, away_id):
     if not fair_1x2:
         return None, {"raison": "cotes 1X2 absentes"}
     sh, sa = strength.get(home_id), strength.get(away_id)
-    if not sh or not sa or not sh.get("played") or not sa.get("played"):
+    if not _has_standings(sh, "points", "gf", "ga") or not _has_standings(sa, "points", "gf", "ga"):
         return None, {"raison": "classement/forme absents pour une des équipes", "provenance": UNCONFIRMED}
     fav_home = fair_1x2[0] >= fair_1x2[2]
     fav_prob = max(fair_1x2[0], fair_1x2[2])
@@ -300,7 +307,7 @@ def upset_engine(fair_1x2, strength, home_id, away_id):
     if not fair_1x2:
         return None, {"raison": "cotes 1X2 absentes"}
     sh, sa = strength.get(home_id), strength.get(away_id)
-    if not sh or not sa or not sh.get("played") or not sa.get("played"):
+    if not _has_standings(sh, "points") or not _has_standings(sa, "points"):
         return None, {"raison": "classement absent", "provenance": UNCONFIRMED}
     dog_home = fair_1x2[0] < fair_1x2[2]
     dog_prob = min(fair_1x2[0], fair_1x2[2])
@@ -320,7 +327,7 @@ def upset_engine(fair_1x2, strength, home_id, away_id):
 def convergence_engine(strength, home_id, away_id, market_over, avg_gf):
     """STATSCONVERGENCE (spec §17) : combien de familles indépendantes pointent vers Over/Under 2.5."""
     sh, sa = strength.get(home_id), strength.get(away_id)
-    if not sh or not sa or not sh.get("played") or not sa.get("played"):
+    if not _has_standings(sh, "gf", "ga") or not _has_standings(sa, "gf", "ga"):
         return None, None, {"raison": "classement absent", "provenance": UNCONFIRMED}
     gf_h, ga_h = sh["gf"] / sh["played"], sh["ga"] / sh["played"]
     gf_a, ga_a = sa["gf"] / sa["played"], sa["ga"] / sa["played"]
