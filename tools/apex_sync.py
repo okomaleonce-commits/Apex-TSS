@@ -34,6 +34,7 @@ import argparse
 import datetime as dt
 import json
 import math
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -52,6 +53,11 @@ BSM = ROOT / "tools" / "apex_bsm.py"
 # ─── feux ───
 GREEN, ORANGE, RED = "VERT", "ORANGE", "ROUGE"
 LIGHT_LABEL = {GREEN: "🟢 GO", ORANGE: "🟠 WATCH", RED: "🔴 NO BET"}
+
+# Gel de promotion (audit 2026-10-05) : tant que la stratégie n'est pas validée, AUCUN chemin
+# (sync, risk autonome) ne doit afficher d'autorisation financière VERTE. Le calcul reste exact en
+# interne (testable), mais toute sortie « VERT » est rabattue sur ORANGE « gelé ».
+PROMOTION_FROZEN = True
 
 # Poids des tags d'anomalie (plan §4) : un signal Sharp confirmé prime, la convergence stats aussi.
 TAG_WEIGHT = {"SHARP": 1.0, "STATSCONVERGENCE": 0.9, "UPSET": 0.7, "BLOWOUT": 0.6}
@@ -300,17 +306,44 @@ def run_protocol(argv: list[str], home: str, away: str, kickoff: str) -> dict:
     return summarize_forecast(fc)
 
 
+# Statuts de modèle considérés comme VALIDÉS (liste blanche POSITIVE et tracée). Tout autre statut —
+# vide, « INCONNU », « NON VALIDÉ », texte libre — n'autorise RIEN (audit 2026-10-05 : l'ancienne
+# règle « non vide et ne contient pas NON VALID » laissait passer des statuts inconnus).
+VALIDATED_STATUSES = {"VALIDÉ", "VALIDE", "VALIDATED", "MODÈLE VALIDÉ", "MODELE VALIDE", "OK"}
+
+
 def _model_validated(fc: dict) -> bool:
-    """Un forecast n'autorise une SÉLECTION (et donc un feu VERT) que si son modèle est VALIDÉ.
-    Les λ structurels WORM transmis au BSM sont marqués « NON VALIDÉ » par le moteur : ils ne
-    peuvent donc jamais produire de VERT par ce chemin (audit 2026-10-05). statut_modele absent ⇒
-    non validé (conservateur)."""
-    sm = (fc.get("statut_modele") or "").upper()
-    return bool(sm) and "NON VALID" not in sm
+    """Validation POSITIVE et explicite : le feu VERT exige un statut_modele figurant dans la liste
+    blanche. Les λ structurels WORM (marqués « NON VALIDÉ ») et tout statut inconnu sont refusés."""
+    sm = (fc.get("statut_modele") or "").strip().upper()
+    if not sm or "NON VALID" in sm:
+        return False
+    return sm in VALIDATED_STATUSES
+
+
+def _is_full_settle(market) -> bool:
+    """Marché à règlement PLEIN binaire (p, cote) : 1X2, BTTS, ou Over/Under sur ligne .5 uniquement.
+    Les lignes quart (2.25/2.75) règlent en demi, les lignes entières (2.0) peuvent faire push, un
+    marché absent/handicap est partiel — tous REFUSÉS (audit 2026-10-05)."""
+    if not market:
+        return False
+    m = str(market).strip()
+    if m.startswith(("1X2", "BTTS")):
+        return True
+    mm = re.match(r"^(Over|Under)\s+([0-9]+(?:\.[0-9]+)?)\b", m)
+    if mm:
+        x = float(mm.group(2))
+        return abs((x % 1.0) - 0.5) < 1e-9   # seule une ligne .5 règle en binaire sans push ni split
+    return False
 
 
 def summarize_forecast(fc: dict, min_ev: float = DEFAULT_CONFIG["min_ev"]) -> dict:
-    """Traduit un forecast BSM en statut PROTOCOL + meilleure sélection exploitable (plan §3.9)."""
+    """Traduit un forecast BSM en statut PROTOCOL + sélection officielle (plan §3.9).
+
+    AUDIT 2026-10-05 : SYNC ne CHOISIT PLUS un marché. Il conserve EXACTEMENT la sélection officielle
+    que BSM a transmise (`official_selection`), avec son éventuel veto ; il ne reconstruit jamais une
+    sélection depuis la liste d'EV brute (sinon il réintroduit une branche écartée par BSM pour
+    instabilité). Sans sélection officielle structurée → abstention."""
     decision = fc.get("decision", "")
     out = {"status": None, "decision": decision, "forecast_id": fc.get("forecast_id"),
            "statut_modele": fc.get("statut_modele"), "official": None}
@@ -320,21 +353,36 @@ def summarize_forecast(fc: dict, min_ev: float = DEFAULT_CONFIG["min_ev"]) -> di
         else:
             out["status"] = "abstention"
         return out
-    # Garde-fou d'autorisation : un modèle NON VALIDÉ ne produit JAMAIS de sélection (donc jamais VERT
-    # ni mise autorisée), quel que soit le reste du forecast (audit 2026-10-05).
+    # Garde-fou : modèle NON VALIDÉ (ou statut inconnu) → jamais de sélection, jamais VERT.
     if not _model_validated(fc):
         out["status"] = "unvalidated"
         return out
-    # sélection proposée : retenir l'EV éligible la plus forte (EV ≥ seuil, stable, non suspecte)
-    ok = [e for e in fc.get("ev", []) if e.get("ev", -1) >= min_ev and not e.get("suspect")]
-    if not ok:
+    off = fc.get("official_selection")
+    if not isinstance(off, dict) or not off.get("marche"):
         out["status"] = "abstention"
+        out["raison"] = "aucune sélection officielle structurée transmise par BSM"
         return out
-    official = max(ok, key=lambda e: e["ev"])
+    # Veto/sensibilité propagés exactement depuis BSM.
+    if off.get("veto") or off.get("suspect") or off.get("instable"):
+        out["status"] = "abstention"
+        out["raison"] = "sélection officielle sous veto/suspecte/instable (BSM)"
+        return out
+    # EV RECALCULÉE depuis p & cote de la sélection officielle (on n'utilise jamais une EV fournie telle
+    # quelle). Sans p & cote, pas de sélection.
+    p, cote = C.as_float(off.get("p")), C.as_float(off.get("cote"))
+    if p is None or cote is None:
+        out["status"] = "abstention"
+        out["raison"] = "p/cote manquants sur la sélection officielle"
+        return out
+    ev = p * cote - 1.0
+    if ev < min_ev:
+        out["status"] = "abstention"
+        out["raison"] = f"EV recalculée {ev * 100:.2f} % < seuil {min_ev * 100:.0f} %"
+        return out
     out["status"] = "selection"
-    out["official"] = {"marche": official["marche"], "p": official.get("p"),
-                       "cote": official.get("cote"), "ev": official.get("ev"),
-                       "full_settle": official["marche"].startswith(FULL_SETTLE_PREFIX)}
+    out["official"] = {"marche": off["marche"], "p": p, "cote": cote, "ev": round(ev, 4),
+                       "full_settle": _is_full_settle(off["marche"]),
+                       "sensibilite": off.get("sensibilite")}
     return out
 
 
@@ -405,28 +453,33 @@ def risk_decision(sel: dict, cfg: dict, exposure: dict | None = None,
     if mid and exposure["matchs"].get(mid, 0.0) > 0:
         reasons.append("corrélation : un pari est déjà engagé sur ce match")
 
-    # EV minimale (CLAUDE.md §4) : fournie si disponible, sinon dérivée de p & cote. Le mode Risk
-    # autonome doit refuser une EV sous le seuil (audit 2026-10-05 : une EV de 2 % passait).
+    # EV minimale (CLAUDE.md §4) : TOUJOURS recalculée depuis p & cote (on n'accepte jamais une EV
+    # fournie telle quelle — audit 2026-10-05 : ev=0.10 fourni contournait le seuil). Sans p & cote,
+    # pas de bord démontrable → refus.
     p_ = C.as_float(sel.get("p"))
     o_ = C.as_float(sel.get("odds"))
-    ev = sel.get("ev")
-    if ev is None and p_ is not None and o_ is not None:
+    if p_ is None or o_ is None:
+        reasons.append("p/cote manquants — EV non recalculable")
+    else:
         ev = p_ * o_ - 1.0
-    if ev is not None and ev < cfg["min_ev"]:
-        reasons.append(f"EV {ev * 100:.2f} % < seuil {cfg['min_ev'] * 100:.0f} %")
+        if ev < cfg["min_ev"]:
+            reasons.append(f"EV {ev * 100:.2f} % < seuil {cfg['min_ev'] * 100:.0f} %")
 
-    # Type de règlement : le Kelly binaire (p, cote) suppose un règlement plein. Un handicap/split à
-    # règlement partiel est refusé ici (audit 2026-10-05). full_settle explicite prime, sinon déduit du marché.
-    mkt = sel.get("market")
+    # Type de règlement : le Kelly binaire (p, cote) suppose un règlement PLEIN sur ligne .5. Un
+    # handicap/split/ligne quart ou entière, ou un marché absent, est refusé (audit 2026-10-05).
     full_settle = sel.get("full_settle")
-    if full_settle is None and mkt is not None:
-        full_settle = str(mkt).startswith(FULL_SETTLE_PREFIX)
-    if full_settle is False:
-        reasons.append("règlement partiel (handicap/split) incompatible avec le Kelly binaire")
+    if full_settle is None:
+        full_settle = _is_full_settle(sel.get("market"))
+    if not full_settle:
+        reasons.append("règlement partiel/non identifié — incompatible avec le Kelly binaire")
 
     base_pct = kelly_stake_pct(sel.get("p"), sel.get("odds"), cfg["kelly_fraction"], cfg["max_stake_pct"])
     if base_pct <= 0:
         reasons.append("Kelly ≤ 0 (aucun bord exploitable)")
+
+    # Un refus FERME (stop-loss, corrélation, EV sous seuil, règlement partiel, Kelly ≤ 0) doit
+    # produire ROUGE en aval, pas ORANGE (audit 2026-10-05).
+    hard_block = bool(reasons)
 
     # plafonds d'exposition résiduels
     stake_pct = base_pct
@@ -446,7 +499,7 @@ def risk_decision(sel: dict, cfg: dict, exposure: dict | None = None,
         stake_pct = 0.0
     return {"approved": approved, "stake_pct": round(stake_pct, 5),
             "stake_amount": round(stake_pct * bankroll, 2),
-            "reasons": reasons, "caps_applied": caps}
+            "reasons": reasons, "caps_applied": caps, "hard_block": hard_block}
 
 
 def add_exposure(exposure: dict, sel: dict, stake_pct: float) -> None:
@@ -467,7 +520,11 @@ def traffic_light(eligible: bool, protocol: dict | None, risk: dict | None) -> s
     if st in ("wait", "unvalidated"):
         return ORANGE                         # modèle non validé → jamais VERT (audit 2026-10-05)
     if st == "selection":
-        return GREEN if (risk and risk.get("approved")) else ORANGE
+        if risk and risk.get("approved"):
+            return ORANGE if PROMOTION_FROZEN else GREEN   # gel : jamais de VERT tant que non levé
+        if risk and risk.get("hard_block"):
+            return RED                         # refus Risk FERME → ROUGE (audit 2026-10-05)
+        return ORANGE                          # refus mou (plancher de mise) → à surveiller
     return ORANGE
 
 
@@ -619,19 +676,34 @@ def _print_sync_report(day, cfg, sel, decisions, counts, ran):
           "APEX-SYNC optimise le processus, pas le résultat.")
 
 
+def risk_light(validated: bool, risk: dict) -> str:
+    """Feu d'une décision Risk autonome. Exige une validation POSITIVE du modèle ET applique le gel
+    de promotion : aucun VERT tant que PROMOTION_FROZEN (audit 2026-10-05)."""
+    if not validated:
+        return RED                             # modèle non validé → jamais d'autorisation
+    if not risk.get("approved"):
+        return RED if risk.get("hard_block") else ORANGE
+    return ORANGE if PROMOTION_FROZEN else GREEN
+
+
 def cmd_risk(a):
     cfg = load_config(a)
     sel = {"match_id": a.match_id, "league": a.league, "market": a.market, "p": a.p, "odds": a.odds}
     r = risk_decision(sel, cfg, pnl_day=a.pnl_day or 0.0, pnl_week=a.pnl_week or 0.0)
-    light = GREEN if r["approved"] else RED
+    validated = _model_validated({"statut_modele": getattr(a, "statut_modele", None)})
+    light = risk_light(validated, r)
     print(f"APEX-SYNC · Risk Manager")
-    print(f"p={a.p} · cote={a.odds} · bankroll={cfg['bankroll']:.0f} · Kelly ×{cfg['kelly_fraction']}")
+    print(f"p={a.p} · cote={a.odds} · marché={a.market or '—'} · modèle={'VALIDÉ' if validated else 'NON VALIDÉ/inconnu'}"
+          f" · bankroll={cfg['bankroll']:.0f} · Kelly ×{cfg['kelly_fraction']}")
     print(f"{LIGHT_LABEL[light]}")
-    if r["approved"]:
+    if light == GREEN:
         print(f"Mise : {r['stake_pct'] * 100:.2f} % = {r['stake_amount']:.2f}"
               + (f" · {', '.join(r['caps_applied'])}" if r["caps_applied"] else ""))
+    elif light == ORANGE and validated and r["approved"]:
+        print("Mise GELÉE (promotion suspendue — audit 2026-10-05) : aucune autorisation financière.")
     else:
-        print("Refus : " + (", ".join(r["reasons"]) or "—"))
+        motifs = r["reasons"] if r["reasons"] else (["modèle non validé"] if not validated else ["—"])
+        print("Refus : " + ", ".join(motifs))
 
 
 def cmd_kpi(a):
@@ -699,6 +771,8 @@ def main():
     r.add_argument("--match-id", dest="match_id")
     r.add_argument("--league")
     r.add_argument("--market")
+    r.add_argument("--statut-modele", dest="statut_modele",
+                   help="statut de validation du modèle (VALIDÉ requis pour une autorisation)")
     r.add_argument("--bankroll", type=float)
     r.add_argument("--config")
     r.add_argument("--kelly-fraction", type=float, dest="kelly_fraction")
