@@ -6,17 +6,21 @@ services:
     startCommand: python webhook_server.py
     plan: free
     envVars:
+      # Secrets : JAMAIS en clair dans le dépôt. `sync: false` = valeur saisie dans le
+      # dashboard Render (Environment), hors Git. Révoquer + renouveler toute clé qui a été
+      # committée en clair (elle reste dans l'historique Git tant qu'il n'est pas purgé).
       - key: BOT_TOKEN
-        value: 8317486741:AAGvBTv-Id5Qr48JBaq-RXyUAGZQfw7Z5dE
+        sync: false
+      - key: FDORG_TOKEN
+        sync: false
+      - key: ODDS_API_KEY
+        sync: false
+      # Non secrets (configuration) :
       - key: CHAT_ID
         value: "5484281251"
       - key: WEBHOOK_URL
         value: "https://apex-tss.onrender.com"
       - key: PORT
         value: "10000"
-      - key: FDORG_TOKEN
-        value: b8b980d46849a1fc55c8bd271bcad18c
-      - key: ODDS_API_KEY
-        value: 4556cbebcaea0e8301f1c176bdb64e31
     healthCheckPath: /health
     autoDeploy: true   # Auto-deploy on every GitHub push
