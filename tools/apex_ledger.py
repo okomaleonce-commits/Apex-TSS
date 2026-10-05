@@ -54,6 +54,7 @@ def _paths(day):
         "decisions": STATE / f"{d}.decisions.jsonl",
         "reservations": STATE / f"{d}.reservations.jsonl",
         "settlements": STATE / f"{d}.settlements.jsonl",
+        "commitments": STATE / f"{d}.commitments.jsonl",
     }
 
 
@@ -95,14 +96,22 @@ def _append_locked(path, record, *, dedup_key=None, dedup_field=None, cap_check=
       l'append, pour que deux passages concurrents ne dépassent pas un plafond.
     Renvoie (written: bool, payload). payload = record écrit, ou la ligne existante, ou {'reason':...}.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.touch(exist_ok=True)
-    with open(path, "r+", encoding="utf-8") as fh:
+    # Indisponibilité du stockage (répertoire non créable, montage absent, droits manquants) : on échoue
+    # en SÉCURITÉ (LedgerError) plutôt que de laisser remonter une OSError brute — l'appelant la traite
+    # comme un refus d'autorisation (audit 2026-10-05, point 3 : « indisponibilité du stockage »).
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch(exist_ok=True)
+        fh = open(path, "r+", encoding="utf-8")
+    except OSError as e:
+        raise LedgerError(f"stockage indisponible pour {path} : {e}") from e
+    with fh:
         if _HAS_FCNTL:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX)   # bloque jusqu'à obtention (inter-processus)
         try:
+            raw = fh.read()
             try:
-                existing = _parse_strict(fh.read(), where=str(path.name))
+                existing = _parse_strict(raw, where=str(path.name))
             except LedgerError as e:
                 return False, {"reason": f"état illisible — opération refusée (fail-closed) : {e}"}
             if dedup_key is not None and dedup_field is not None:
@@ -113,6 +122,13 @@ def _append_locked(path, record, *, dedup_key=None, dedup_field=None, cap_check=
                 ok, reason = cap_check(existing)
                 if not ok:
                     return False, {"reason": reason}
+            # Si le journal ne se termine PAS par un saut de ligne (dernier objet complet écrit sans
+            # « \n », p. ex. écriture interrompue juste avant), un append naïf concaténerait les deux
+            # objets (« }{ ») et rendrait le fichier illisible au passage suivant tout en annonçant un
+            # succès (audit 2026-10-05, défaut D5). On RÉPARE la séparation sous verrou avant d'ajouter.
+            # `raw` vient d'un fh.read() complet, donc le flux est déjà positionné en fin de fichier.
+            if raw and not raw.endswith("\n"):
+                fh.write("\n")
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
             fh.flush()
             os.fsync(fh.fileno())
@@ -157,15 +173,22 @@ def get_frozen_decision(day, match_id):
 # ───────────────────────── réservations d'exposition ─────────────────────────
 
 def current_exposure(day):
-    """Reconstruit l'exposition engagée (fraction de bankroll) depuis le journal — restart-safe."""
+    """Reconstruit l'exposition ENGAGÉE (fraction de bankroll) depuis le disque — restart-safe. Fond
+    à la fois les réservations primitives (`reserve_exposure`) et l'exposition EFFECTIVE des
+    transactions de décision (`commit_decision`) ; sous gel, `stake_effectif` vaut 0, donc une
+    décision figée n'engage AUCUNE exposition (recherche seule)."""
     exp = {"matchs": {}, "ligues": {}, "marches": {}, "total": 0.0}
-    for r in _read_jsonl(_paths(day)["reservations"]):
-        s = float(r.get("stake_pct") or 0.0)
-        for scope, key in (("matchs", r.get("match_id")), ("ligues", r.get("league")),
-                           ("marches", r.get("market"))):
+
+    def _add(mid, lg, mk, s):
+        for scope, key in (("matchs", mid), ("ligues", lg), ("marches", mk)):
             if key is not None:
                 exp[scope][key] = round(exp[scope].get(key, 0.0) + s, 6)
         exp["total"] = round(exp["total"] + s, 6)
+
+    for r in _read_jsonl(_paths(day)["reservations"]):
+        _add(r.get("match_id"), r.get("league"), r.get("market"), float(r.get("stake_pct") or 0.0))
+    for r in _read_jsonl(_paths(day)["commitments"]):
+        _add(r.get("match_id"), r.get("league"), r.get("market"), float(r.get("stake_effectif") or 0.0))
     return exp
 
 
@@ -223,6 +246,78 @@ def settle(day, match_id, market, score, result, *, now=None):
     # un règlement par (match, marché) : idempotent sur reservation_id
     return _append_locked(_paths(day)["settlements"], rec,
                           dedup_key=rec["reservation_id"], dedup_field="reservation_id")
+
+
+def _commit_id(day, match_id) -> str:
+    """Clé de transaction : une seule par match (un pari par match)."""
+    return reservation_id(day, match_id, "__commit__")
+
+
+def get_committed_decision(day, match_id):
+    cid = _commit_id(day, match_id)
+    for r in _read_jsonl(_paths(day)["commitments"]):
+        if r.get("commit_id") == cid:
+            return r
+    return None
+
+
+def commit_decision(day, sel, kickoff_utc, decision, stake_calcule, *, authorized,
+                    caps=None, now=None):
+    """TRANSACTION UNIQUE (un seul verrou, un seul append) : vérifie le coup d'envoi, fige la décision
+    ET réserve l'exposition d'un même match en une opération atomique — jamais un `freeze_decision()`
+    puis un `reserve_exposure()` séparés qui laisseraient un état mi-figé en cas d'interruption (audit
+    2026-10-05, point 3).
+
+    AUTORISATION FINALE EXPLICITE : `authorized=False` (gel de promotion) ⇒ `stake_effectif=0` ; le
+    montant calculé `stake_calcule` est conservé comme INFORMATION DE RECHERCHE mais n'engage aucune
+    exposition. Première écriture gagnante par match (idempotent). Renvoie (committed: bool, payload)."""
+    caps = {**DEFAULT_CAPS, **(caps or {})}
+    now = now or dt.datetime.now(dt.timezone.utc)
+    mid, lg, mk = sel.get("match_id"), sel.get("league"), sel.get("market")
+    ko = _parse_utc(kickoff_utc)
+    if ko is None:
+        return False, {"reason": "coup d'envoi absent ou invalide — rien figé ni réservé"}
+    # Mise CALCULÉE : finie et ≥ 0 (une mise non finie ne doit jamais traverser — audit D3).
+    try:
+        stake_calcule = float(stake_calcule)
+    except (TypeError, ValueError):
+        return False, {"reason": "mise calculée non numérique — rien figé ni réservé"}
+    if not math.isfinite(stake_calcule) or stake_calcule < 0.0:
+        return False, {"reason": f"mise calculée invalide ({stake_calcule!r}) — finie et ≥ 0 requise"}
+    authorized = bool(authorized)
+    stake_effectif = stake_calcule if authorized else 0.0
+    if authorized and stake_effectif <= 0.0:
+        return False, {"reason": "autorisée mais mise effective nulle — incohérent, rien réservé"}
+    cid = _commit_id(day, mid)
+    rec = {"commit_id": cid, "match_id": mid, "league": lg, "market": mk, "kickoff_utc": kickoff_utc,
+           "decision": decision, "stake_calcule": stake_calcule, "stake_effectif": stake_effectif,
+           "authorized": authorized}
+
+    def cap_check(existing):
+        t = now   # instant RÉEL d'écriture, sous verrou (pas un horodatage capturé avant l'attente)
+        if t >= ko:
+            return False, "coup d'envoi dépassé au moment de l'écriture — rien figé ni réservé"
+        rec["committed_at_utc"] = t.isoformat()
+        # Un seul pari par match (anti-corrélation) — vaut même sous gel pour garder la trace unique.
+        if any(r.get("match_id") == mid for r in existing):
+            return False, "un pari est déjà engagé sur ce match (un pari par match)"
+        # Plafonds cumulés : SEULE l'exposition EFFECTIVE compte (sous gel, 0 → jamais bloquant).
+        if stake_effectif > 0.0:
+            el = sum(float(r.get("stake_effectif") or 0.0) for r in existing if r.get("league") == lg)
+            ek = sum(float(r.get("stake_effectif") or 0.0) for r in existing if r.get("market") == mk)
+            et = sum(float(r.get("stake_effectif") or 0.0) for r in existing)
+            if stake_effectif > caps["match"] + 1e-9:
+                return False, f"plafond match dépassé ({stake_effectif:.4f} > {caps['match']})"
+            if el + stake_effectif > caps["league"] + 1e-9:
+                return False, f"plafond ligue dépassé ({el + stake_effectif:.4f} > {caps['league']})"
+            if ek + stake_effectif > caps["market"] + 1e-9:
+                return False, f"plafond marché dépassé ({ek + stake_effectif:.4f} > {caps['market']})"
+            if et + stake_effectif > caps["total_day"] + 1e-9:
+                return False, f"plafond journalier dépassé ({et + stake_effectif:.4f} > {caps['total_day']})"
+        return True, None
+
+    return _append_locked(_paths(day)["commitments"], rec,
+                          dedup_key=cid, dedup_field="commit_id", cap_check=cap_check)
 
 
 def _parse_utc(s):

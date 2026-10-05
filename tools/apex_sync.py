@@ -42,6 +42,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import apex_worm as W      # noqa: E402  (fenêtre APEX, snapshots, démarge, sélection de book via W.AF)
 import apex_common as C    # noqa: E402  (identité de match, horodatage UTC)
+import apex_ledger as L    # noqa: E402  (état durable : transaction KO+gel+réservation atomique)
 
 ROOT = Path(__file__).resolve().parent.parent
 SYNC_DIR = ROOT / "data" / "sync"
@@ -78,6 +79,7 @@ DEFAULT_CONFIG = {
     "max_exposure_match": 0.01,  # exposition max par match
     "max_exposure_league": 0.03,
     "max_exposure_market": 0.03,
+    "max_exposure_day": 0.10,    # exposition max cumulée sur la journée (transaction ledger)
     "stop_loss_daily": -0.05,    # stop-loss quotidien (−5 % de bankroll)
     "stop_loss_weekly": -0.10,
     "min_ev": 0.03,              # EV ≥ 3 % (CLAUDE.md §4)
@@ -306,20 +308,36 @@ def run_protocol(argv: list[str], home: str, away: str, kickoff: str) -> dict:
     return summarize_forecast(fc)
 
 
-# Statuts de modèle considérés comme VALIDÉS (liste blanche POSITIVE et tracée). Tout autre statut —
-# vide, « INCONNU », « NON VALIDÉ », texte libre — n'autorise RIEN (audit 2026-10-05 : l'ancienne
-# règle « non vide et ne contient pas NON VALID » laissait passer des statuts inconnus).
-VALIDATED_STATUSES = {"VALIDÉ", "VALIDE", "VALIDATED", "MODÈLE VALIDÉ", "MODELE VALIDE", "OK"}
+# Préfixes de statut de modèle reconnus comme VALIDÉS (liste blanche POSITIVE). Ancrés en DÉBUT de
+# chaîne ET suivis d'une frontière de mot (fin de chaîne, espace ou parenthèse) — « OK » est retiré
+# et « OKAY » n'est plus accepté (audit 2026-10-05, défaut D1 : « validation par préfixe »).
+VALIDATED_STATUSES = {"VALIDÉ", "VALIDE", "VALIDATED", "MODÈLE VALIDÉ", "MODELE VALIDE"}
+_VALID_RE = re.compile(
+    r"^(?:" + "|".join(sorted((re.escape(s) for s in VALIDATED_STATUSES), key=len, reverse=True)) +
+    r")(?![0-9A-ZÀ-Ÿ])", re.IGNORECASE)
+
+
+def _validation_proof(fc: dict) -> bool:
+    """Preuve de validation STRUCTURÉE : bloc `validation` = {validated: true, run_id: <backtest>}.
+    C'est la seule forme qui autorise une mise dans la transaction de décision (audit 2026-10-05 :
+    la racine des défauts est la validation par texte libre). Le `statut_modele` textuel ne sert plus
+    qu'à l'affichage."""
+    v = fc.get("validation")
+    if not isinstance(v, dict):
+        return False
+    return v.get("validated") is True and bool(str(v.get("run_id") or "").strip())
 
 
 def _model_validated(fc: dict) -> bool:
-    """Validation POSITIVE et explicite : le feu VERT exige un statut_modele COMMENÇANT par un
-    préfixe de la liste blanche (BSM émet « VALIDÉ (walk-forward …) »). Les λ structurels WORM
-    (« NON VALIDÉ »), « NON CONCLUANT » et tout statut inconnu/vide sont refusés (audit 2026-10-05)."""
-    sm = (fc.get("statut_modele") or "").strip().upper()
-    if not sm or "NON VALID" in sm:
+    """Validation POSITIVE. Priorité à la PREUVE STRUCTURÉE (`validation`), sinon repli texte STRICT :
+    le statut_modele doit COMMENCER par un préfixe blanc suivi d'une frontière de mot (« VALIDÉ (walk-
+    forward …) »). « NON VALIDÉ », « NON CONCLUANT », « OKAY » et tout statut inconnu/vide sont refusés."""
+    if _validation_proof(fc):
+        return True
+    sm = (fc.get("statut_modele") or "").strip()
+    if not sm or "NON VALID" in sm.upper():
         return False
-    return any(sm.startswith(p) for p in VALIDATED_STATUSES)
+    return bool(_VALID_RE.match(sm))
 
 
 def _is_full_settle(market) -> bool:
@@ -331,11 +349,32 @@ def _is_full_settle(market) -> bool:
     m = str(market).strip()
     if m.startswith(("1X2", "BTTS")):
         return True
-    mm = re.match(r"^(Over|Under)\s+([0-9]+(?:\.[0-9]+)?)\b", m)
+    # Une ligne SPLIT (« Over 2.5/3.0 » = 2,75, « 2.5/3 ») règle en demi → PARTIEL. On refuse dès qu'un
+    # séparateur de double ligne (/, virgule entre deux nombres, tiret) suit le mot-clé (audit 2026-10-05,
+    # défaut D2 : « Over 2.5/3.0 » était pris pour une ligne .5 pleine).
+    if re.match(r"^(Over|Under)\s+\d+(?:[.,]\d+)?\s*[/\-,]\s*\d", m, re.IGNORECASE):
+        return False
+    mm = re.match(r"^(Over|Under)\s+(\d+(?:[.,]\d+)?)", m, re.IGNORECASE)
     if mm:
-        x = float(mm.group(2))
-        return abs((x % 1.0) - 0.5) < 1e-9   # seule une ligne .5 règle en binaire sans push ni split
+        x = float(mm.group(2).replace(",", "."))
+        return abs((x % 1.0) - 0.5) < 1e-9   # seule une ligne .5 SEULE règle en binaire sans push ni split
     return False
+
+
+def _finite_prob(x):
+    """Probabilité FINIE dans ]0,1[ ou None (refuse NaN, ±inf, hors bornes — audit 2026-10-05, D3)."""
+    v = C.as_float(x)
+    if v is None or not math.isfinite(v) or not (0.0 < v < 1.0):
+        return None
+    return v
+
+
+def _finite_odds(x):
+    """Cote FINIE > 1 ou None (refuse NaN, ±inf, ≤ 1 — audit 2026-10-05, défaut D3 : NaN/inf passaient)."""
+    v = C.as_float(x)
+    if v is None or not math.isfinite(v) or v <= 1.0:
+        return None
+    return v
 
 
 def summarize_forecast(fc: dict, min_ev: float = DEFAULT_CONFIG["min_ev"]) -> dict:
@@ -368,22 +407,27 @@ def summarize_forecast(fc: dict, min_ev: float = DEFAULT_CONFIG["min_ev"]) -> di
         out["status"] = "abstention"
         out["raison"] = "sélection officielle sous veto/suspecte/instable (BSM)"
         return out
-    # EV RECALCULÉE depuis p & cote de la sélection officielle (on n'utilise jamais une EV fournie telle
-    # quelle). Sans p & cote, pas de sélection.
-    p, cote = C.as_float(off.get("p")), C.as_float(off.get("cote"))
+    # EV RECALCULÉE depuis p & cote FINIES de la sélection officielle (jamais une EV fournie telle quelle,
+    # jamais une p/cote NaN ou ±inf — audit 2026-10-05, D3). Sans p & cote valides, pas de sélection.
+    p, cote = _finite_prob(off.get("p")), _finite_odds(off.get("cote"))
     if p is None or cote is None:
         out["status"] = "abstention"
-        out["raison"] = "p/cote manquants sur la sélection officielle"
+        out["raison"] = "p/cote manquants ou non finis sur la sélection officielle"
         return out
     ev = p * cote - 1.0
     if ev < min_ev:
         out["status"] = "abstention"
         out["raison"] = f"EV recalculée {ev * 100:.2f} % < seuil {min_ev * 100:.0f} %"
         return out
+    # Sensibilité conservée EXACTEMENT depuis BSM. BSM exporte `sensibilite_min` ; on le restitue sous
+    # ce nom (audit 2026-10-05, défaut D4 : le contrat retournait `sensibilite=None`).
+    sens_min = C.as_float(off.get("sensibilite_min"))
+    if sens_min is None:
+        sens_min = C.as_float(off.get("sensibilite"))
     out["status"] = "selection"
     out["official"] = {"marche": off["marche"], "p": p, "cote": cote, "ev": round(ev, 4),
                        "full_settle": _is_full_settle(off["marche"]),
-                       "sensibilite": off.get("sensibilite")}
+                       "sensibilite_min": sens_min}
     return out
 
 
@@ -421,8 +465,8 @@ def _ledger_new_forecast(before: set, home: str, away: str, kickoff: str):
 
 def kelly_stake_pct(p, odds, fraction: float, cap: float) -> float:
     """Kelly fractionné, borné par le plafond de mise. 0 si pas de bord."""
-    p = C.as_float(p)
-    odds = C.as_float(odds)
+    p = _finite_prob(p)
+    odds = _finite_odds(odds)
     if p is None or odds is None:
         return 0.0
     b = odds - 1.0
@@ -457,10 +501,12 @@ def risk_decision(sel: dict, cfg: dict, exposure: dict | None = None,
     # EV minimale (CLAUDE.md §4) : TOUJOURS recalculée depuis p & cote (on n'accepte jamais une EV
     # fournie telle quelle — audit 2026-10-05 : ev=0.10 fourni contournait le seuil). Sans p & cote,
     # pas de bord démontrable → refus.
-    p_ = C.as_float(sel.get("p"))
-    o_ = C.as_float(sel.get("odds"))
+    p_ = _finite_prob(sel.get("p"))
+    o_ = _finite_odds(sel.get("odds"))
     if p_ is None or o_ is None:
-        reasons.append("p/cote manquants — EV non recalculable")
+        # p NaN/±inf/hors ]0,1[ ou cote NaN/±inf/≤1 : NaN fausse toute comparaison (nan<seuil == False),
+        # d'où une approbation erronée — on refuse AVANT tout calcul (audit 2026-10-05, défaut D3).
+        reasons.append("p/cote manquants ou non finis — EV non recalculable")
     else:
         ev = p_ * o_ - 1.0
         if ev < cfg["min_ev"]:
@@ -621,10 +667,31 @@ def cmd_sync(a):
                      "market": off["marche"], "p": off["p"], "odds": off["cote"]}
                 risk = risk_decision(s, cfg, exposure, pnl_day, pnl_week)
                 entry["risk"] = risk
-                # On n'engage l'exposition que pour une autorisation RÉELLE (feu VERT) — jamais sous
-                # gel (sinon une mise non autorisée bloquerait d'autres candidats).
-                if risk["approved"] and not PROMOTION_FROZEN:
-                    add_exposure(exposure, s, risk["stake_pct"])
+                # TRANSACTION UNIQUE (point 3) : une seule opération atomique vérifie le KO sous verrou,
+                # fige la sélection et réserve l'exposition. AUTORISATION FINALE EXPLICITE : sous gel
+                # (ou risk non approuvé), authorized=False → mise effective 0 ; le montant Kelly reste
+                # une information de recherche, aucune exposition engagée. Jamais un freeze puis un
+                # reserve séparés (audit 2026-10-05).
+                authorized = bool(risk.get("approved")) and not PROMOTION_FROZEN
+                caps = {"match": cfg["max_exposure_match"], "league": cfg["max_exposure_league"],
+                        "market": cfg["max_exposure_market"], "total_day": cfg.get("max_exposure_day", 0.10)}
+                try:
+                    committed, payload = L.commit_decision(
+                        day, s, c["kickoff"],
+                        {"marche": off["marche"], "p": off["p"], "cote": off["cote"],
+                         "ev": off.get("ev"), "sensibilite_min": off.get("sensibilite_min"),
+                         "worm_tier": c["worm_tier"], "light": None},
+                        risk.get("stake_pct", 0.0), authorized=authorized, caps=caps)
+                    entry["commit"] = {"committed": committed, "authorized": authorized,
+                                       "stake_calcule": risk.get("stake_pct", 0.0),
+                                       "stake_effectif": (risk.get("stake_pct", 0.0) if authorized else 0.0),
+                                       "payload": payload if not committed else None}
+                    if committed and authorized:
+                        add_exposure(exposure, s, risk["stake_pct"])
+                except L.LedgerError as e:
+                    # fail-closed : état durable illisible → aucune autorisation, trace l'échec.
+                    entry["commit"] = {"committed": False, "authorized": False,
+                                       "stake_effectif": 0.0, "payload": {"reason": f"ledger: {e}"}}
         elif a.run_protocol and not cmd["runnable"]:
             protocol = {"status": "wait", "reason": cmd["reason"]}
             entry["protocol"] = protocol
@@ -675,6 +742,15 @@ def _print_sync_report(day, cfg, sel, decisions, counts, ran):
                 print("   RISK : GELÉ — mise calculée mais NON autorisée (promotion suspendue, audit 2026-10-05)")
             else:
                 print(f"   RISK : refus · {', '.join(r.get('reasons', [])) or '—'}")
+            cm = e.get("commit")
+            if cm is not None:
+                if cm.get("committed"):
+                    print(f"   LEDGER : décision figée + exposition {'RÉSERVÉE' if cm['authorized'] else 'NON réservée'} · "
+                          f"mise effective {cm['stake_effectif'] * 100:.2f} % · autorisée={cm['authorized']} "
+                          f"(calculée {cm['stake_calcule'] * 100:.2f} %)")
+                else:
+                    why = (cm.get("payload") or {}).get("reason", "—")
+                    print(f"   LEDGER : non figée · {why}")
         else:
             why = p.get("reason") or p.get("decision") or p.get("status")
             print(f"   PROTOCOL : {p.get('status', '?').upper()} · {why}")

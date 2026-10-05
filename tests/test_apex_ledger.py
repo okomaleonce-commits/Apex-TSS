@@ -172,6 +172,173 @@ def test_concurrent_distinct_keys_respect_cap(tmp_path):
     assert outs.count("OK") == 3    # le verrou inter-processus empêche de dépasser 3 %
 
 
+# ───────── D5 : fin de journal sans saut de ligne (objet COMPLET) ─────────
+
+def test_d5_complete_last_object_without_newline(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    p = L._paths(DAY)["reservations"]
+    p.parent.mkdir(parents=True, exist_ok=True)
+    # dernier objet COMPLET mais sans « \n » final (écriture interrompue juste avant le saut de ligne)
+    p.write_text('{"reservation_id":"aaa","match_id":"m0","league":"L","market":"Under 2.5","stake_pct":0.01}')
+    ok, _ = L.reserve_exposure(DAY, {"match_id": "m1", "league": "L", "market": "Over 2.5"}, 0.01)
+    assert ok is True
+    raw = p.read_text()
+    assert "}{" not in raw                                   # pas de concaténation
+    assert L.current_exposure(DAY)["total"] == 0.02          # relecture lisible, pas d'illisible
+
+
+# ───────── point 3 : transaction unique commit_decision ─────────
+
+KO_FUT = "2026-10-05T18:45:00+00:00"
+BEFORE = dt.datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+
+
+def _sel(mid="m1", league="L", market="Under 2.5"):
+    return {"match_id": mid, "league": league, "market": market}
+
+
+def test_commit_frozen_under_gel_reserves_zero(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    # sous gel : authorized=False → décision figée, mais mise effective 0 (recherche seule)
+    ok, rec = L.commit_decision(DAY, _sel(), KO_FUT, {"marche": "Under 2.5"}, 0.01,
+                                authorized=False, now=BEFORE)
+    assert ok is True
+    assert rec["authorized"] is False and rec["stake_effectif"] == 0.0 and rec["stake_calcule"] == 0.01
+    assert L.current_exposure(DAY)["total"] == 0.0           # AUCUNE exposition engagée
+    assert L.get_committed_decision(DAY, "m1")["decision"]["marche"] == "Under 2.5"
+
+
+def test_commit_authorized_reserves_exposure(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    ok, rec = L.commit_decision(DAY, _sel(), KO_FUT, {"marche": "Under 2.5"}, 0.01,
+                                authorized=True, now=BEFORE)
+    assert ok is True and rec["stake_effectif"] == 0.01
+    assert L.current_exposure(DAY)["matchs"]["m1"] == 0.01
+
+
+def test_commit_refused_after_kickoff_atomic(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    after = dt.datetime(2026, 10, 5, 19, 0, tzinfo=UTC)
+    ok, payload = L.commit_decision(DAY, _sel(), KO_FUT, {"marche": "x"}, 0.01,
+                                    authorized=True, now=after)
+    assert ok is False and "dépassé" in payload["reason"]
+    # atomicité : RIEN n'est écrit (ni décision figée ni exposition)
+    assert L.get_committed_decision(DAY, "m1") is None
+    assert L.current_exposure(DAY)["total"] == 0.0
+
+
+def test_commit_requires_valid_kickoff(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    for bad in (None, "", "pas-une-date"):
+        ok, payload = L.commit_decision(DAY, _sel(), bad, {"marche": "x"}, 0.01,
+                                        authorized=False, now=BEFORE)
+        assert ok is False and "coup d'envoi" in payload["reason"]
+    assert L.get_committed_decision(DAY, "m1") is None
+
+
+def test_commit_one_bet_per_match(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    # Un second marché sur le MÊME match ne crée jamais un second engagement : la clé de commit est
+    # par match, donc la 2e tentative est idempotente (1re gagne) → une seule exposition engagée.
+    a, _ = L.commit_decision(DAY, _sel(market="Under 2.5"), KO_FUT, {"marche": "Under 2.5"}, 0.01,
+                             authorized=True, now=BEFORE)
+    b, payload = L.commit_decision(DAY, _sel(market="Over 2.5"), KO_FUT, {"marche": "Over 2.5"}, 0.01,
+                                   authorized=True, now=BEFORE)
+    assert a is True and b is False
+    assert payload["decision"]["marche"] == "Under 2.5"        # la 1re décision est conservée
+    assert L.current_exposure(DAY)["matchs"]["m1"] == 0.01     # un seul pari engagé sur le match
+
+
+def test_commit_idempotent_per_match(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    a, _ = L.commit_decision(DAY, _sel(), KO_FUT, {"marche": "Under 2.5"}, 0.01,
+                             authorized=False, now=BEFORE)
+    b, _ = L.commit_decision(DAY, _sel(), KO_FUT, {"marche": "Over 2.5"}, 0.01,
+                             authorized=False, now=BEFORE)      # 2e tentative même match
+    assert a is True and b is False
+    assert L.get_committed_decision(DAY, "m1")["decision"]["marche"] == "Under 2.5"  # 1re gagne
+
+
+def test_commit_rejects_invalid_stake(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    for bad in (float("nan"), float("inf"), -0.01, "x"):
+        ok, payload = L.commit_decision(DAY, _sel(), KO_FUT, {"marche": "x"}, bad,
+                                        authorized=True, now=BEFORE)
+        assert ok is False and ("invalide" in payload["reason"] or "non numérique" in payload["reason"])
+    assert L.current_exposure(DAY)["total"] == 0.0
+
+
+def test_commit_respects_day_cap(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    caps = {"match": 0.01, "league": 0.99, "market": 0.99, "total_day": 0.02}
+    ok_count = 0
+    for i in range(5):
+        ok, _ = L.commit_decision(DAY, _sel(mid=f"m{i}", market=f"k{i}"), KO_FUT,
+                                  {"marche": "x"}, 0.01, authorized=True, caps=caps, now=BEFORE)
+        ok_count += int(ok)
+    assert ok_count == 2                                   # plafond jour 2 % → au plus 2 paris à 1 %
+    assert L.current_exposure(DAY)["total"] <= 0.02 + 1e-9
+
+
+def test_commit_restart_rebuilds_from_disk(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    L.commit_decision(DAY, _sel(mid="m1", market="Under 2.5"), KO_FUT, {"marche": "Under 2.5"}, 0.01,
+                      authorized=True, now=BEFORE)
+    L.commit_decision(DAY, _sel(mid="m2", market="Over 2.5"), KO_FUT, {"marche": "Over 2.5"}, 0.005,
+                      authorized=True, now=BEFORE)
+    # « redémarrage » : relecture pure du disque
+    exp = L.current_exposure(DAY)
+    assert exp["total"] == 0.015 and exp["matchs"]["m1"] == 0.01 and exp["matchs"]["m2"] == 0.005
+
+
+def test_commit_storage_unavailable_fails_closed(monkeypatch, tmp_path):
+    import pytest
+    # STATE pointe « dans » un fichier → mkdir impossible → LedgerError (pas d'OSError nue, pas de succès)
+    f = tmp_path / "not_a_dir"
+    f.write_text("x")
+    monkeypatch.setattr(L, "STATE", f / "ledger")
+    with pytest.raises(L.LedgerError):
+        L.commit_decision(DAY, _sel(), KO_FUT, {"marche": "x"}, 0.01, authorized=False, now=BEFORE)
+
+
+# ───────── concurrence RÉELLE sur la transaction commit (verrou fcntl) ─────────
+
+_WORKER_COMMIT = (
+    "import os,sys,datetime as dt;"
+    "sys.path.insert(0, os.path.join(os.environ['APEX_TOOLS']));"
+    "import apex_ledger as L;"
+    "day=dt.date(2026,10,5);"
+    "sel={'match_id':os.environ['MID'],'league':'L','market':os.environ['MK']};"
+    "ko='2026-10-05T18:45:00+00:00';"
+    "now=dt.datetime(2026,10,5,12,0,tzinfo=dt.timezone.utc);"
+    "ok,_=L.commit_decision(day, sel, ko, {'marche':'x'}, 0.01, authorized=True,"
+    " caps={'match':0.01,'league':0.99,'market':0.99,'total_day':0.03}, now=now);"
+    "print('OK' if ok else 'NO')"
+)
+
+
+def _spawn_commit(n, state_dir, mid_fn, mk_fn):
+    env = {**os.environ, "APEX_LEDGER_STATE": str(state_dir),
+           "APEX_TOOLS": os.path.join(os.path.dirname(__file__), "..", "tools")}
+    procs = []
+    for i in range(n):
+        e = {**env, "MID": mid_fn(i), "MK": mk_fn(i)}
+        procs.append(subprocess.Popen([sys.executable, "-c", _WORKER_COMMIT], env=e,
+                                      stdout=subprocess.PIPE, text=True))
+    return [p.communicate()[0].strip() for p in procs]
+
+
+def test_commit_concurrent_same_match_one_wins(tmp_path):
+    outs = _spawn_commit(8, tmp_path, lambda i: "mSAME", lambda i: "Under 2.5")
+    assert outs.count("OK") == 1 and outs.count("NO") == 7
+
+
+def test_commit_concurrent_distinct_respect_day_cap(tmp_path):
+    # 8 processus, matchs distincts, 0.01 chacun, plafond jour 0.03 → au plus 3 autorisés
+    outs = _spawn_commit(8, tmp_path, lambda i: f"m{i}", lambda i: f"k{i}")
+    assert outs.count("OK") == 3
+
+
 def _run_all():
     import inspect
     import tempfile

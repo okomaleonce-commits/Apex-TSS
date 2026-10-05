@@ -349,6 +349,64 @@ def test_bsm_official_selection_consumed_and_prefix_validation():
     assert S.summarize_forecast(fc2)["status"] == "unvalidated"
 
 
+# ───────── régressions audit 2026-10-05 (défauts résiduels D1–D5) ─────────
+
+def test_d1_prefix_validation_rejects_okay():
+    # « OKAY » commençait par « OK » (liste blanche) et passait → doit être REFUSÉ.
+    assert S._model_validated({"statut_modele": "OKAY"}) is False
+    assert S._model_validated({"statut_modele": "OK"}) is False
+    assert S._model_validated({"statut_modele": "VALIDÉ (walk-forward run=bsm-x)"}) is True
+    # repli texte strict : une frontière de mot est exigée après le préfixe
+    assert S._model_validated({"statut_modele": "VALIDEMENT FAUX"}) is False
+
+
+def test_d1_structured_validation_proof():
+    # preuve structurée : bloc validation {validated, run_id} rattaché à un backtest
+    assert S._validation_proof({"validation": {"validated": True, "run_id": "bsm-2026"}}) is True
+    assert S._validation_proof({"validation": {"validated": True, "run_id": ""}}) is False
+    assert S._validation_proof({"validation": {"validated": False, "run_id": "bsm-2026"}}) is False
+    assert S._validation_proof({"statut_modele": "VALIDÉ"}) is False  # texte seul ≠ preuve
+    # un forecast à preuve structurée est validé même si le texte est muet
+    assert S._model_validated({"validation": {"validated": True, "run_id": "bsm-2026"}}) is True
+
+
+def test_d2_split_line_not_full_settle():
+    # « Over 2.5/3.0 » = ligne 2,75 (split) → règlement en demi, PAS un full settle binaire
+    assert S._is_full_settle("Over 2.5/3.0") is False
+    assert S._is_full_settle("Over 2.5/3") is False
+    assert S._is_full_settle("Under 2.75") is False
+    assert S._is_full_settle("Over 2,5/3,0") is False
+    # une vraie ligne .5 seule reste pleine
+    assert S._is_full_settle("Under 2.5") is True
+    assert S._is_full_settle("Over 2.5") is True
+
+
+def test_d3_non_finite_odds_refused():
+    cfg = dict(S.DEFAULT_CONFIG)
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        r = S.risk_decision({"match_id": "m", "league": "L", "market": "Under 2.5",
+                             "p": 0.6, "odds": bad}, cfg)
+        assert r["approved"] is False and r["stake_pct"] == 0.0 and r["hard_block"] is True
+    # p non finie ou hors ]0,1[ également refusée
+    r = S.risk_decision({"match_id": "m", "league": "L", "market": "Under 2.5",
+                         "p": float("nan"), "odds": 1.8}, cfg)
+    assert r["approved"] is False
+    # summarize_forecast refuse aussi une cote non finie
+    fc = {"statut_mise": "PROPOSÉE", "statut_modele": "VALIDÉ (wf)", "decision": "PARI",
+          "official_selection": {"marche": "Under 2.5", "p": 0.64, "cote": float("inf"),
+                                 "sensibilite_min": 0.02, "veto": False}}
+    assert S.summarize_forecast(fc)["status"] == "abstention"
+
+
+def test_d4_sensibilite_min_preserved():
+    fc = {"statut_mise": "PROPOSÉE", "statut_modele": "VALIDÉ (wf)", "decision": "PARI",
+          "official_selection": {"marche": "Under 2.5", "p": 0.64, "cote": 1.66,
+                                 "ev": 0.06, "sensibilite_min": 0.02384, "veto": False}}
+    out = S.summarize_forecast(fc)
+    assert out["status"] == "selection"
+    assert abs(out["official"]["sensibilite_min"] - 0.02384) < 1e-9
+
+
 def _run_all():
     import inspect
     import types

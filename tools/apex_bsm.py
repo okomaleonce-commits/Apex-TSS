@@ -776,9 +776,16 @@ def cmd_simulate(a):
                               "sensibilite_min": (min(official["sens"]) if official.get("sens") else None),
                               "veto": False}
 
+    # Preuve de validation STRUCTURÉE (audit 2026-10-05, défaut D1) : la validation ne repose plus sur
+    # le texte libre `statut_modele`, mais sur ce bloc rattaché à un backtest. `validated` n'est vrai
+    # que si le pricing vient d'un backtest validé (run_id présent) — jamais pour des λ externes.
+    bt_run_id = (params.get("run_id") if (params and not (a.lh and a.la)) else None)
+    validation = {"validated": bool(status.startswith("VALIDÉ") and bt_run_id),
+                  "run_id": bt_run_id, "statut": status}
+
     fid = hashlib.sha1(f"{a.home}|{a.away}|{a.kickoff}|{dt.datetime.now(dt.timezone.utc).isoformat()}".encode()).hexdigest()[:12]
     rec = {"forecast_id": fid, "cree_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-           "official_selection": official_selection,
+           "official_selection": official_selection, "validation": validation,
            "coup_envoi": a.kickoff, "fixture_id": a.fixture_id, "div": a.div, "home": a.home, "away": a.away, "model_version": MODEL_VERSION,
            "source_lambdas": source, "statut_modele": status, "lh": round(lh, 3), "la": round(la, 3), "rho": rho, "sigma": sigma,
            "scenarios": scen, "n_simulations": n, "demi_largeur_IC95_MC": round(half, 4),
