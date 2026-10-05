@@ -553,6 +553,23 @@ def test_compute_bilan_grades_done_only(tmp_path):
         W.SNAP = old
 
 
+def test_live_emerging_market_reads_score_and_phase():
+    # 0–0 : Under se renforce ; mention de la pause à HT
+    assert "Under 2.5 se renforce" in W.live_emerging_market({"home": 0, "away": 0}, "2H")
+    assert "pause" in W.live_emerging_market({"home": 0, "away": 0}, "HT")
+    # 1 but : équilibré en 1re période, Under se dessine en 2nde
+    assert "équilibré" in W.live_emerging_market({"home": 1, "away": 0}, "1H")
+    assert "Under 2.5 se dessine" == W.live_emerging_market({"home": 0, "away": 1}, "2H")
+    # Over franchi
+    assert "Over 2.5" in W.live_emerging_market({"home": 2, "away": 1}, "2H")
+    assert "Over 3.5 ✓" in W.live_emerging_market({"home": 3, "away": 1}, "2H")
+    # écart ≥ 2 → handicap favori signalé
+    assert "handicap favori" in W.live_emerging_market({"home": 2, "away": 0}, "1H")
+    # score absent → jamais inventé
+    assert W.live_emerging_market(None, "1H") == "—"
+    assert W.live_emerging_market({"home": None, "away": 0}, "1H") == "—"
+
+
 def _run_all():
     import types
     g = dict(globals())

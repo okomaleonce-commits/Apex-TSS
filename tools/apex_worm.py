@@ -225,6 +225,34 @@ def fmt_score(sc):
     return "—" if sc is None else str(sc)
 
 
+def live_emerging_market(score, status):
+    """Lecture descriptive du « marché qui se dessine » pour un match en cours,
+    déduite MÉCANIQUEMENT du score live et de la phase (première période 1H/HT vs
+    seconde 2H/ET/BT/P). Aucune donnée inventée, aucun conseil de mise : c'est une
+    lecture de tendance en direct, pas un pari. Score absent → '—'."""
+    if not isinstance(score, dict):
+        return "—"
+    h, a = score.get("home"), score.get("away")
+    if h is None or a is None:
+        return "—"
+    tot = h + a
+    ecart = abs(h - a)
+    first = status in ("1H", "HT")  # première période ou mi-temps
+    if tot >= 4:
+        base = "Over 3.5 ✓ atteint"
+    elif tot == 3:
+        base = "Over 2.5 ✓ · Over 3.5 se dessine"
+    elif tot == 2:
+        base = "Over 2.5 à 1 but" + (" (avant la pause)" if first else "")
+    elif tot == 1:
+        base = "équilibré (1 but)" if first else "Under 2.5 se dessine"
+    else:  # 0–0
+        base = "Under 2.5 se renforce" + (" (0–0 à la pause)" if status == "HT" else "")
+    if ecart >= 2:
+        base += f" · handicap favori se confirme (écart {ecart})"
+    return base
+
+
 def sharp_signal(fair_now, fair_prev, hours_between, dispersion, sharp_vs_median, exchange=None):
     """SHARP (spec §13). Composantes calculables sans argent public : trajectoire de ligne entre nos
     relevés, consensus (dispersion), divergence books sharp↔médiane (Pinnacle + book asiatique SBO
@@ -1497,10 +1525,15 @@ def build_email_html(day) -> tuple:
               "au journal (ledger/forecasts.jsonl). Lance le protocole APEX sur ces matchs pour recouper.</div>"]
 
     if live:
-        H += ["<h2>En direct</h2><table><tr><th>Match</th><th>KO</th><th>Score</th><th>Statut</th></tr>"]
+        H += ["<h2>En direct</h2><table><tr><th>Match</th><th>KO</th><th>Score</th><th>Statut</th>"
+              "<th>Marché qui se dessine</th></tr>"]
         for r in live[:10]:
             H.append(f"<tr><td>{esc(r['home'])}–{esc(r['away'])}</td><td>{esc((r.get('kickoff') or '')[11:16])}</td>"
-                     f"<td>{esc(fmt_score(r.get('score')))}</td><td>{esc(r['status'])}</td></tr>")
+                     f"<td>{esc(fmt_score(r.get('score')))}</td><td>{esc(r['status'])}</td>"
+                     f"<td class='muted'>{esc(live_emerging_market(r.get('score'), r.get('status')))}</td></tr>")
+        H += ["<div class='muted'>« Marché qui se dessine » = lecture descriptive de la tendance "
+              "déduite du score et de la phase en direct (mécanique, aucune donnée inventée). "
+              "Ce n'est pas un conseil de pari : le live n'est pas backtesté par le module BSM.</div>"]
         H += ["</table>"]
 
     H += ["<h2>Meilleures anomalies</h2><table><tr><th>Match</th><th>KO</th><th>Sharp</th><th>Blow</th><th>Upset</th>"
