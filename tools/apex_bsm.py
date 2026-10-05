@@ -766,8 +766,19 @@ def cmd_simulate(a):
         official = None
         decision = "ABSTENTION — aucune EV ≥ 3 % stable" + (" (EV qui disparaît en sensibilité : surveillance)" if fragile else "")
 
+    # Sélection officielle STRUCTURÉE (audit 2026-10-05) : SYNC ne doit pas reconstruire une
+    # sélection depuis la liste d'EV brute ; il consomme ce champ exact (marché, p, cote, EV, borne
+    # basse de sensibilité). None si abstention/veto. Le gel de promotion reste géré par SYNC.
+    official_selection = None
+    if official:
+        official_selection = {"marche": official["marche"], "p": official.get("p"),
+                              "cote": official.get("cote"), "ev": official.get("ev"),
+                              "sensibilite_min": (min(official["sens"]) if official.get("sens") else None),
+                              "veto": False}
+
     fid = hashlib.sha1(f"{a.home}|{a.away}|{a.kickoff}|{dt.datetime.now(dt.timezone.utc).isoformat()}".encode()).hexdigest()[:12]
     rec = {"forecast_id": fid, "cree_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+           "official_selection": official_selection,
            "coup_envoi": a.kickoff, "fixture_id": a.fixture_id, "div": a.div, "home": a.home, "away": a.away, "model_version": MODEL_VERSION,
            "source_lambdas": source, "statut_modele": status, "lh": round(lh, 3), "la": round(la, 3), "rho": rho, "sigma": sigma,
            "scenarios": scen, "n_simulations": n, "demi_largeur_IC95_MC": round(half, 4),

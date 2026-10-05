@@ -313,12 +313,13 @@ VALIDATED_STATUSES = {"VALIDÉ", "VALIDE", "VALIDATED", "MODÈLE VALIDÉ", "MODE
 
 
 def _model_validated(fc: dict) -> bool:
-    """Validation POSITIVE et explicite : le feu VERT exige un statut_modele figurant dans la liste
-    blanche. Les λ structurels WORM (marqués « NON VALIDÉ ») et tout statut inconnu sont refusés."""
+    """Validation POSITIVE et explicite : le feu VERT exige un statut_modele COMMENÇANT par un
+    préfixe de la liste blanche (BSM émet « VALIDÉ (walk-forward …) »). Les λ structurels WORM
+    (« NON VALIDÉ »), « NON CONCLUANT » et tout statut inconnu/vide sont refusés (audit 2026-10-05)."""
     sm = (fc.get("statut_modele") or "").strip().upper()
     if not sm or "NON VALID" in sm:
         return False
-    return sm in VALIDATED_STATUSES
+    return any(sm.startswith(p) for p in VALIDATED_STATUSES)
 
 
 def _is_full_settle(market) -> bool:
@@ -465,11 +466,10 @@ def risk_decision(sel: dict, cfg: dict, exposure: dict | None = None,
         if ev < cfg["min_ev"]:
             reasons.append(f"EV {ev * 100:.2f} % < seuil {cfg['min_ev'] * 100:.0f} %")
 
-    # Type de règlement : le Kelly binaire (p, cote) suppose un règlement PLEIN sur ligne .5. Un
-    # handicap/split/ligne quart ou entière, ou un marché absent, est refusé (audit 2026-10-05).
-    full_settle = sel.get("full_settle")
-    if full_settle is None:
-        full_settle = _is_full_settle(sel.get("market"))
+    # Type de règlement : le Kelly binaire (p, cote) suppose un règlement PLEIN sur ligne .5. Le type
+    # est TOUJOURS recalculé depuis le marché — un `full_settle` fourni n'est jamais cru (audit
+    # 2026-10-05 : full_settle=True sur « Over 2.25 » contournait l'identification du contrat).
+    full_settle = _is_full_settle(sel.get("market"))
     if not full_settle:
         reasons.append("règlement partiel/non identifié — incompatible avec le Kelly binaire")
 
@@ -621,7 +621,9 @@ def cmd_sync(a):
                      "market": off["marche"], "p": off["p"], "odds": off["cote"]}
                 risk = risk_decision(s, cfg, exposure, pnl_day, pnl_week)
                 entry["risk"] = risk
-                if risk["approved"]:
+                # On n'engage l'exposition que pour une autorisation RÉELLE (feu VERT) — jamais sous
+                # gel (sinon une mise non autorisée bloquerait d'autres candidats).
+                if risk["approved"] and not PROMOTION_FROZEN:
                     add_exposure(exposure, s, risk["stake_pct"])
         elif a.run_protocol and not cmd["runnable"]:
             protocol = {"status": "wait", "reason": cmd["reason"]}
@@ -664,9 +666,13 @@ def _print_sync_report(day, cfg, sel, decisions, counts, ran):
             print(f"   PROTOCOL : SÉLECTION {off['marche']} @ {off['cote']} · "
                   f"p={off['p']:.3f} · EV {off['ev']:+.1%} · {p.get('statut_modele', '')}")
             r = e.get("risk") or {}
-            if r.get("approved"):
+            # Le rapport ne doit JAMAIS afficher « GO · mise » tant que le feu n'est pas VERT : sous
+            # gel, un risk approved + feu ORANGE s'affiche GELÉ, pas GO (audit 2026-10-05).
+            if e["light"] == GREEN and r.get("approved"):
                 print(f"   RISK : GO · mise {r['stake_pct'] * 100:.2f} % = {r['stake_amount']:.2f} "
                       f"(bankroll {cfg['bankroll']:.0f})" + (f" · {', '.join(r['caps_applied'])}" if r.get("caps_applied") else ""))
+            elif r.get("approved") and PROMOTION_FROZEN:
+                print("   RISK : GELÉ — mise calculée mais NON autorisée (promotion suspendue, audit 2026-10-05)")
             else:
                 print(f"   RISK : refus · {', '.join(r.get('reasons', [])) or '—'}")
         else:

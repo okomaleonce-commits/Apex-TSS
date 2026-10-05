@@ -42,6 +42,14 @@ def test_freeze_decision_refused_after_kickoff(monkeypatch, tmp_path):
     assert ok is False and "dépassé" in payload["reason"]
 
 
+def test_freeze_decision_requires_valid_kickoff(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    now = dt.datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+    for bad in (None, "", "pas-une-date"):
+        ok, payload = L.freeze_decision(DAY, "mX", bad, {"market": "x"}, now=now)
+        assert ok is False and "coup d'envoi" in payload["reason"]
+
+
 # ───────── réservations : idempotence, plafonds, restart ─────────
 
 def test_reserve_idempotent_same_key(monkeypatch, tmp_path):
@@ -77,6 +85,38 @@ def test_settlement_is_separate_append_only(monkeypatch, tmp_path):
     # règlement idempotent
     w2, _ = L.settle(DAY, "m1", "Under 2.5", "1-0", "gagné")
     assert w2 is False
+
+
+def test_reserve_rejects_invalid_amounts(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    for bad in (float("nan"), float("inf"), -0.02, 0.0, "x", None):
+        ok, payload = L.reserve_exposure(DAY, {"match_id": "m1", "league": "L", "market": "Under 2.5"}, bad)
+        assert ok is False and "invalide" in payload["reason"] or "non numérique" in payload["reason"]
+    # un montant négatif refusé ne doit PAS permettre de dépasser ensuite le plafond ligue
+    assert L.current_exposure(DAY)["total"] == 0.0
+
+
+def test_reserve_one_bet_per_match(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    a, _ = L.reserve_exposure(DAY, {"match_id": "m1", "league": "L", "market": "Under 2.5"}, 0.005)
+    b, payload = L.reserve_exposure(DAY, {"match_id": "m1", "league": "L", "market": "Over 2.5"}, 0.005)
+    assert a is True and b is False
+    assert "un pari par match" in payload["reason"]
+    assert L.current_exposure(DAY)["matchs"]["m1"] == 0.005   # un seul pari engagé
+
+
+def test_corrupt_journal_fails_closed(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    L.reserve_exposure(DAY, {"match_id": "m1", "league": "L", "market": "Under 2.5"}, 0.01)
+    # on corrompt la fin du journal (ligne JSON tronquée)
+    p = L._paths(DAY)["reservations"]
+    with open(p, "a", encoding="utf-8") as fh:
+        fh.write('{"reservation_id": "zz", "stake_pct": 0.0')   # ligne incomplète
+    ok, payload = L.reserve_exposure(DAY, {"match_id": "m2", "league": "L", "market": "Over 2.5"}, 0.01)
+    assert ok is False and "illisible" in payload["reason"]     # fail-closed, pas « succès »
+    import pytest
+    with pytest.raises(L.LedgerError):
+        L.current_exposure(DAY)                                 # ne renvoie jamais 0 en silence
 
 
 def test_restart_rebuilds_exposure_from_disk(monkeypatch, tmp_path):

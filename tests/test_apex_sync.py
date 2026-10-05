@@ -328,6 +328,27 @@ def test_risk_rejects_quarter_line_and_missing_market():
     assert absent["approved"] is False and absent["hard_block"] is True
 
 
+def test_risk_ignores_supplied_full_settle_flag():
+    # DÉFAUT AUDIT : full_settle=True fourni contournait l'identification du contrat. Il est ignoré :
+    # le type de règlement est TOUJOURS recalculé depuis le marché.
+    cfg = {**S.DEFAULT_CONFIG, "bankroll": 1000.0}
+    r = S.risk_decision({"match_id": "m", "league": "L", "market": "Over 2.25",
+                         "p": 0.60, "odds": 2.0, "full_settle": True}, cfg)
+    assert r["approved"] is False and r["hard_block"] is True
+    assert any("règlement partiel" in x for x in r["reasons"])
+
+
+def test_bsm_official_selection_consumed_and_prefix_validation():
+    # Round-trip du contrat BSM durci : official_selection structurée + statut « VALIDÉ (walk-forward) ».
+    fc = {"statut_mise": "PROPOSÉE", "statut_modele": "VALIDÉ (walk-forward 2026)",
+          "official_selection": {"marche": "Under 2.5", "p": 0.64, "cote": 1.66, "veto": False}}
+    out = S.summarize_forecast(fc)
+    assert out["status"] == "selection" and out["official"]["marche"] == "Under 2.5"
+    # « NON CONCLUANT » n'est pas une validation
+    fc2 = {**fc, "statut_modele": "NON CONCLUANT (échantillon court)"}
+    assert S.summarize_forecast(fc2)["status"] == "unvalidated"
+
+
 def _run_all():
     import inspect
     import types

@@ -26,8 +26,13 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
+
+
+class LedgerError(Exception):
+    """État du journal illisible/corrompu — toute opération échoue en SÉCURITÉ (fail-closed)."""
 
 try:
     import fcntl  # POSIX uniquement (conteneur Linux) ; verrou inter-processus réel
@@ -59,19 +64,26 @@ def reservation_id(day, match_id, market) -> str:
     return hashlib.sha1(raw).hexdigest()[:16]
 
 
-def _read_jsonl(path):
-    if not path.exists():
-        return []
+def _parse_strict(text, where="journal"):
+    """Parse un contenu JSONL en REFUSANT toute ligne non vide illisible (fail-closed) : une dernière
+    ligne tronquée ne doit pas être silencieusement ignorée (sinon l'exposition reconstruite serait
+    sous-évaluée → autorisations erronées). Lève LedgerError."""
     out = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for i, line in enumerate(text.splitlines(), 1):
         line = line.strip()
         if not line:
             continue
         try:
             out.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
+        except json.JSONDecodeError as e:
+            raise LedgerError(f"{where} illisible à la ligne {i} : {e}") from e
     return out
+
+
+def _read_jsonl(path):
+    if not path.exists():
+        return []
+    return _parse_strict(path.read_text(encoding="utf-8"), where=str(path.name))
 
 
 def _append_locked(path, record, *, dedup_key=None, dedup_field=None, cap_check=None):
@@ -89,14 +101,10 @@ def _append_locked(path, record, *, dedup_key=None, dedup_field=None, cap_check=
         if _HAS_FCNTL:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX)   # bloque jusqu'à obtention (inter-processus)
         try:
-            existing = []
-            for line in fh.read().splitlines():
-                line = line.strip()
-                if line:
-                    try:
-                        existing.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        continue
+            try:
+                existing = _parse_strict(fh.read(), where=str(path.name))
+            except LedgerError as e:
+                return False, {"reason": f"état illisible — opération refusée (fail-closed) : {e}"}
             if dedup_key is not None and dedup_field is not None:
                 for r in existing:
                     if r.get(dedup_field) == dedup_key:
@@ -117,17 +125,25 @@ def _append_locked(path, record, *, dedup_key=None, dedup_field=None, cap_check=
 # ───────────────────────── décisions figées avant KO ─────────────────────────
 
 def freeze_decision(day, match_id, kickoff_utc, decision, *, now=None):
-    """Fige la décision d'un match AVANT le coup d'envoi. Première écriture gagnante (idempotent) :
-    un passage ultérieur ne peut pas remplacer une décision déjà figée. Refus si KO dépassé."""
-    now = now or dt.datetime.now(dt.timezone.utc)
+    """Fige la décision d'un match AVANT le coup d'envoi. Première écriture gagnante (idempotent).
+    Le KO est OBLIGATOIRE et valide ; il est revérifié SOUS VERROU avec l'instant d'écriture (pas un
+    horodatage capturé avant l'attente du verrou) — un KO absent/invalide ou dépassé est refusé."""
     ko = _parse_utc(kickoff_utc)
-    if ko is not None and now >= ko:
-        return False, {"reason": "coup d'envoi dépassé — décision non figée (trop tard)"}
+    if ko is None:
+        return False, {"reason": "coup d'envoi absent ou invalide — décision non figée"}
     rid = reservation_id(day, match_id, "__decision__")
     rec = {"reservation_id": rid, "match_id": match_id, "kickoff_utc": kickoff_utc,
-           "decision": decision, "frozen_at_utc": now.isoformat()}
+           "decision": decision}
+
+    def cap_check(_existing):
+        t = now or dt.datetime.now(dt.timezone.utc)   # instant RÉEL d'écriture, sous verrou
+        if t >= ko:
+            return False, "coup d'envoi dépassé au moment de l'écriture — décision non figée"
+        rec["frozen_at_utc"] = t.isoformat()
+        return True, None
+
     return _append_locked(_paths(day)["decisions"], rec,
-                          dedup_key=rid, dedup_field="reservation_id")
+                          dedup_key=rid, dedup_field="reservation_id", cap_check=cap_check)
 
 
 def get_frozen_decision(day, match_id):
@@ -163,11 +179,21 @@ def reserve_exposure(day, sel, stake_pct, caps=None, *, now=None):
     now = now or dt.datetime.now(dt.timezone.utc)
     mid, lg, mk = sel.get("match_id"), sel.get("league"), sel.get("market")
     rid = reservation_id(day, mid, mk)
-    stake_pct = float(stake_pct or 0.0)
+    # Montant VALIDE : fini et strictement positif (refus NaN, ±inf, négatif, zéro — audit 2026-10-05).
+    try:
+        stake_pct = float(stake_pct)
+    except (TypeError, ValueError):
+        return False, {"reason": "montant de mise non numérique"}
+    if not math.isfinite(stake_pct) or stake_pct <= 0.0:
+        return False, {"reason": f"montant de mise invalide ({stake_pct!r}) — fini et > 0 requis"}
     rec = {"reservation_id": rid, "match_id": mid, "league": lg, "market": mk,
            "stake_pct": stake_pct, "reserved_at_utc": now.isoformat()}
 
     def cap_check(existing):
+        # Un seul pari par match (anti-corrélation, au-delà du plafond cumulé) : si une réservation
+        # existe déjà sur ce match (quel que soit le marché), on refuse (audit 2026-10-05).
+        if any(r.get("match_id") == mid for r in existing):
+            return False, "un pari est déjà engagé sur ce match (un pari par match)"
         em = sum(float(r.get("stake_pct") or 0.0) for r in existing if r.get("match_id") == mid)
         el = sum(float(r.get("stake_pct") or 0.0) for r in existing if r.get("league") == lg)
         ek = sum(float(r.get("stake_pct") or 0.0) for r in existing if r.get("market") == mk)
