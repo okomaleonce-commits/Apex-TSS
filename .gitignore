@@ -29,3 +29,6 @@ data/sync/
 # APEX-CHARACTER (sorties générées)
 data/character/
 backtests/character-*/
+
+# État durable généré (APEX-LEDGER, étape 2) — non versionné
+state/

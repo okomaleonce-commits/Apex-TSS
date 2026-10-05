@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""APEX-LEDGER — état durable de la chaîne de décision (audit 2026-10-05, étape 2).
+
+Trois journaux APPEND-ONLY distincts, reconstruits depuis le disque à chaque lecture (donc
+sûrs au redémarrage du conteneur) :
+
+  state/ledger/<jour>.decisions.jsonl    décisions FIGÉES avant le coup d'envoi (une par match,
+                                         première écriture gagnante — jamais réécrite)
+  state/ledger/<jour>.reservations.jsonl réservations d'exposition ATOMIQUES et IDEMPOTENTES
+                                         (verrou inter-processus fcntl ; clé déterministe)
+  state/ledger/<jour>.settlements.jsonl  règlements AJOUTÉS séparément (ne touchent jamais les
+                                         décisions ni les réservations)
+
+Principes (audit) :
+  • append-only strict : on n'édite/supprime jamais une ligne ; un règlement est un ÉVÉNEMENT à part.
+  • idempotence : réserver deux fois la même clé ne double pas l'exposition (dédup sur reservation_id).
+  • atomicité inter-passage : check-cumul-puis-append sous verrou exclusif fcntl (deux passages
+    concurrents ne peuvent pas dépasser un plafond).
+  • restart-safe : aucun état en mémoire entre passages ; tout est relu du journal.
+
+Ce module NE price pas et N'autorise pas une mise : il tient l'état. L'autorisation reste soumise
+au gel de promotion d'apex_sync (PROMOTION_FROZEN).
+"""
+from __future__ import annotations
+
+import datetime as dt
+import hashlib
+import json
+import os
+from pathlib import Path
+
+try:
+    import fcntl  # POSIX uniquement (conteneur Linux) ; verrou inter-processus réel
+    _HAS_FCNTL = True
+except ImportError:  # pragma: no cover
+    _HAS_FCNTL = False
+
+ROOT = Path(__file__).resolve().parent.parent
+# Emplacement du journal durable ; surchargeable par APEX_LEDGER_STATE (tests multi-processus).
+STATE = Path(os.environ.get("APEX_LEDGER_STATE") or (ROOT / "state" / "ledger"))
+
+# Plafonds d'exposition (fraction de bankroll) — mêmes valeurs que le Risk Manager SYNC.
+DEFAULT_CAPS = {"match": 0.01, "league": 0.03, "market": 0.03, "total_day": 0.10}
+
+
+def _paths(day):
+    d = day.isoformat() if hasattr(day, "isoformat") else str(day)
+    return {
+        "decisions": STATE / f"{d}.decisions.jsonl",
+        "reservations": STATE / f"{d}.reservations.jsonl",
+        "settlements": STATE / f"{d}.settlements.jsonl",
+    }
+
+
+def reservation_id(day, match_id, market) -> str:
+    """Clé déterministe d'une réservation : même (jour, match, marché) → même id (idempotence)."""
+    d = day.isoformat() if hasattr(day, "isoformat") else str(day)
+    raw = f"{d}|{match_id}|{market}".encode("utf-8")
+    return hashlib.sha1(raw).hexdigest()[:16]
+
+
+def _read_jsonl(path):
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return out
+
+
+def _append_locked(path, record, *, dedup_key=None, dedup_field=None, cap_check=None):
+    """Ajoute `record` à `path` sous verrou EXCLUSIF inter-processus (atomique).
+
+    - dedup_key/dedup_field : si une ligne porte déjà cette valeur, on NE ré-écrit PAS et on renvoie
+      (False, ligne_existante) — idempotence.
+    - cap_check(existing_records) -> (ok, reason) : évalué APRÈS relecture SOUS verrou, juste avant
+      l'append, pour que deux passages concurrents ne dépassent pas un plafond.
+    Renvoie (written: bool, payload). payload = record écrit, ou la ligne existante, ou {'reason':...}.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch(exist_ok=True)
+    with open(path, "r+", encoding="utf-8") as fh:
+        if _HAS_FCNTL:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)   # bloque jusqu'à obtention (inter-processus)
+        try:
+            existing = []
+            for line in fh.read().splitlines():
+                line = line.strip()
+                if line:
+                    try:
+                        existing.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+            if dedup_key is not None and dedup_field is not None:
+                for r in existing:
+                    if r.get(dedup_field) == dedup_key:
+                        return False, r            # déjà présent → idempotent
+            if cap_check is not None:
+                ok, reason = cap_check(existing)
+                if not ok:
+                    return False, {"reason": reason}
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+            return True, record
+        finally:
+            if _HAS_FCNTL:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+# ───────────────────────── décisions figées avant KO ─────────────────────────
+
+def freeze_decision(day, match_id, kickoff_utc, decision, *, now=None):
+    """Fige la décision d'un match AVANT le coup d'envoi. Première écriture gagnante (idempotent) :
+    un passage ultérieur ne peut pas remplacer une décision déjà figée. Refus si KO dépassé."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    ko = _parse_utc(kickoff_utc)
+    if ko is not None and now >= ko:
+        return False, {"reason": "coup d'envoi dépassé — décision non figée (trop tard)"}
+    rid = reservation_id(day, match_id, "__decision__")
+    rec = {"reservation_id": rid, "match_id": match_id, "kickoff_utc": kickoff_utc,
+           "decision": decision, "frozen_at_utc": now.isoformat()}
+    return _append_locked(_paths(day)["decisions"], rec,
+                          dedup_key=rid, dedup_field="reservation_id")
+
+
+def get_frozen_decision(day, match_id):
+    rid = reservation_id(day, match_id, "__decision__")
+    for r in _read_jsonl(_paths(day)["decisions"]):
+        if r.get("reservation_id") == rid:
+            return r
+    return None
+
+
+# ───────────────────────── réservations d'exposition ─────────────────────────
+
+def current_exposure(day):
+    """Reconstruit l'exposition engagée (fraction de bankroll) depuis le journal — restart-safe."""
+    exp = {"matchs": {}, "ligues": {}, "marches": {}, "total": 0.0}
+    for r in _read_jsonl(_paths(day)["reservations"]):
+        s = float(r.get("stake_pct") or 0.0)
+        for scope, key in (("matchs", r.get("match_id")), ("ligues", r.get("league")),
+                           ("marches", r.get("market"))):
+            if key is not None:
+                exp[scope][key] = round(exp[scope].get(key, 0.0) + s, 6)
+        exp["total"] = round(exp["total"] + s, 6)
+    return exp
+
+
+def reserve_exposure(day, sel, stake_pct, caps=None, *, now=None):
+    """Réserve `stake_pct` pour `sel` = {match_id, league, market}. Atomique + idempotent :
+      • même (jour, match, marché) déjà réservé → renvoie la réservation existante, pas de doublon ;
+      • sinon, sous verrou, vérifie les plafonds CUMULÉS (match/ligue/marché/jour) et n'écrit que
+        si tous sont respectés — deux passages concurrents ne peuvent pas dépasser un plafond.
+    Renvoie (reserved: bool, payload)."""
+    caps = {**DEFAULT_CAPS, **(caps or {})}
+    now = now or dt.datetime.now(dt.timezone.utc)
+    mid, lg, mk = sel.get("match_id"), sel.get("league"), sel.get("market")
+    rid = reservation_id(day, mid, mk)
+    stake_pct = float(stake_pct or 0.0)
+    rec = {"reservation_id": rid, "match_id": mid, "league": lg, "market": mk,
+           "stake_pct": stake_pct, "reserved_at_utc": now.isoformat()}
+
+    def cap_check(existing):
+        em = sum(float(r.get("stake_pct") or 0.0) for r in existing if r.get("match_id") == mid)
+        el = sum(float(r.get("stake_pct") or 0.0) for r in existing if r.get("league") == lg)
+        ek = sum(float(r.get("stake_pct") or 0.0) for r in existing if r.get("market") == mk)
+        et = sum(float(r.get("stake_pct") or 0.0) for r in existing)
+        if em + stake_pct > caps["match"] + 1e-9:
+            return False, f"plafond match dépassé ({em + stake_pct:.4f} > {caps['match']})"
+        if el + stake_pct > caps["league"] + 1e-9:
+            return False, f"plafond ligue dépassé ({el + stake_pct:.4f} > {caps['league']})"
+        if ek + stake_pct > caps["market"] + 1e-9:
+            return False, f"plafond marché dépassé ({ek + stake_pct:.4f} > {caps['market']})"
+        if et + stake_pct > caps["total_day"] + 1e-9:
+            return False, f"plafond journalier dépassé ({et + stake_pct:.4f} > {caps['total_day']})"
+        return True, None
+
+    return _append_locked(_paths(day)["reservations"], rec,
+                          dedup_key=rid, dedup_field="reservation_id", cap_check=cap_check)
+
+
+# ───────────────────────── règlements (fichier séparé) ─────────────────────────
+
+def settle(day, match_id, market, score, result, *, now=None):
+    """Ajoute un règlement dans un journal SÉPARÉ (append-only). Ne touche jamais la décision figée
+    ni la réservation : le bilan se lit en joignant decisions ⋈ settlements, sans réécriture."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    rec = {"reservation_id": reservation_id(day, match_id, market), "match_id": match_id,
+           "market": market, "score": score, "result": result, "settled_at_utc": now.isoformat()}
+    # un règlement par (match, marché) : idempotent sur reservation_id
+    return _append_locked(_paths(day)["settlements"], rec,
+                          dedup_key=rec["reservation_id"], dedup_field="reservation_id")
+
+
+def _parse_utc(s):
+    if not s:
+        return None
+    try:
+        d = dt.datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        return d if d.tzinfo else d.replace(tzinfo=dt.timezone.utc)
+    except ValueError:
+        return None
