@@ -575,6 +575,32 @@ def test_live_emerging_market_reads_score_and_phase():
     assert W.live_emerging_market({"home": None, "away": 0}, "1H") == "—"
 
 
+def _reco_rec(**kw):
+    base = {"odds": {}, "data_quality": 80, "blowout": 100, "upset": None, "convergence": None,
+            "sharp": 20, "convergence_dir": None, "ev_best": None, "ev_best_idx": None,
+            "exchange_confirmation": False, "rlm": None}
+    base.update(kw)
+    return base
+
+
+def test_min_played_guard_blocks_promotion_on_short_sample():
+    # BLOWOUT 100 mais 2 matchs joués → signal structurel NON FIABLE, jamais promu (audit 2026-10-05)
+    out = W.recommend(_reco_rec(min_played=2))
+    assert out["decision"]["tier"] == "SURVEILLER"
+    assert out["small_sample"]["min_played"] == 2 and out["small_sample"]["seuil"] == W.MIN_PLAYED
+
+
+def test_min_played_guard_allows_promotion_on_full_sample():
+    out = W.recommend(_reco_rec(min_played=10))
+    assert out["decision"]["tier"] in ("JOUER", "JOUER_PETIT")
+    assert "small_sample" not in out
+
+
+def test_min_played_guard_ignored_when_played_unknown():
+    out = W.recommend(_reco_rec(min_played=None))
+    assert "small_sample" not in out
+
+
 def _run_all():
     import types
     g = dict(globals())

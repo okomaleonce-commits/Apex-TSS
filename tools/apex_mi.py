@@ -60,6 +60,12 @@ WATCH_JOURNAL = os.path.join(ROOT, "journal", "apex_mi_watch.csv")
 WATCH_HEADER = ["day", "fixture_id", "match", "league", "kind", "side", "market",
                 "side_prob_h60", "fair_odd_h60", "watch_score", "status",
                 "logged_at_utc", "settled_at_utc", "score", "result"]
+# Règlements des veilles : journal SÉPARÉ, strictement APPEND-ONLY (audit 2026-10-05, point 4).
+# `settle` ne réécrit PLUS `apex_mi_watch.csv` (l'ancienne version l'ouvrait en « w », donc non
+# atomique et re-churné à chaque passage) : il AJOUTE un événement de règlement ici, idempotent
+# sur (day, fixture_id, market). Le bilan se lit en joignant veilles ⋈ règlements.
+SETTLE_JOURNAL = os.path.join(ROOT, "journal", "apex_mi_settlements.csv")
+SETTLE_HEADER = ["day", "fixture_id", "market", "score", "result", "settled_at_utc"]
 # Pont avec APEX-WORM : le scanner écrit ses relevés horodatés ici ; l'activation H-60
 # d'APEX-MI les lit, produit un rapport orienté UPSET et le dépose pour l'email WORM.
 WORM_SNAP = os.path.join(ROOT, "data", "worm", "snapshots")
@@ -1168,9 +1174,30 @@ def _final_scores_from_snapshot(day):
     return finals
 
 
+def _settle_key(day, fixture_id, market):
+    return f"{day}|{fixture_id}|{market}"
+
+
+def _read_settlements():
+    """Règlements déjà enregistrés, indexés par clé (day|fixture_id|market). Fichier séparé,
+    append-only : une lecture n'écrit jamais."""
+    import csv
+    out = {}
+    if not os.path.exists(SETTLE_JOURNAL):
+        return out
+    with open(SETTLE_JOURNAL, encoding="utf-8", newline="") as fh:
+        for r in csv.DictReader(fh):
+            out[_settle_key(r.get("day"), r.get("fixture_id"), r.get("market"))] = r
+    return out
+
+
 def cmd_settle(a):
     """Règle les veilles H-60 non encore réglées contre le score final (snapshot WORM).
-    Réutilise grade_market d'APEX-WORM pour une notation cohérente avec le scanner."""
+
+    AUDIT 2026-10-05, point 4 : APPEND-ONLY. On ne réécrit JAMAIS `apex_mi_watch.csv` ; chaque
+    règlement est AJOUTÉ à `apex_mi_settlements.csv` (idempotent sur day|fixture_id|market). Le taux
+    de réussite se lit en joignant veilles ⋈ règlements, plus les résultats historiques déjà inscrits
+    en ligne dans d'anciennes veilles (rétrocompatibilité, dédupliqués par la même clé)."""
     import csv
     if not os.path.exists(WATCH_JOURNAL):
         print("Aucun journal de veille à régler.")
@@ -1178,11 +1205,12 @@ def cmd_settle(a):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import apex_worm as W
     with open(WATCH_JOURNAL, encoding="utf-8", newline="") as fh:
-        rows = list(csv.DictReader(fh))
-    finals_by_day = {}
-    settled = 0
-    for r in rows:
-        if r.get("result"):
+        watches = list(csv.DictReader(fh))
+    settlements = _read_settlements()                 # déjà réglés (fichier séparé)
+    finals_by_day, new_rows, settled = {}, [], 0
+    for r in watches:
+        key = _settle_key(r.get("day"), r.get("fixture_id"), r.get("market"))
+        if r.get("result") or key in settlements:     # déjà réglé (en ligne historique ou séparé)
             continue
         d = r.get("day")
         if d not in finals_by_day:
@@ -1191,21 +1219,32 @@ def cmd_settle(a):
         if not fin:
             continue
         hg, ag = fin
-        res = W.grade_market(r.get("market"), hg, ag)
-        r["score"] = f"{hg}-{ag}"
-        r["result"] = res
-        r["settled_at_utc"] = now_utc()
+        rec = {"day": d, "fixture_id": r.get("fixture_id"), "market": r.get("market"),
+               "score": f"{hg}-{ag}", "result": W.grade_market(r.get("market"), hg, ag),
+               "settled_at_utc": now_utc()}
+        new_rows.append(rec)
+        settlements[key] = rec
         settled += 1
-    with open(WATCH_JOURNAL, "w", encoding="utf-8", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=WATCH_HEADER)
-        w.writeheader()
-        w.writerows(rows)
-    graded = [r for r in rows if r.get("result") and r["result"] not in ("non-gradé",)]
-    wins = sum(1 for r in graded if r["result"] == "gagné") + 0.5 * sum(1 for r in graded if r["result"] == "demi-gagné")
-    n = sum(1 for r in graded if r["result"] != "push")
+    if new_rows:                                       # AJOUT uniquement — jamais de réécriture
+        os.makedirs(os.path.dirname(SETTLE_JOURNAL), exist_ok=True)
+        fresh = not os.path.exists(SETTLE_JOURNAL)
+        with open(SETTLE_JOURNAL, "a", encoding="utf-8", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=SETTLE_HEADER)
+            if fresh:
+                w.writeheader()
+            w.writerows(new_rows)
+    # Bilan : union des règlements séparés et des résultats historiques en ligne, dédupliqués par clé.
+    graded = dict(settlements)
+    for r in watches:
+        if r.get("result"):
+            graded.setdefault(_settle_key(r.get("day"), r.get("fixture_id"), r.get("market")),
+                              {"result": r["result"]})
+    vals = [g["result"] for g in graded.values() if g.get("result") and g["result"] != "non-gradé"]
+    wins = sum(1 for v in vals if v == "gagné") + 0.5 * sum(1 for v in vals if v == "demi-gagné")
+    n = sum(1 for v in vals if v != "push")
     taux = (wins / n) if n else None
     print(f"APEX-MI settle : {settled} veille(s) réglée(s) ce passage · "
-          f"{len(graded)} gradées au total" + (f" · réussite {taux:.0%}" if taux is not None else ""))
+          f"{len(vals)} gradées au total" + (f" · réussite {taux:.0%}" if taux is not None else ""))
     return 0
 
 

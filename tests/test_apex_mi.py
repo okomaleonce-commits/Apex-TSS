@@ -39,11 +39,13 @@ def test_watch_picks_only_live_watches():
 
 
 def test_journal_and_settle(tmp_path, monkeypatch):
-    # redirige journal + snapshots vers tmp
+    # redirige journal veilles + règlements + snapshots vers tmp
     wj = tmp_path / "apex_mi_watch.csv"
+    sj = tmp_path / "apex_mi_settlements.csv"
     snapdir = tmp_path / "wsnap"
     snapdir.mkdir()
     monkeypatch.setattr(MI, "WATCH_JOURNAL", str(wj))
+    monkeypatch.setattr(MI, "SETTLE_JOURNAL", str(sj))
     monkeypatch.setattr(MI, "WORM_SNAP", str(snapdir))
 
     artifact = {"items": [
@@ -67,13 +69,20 @@ def test_journal_and_settle(tmp_path, monkeypatch):
 
     class A:  # args factices
         pass
-    MI.cmd_settle(A())
 
-    with open(wj, encoding="utf-8", newline="") as fh:
-        rows = {r["fixture_id"]: r for r in csv.DictReader(fh)}
-    assert rows["10"]["result"] == "gagné"
-    assert rows["10"]["score"] == "2-0"
-    assert rows["11"]["result"] == "perdu"
+    # APPEND-ONLY (audit 2026-10-05, point 4) : le journal des veilles n'est JAMAIS réécrit par settle.
+    watch_before = wj.read_bytes()
+    MI.cmd_settle(A())
+    assert wj.read_bytes() == watch_before                       # veilles inchangées
+    # les règlements vont dans un fichier séparé, append-only
+    with open(sj, encoding="utf-8", newline="") as fh:
+        srows = {r["fixture_id"]: r for r in csv.DictReader(fh)}
+    assert srows["10"]["result"] == "gagné" and srows["10"]["score"] == "2-0"
+    assert srows["11"]["result"] == "perdu"
+    # idempotence : un second settle n'ajoute aucun doublon
+    MI.cmd_settle(A())
+    with open(sj, encoding="utf-8", newline="") as fh:
+        assert sum(1 for _ in csv.DictReader(fh)) == 2
 
 
 def test_settle_no_journal_is_noop(tmp_path, monkeypatch):

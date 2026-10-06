@@ -509,6 +509,14 @@ def asian_integrity(rec, prev):
 SIGNAL_MIN = {"BLOWOUT": 45, "UPSET": 45, "SHARP": 45, "STATSCONVERGENCE": 60}
 STATSCONV_UNDER_MIN = 67
 
+# Garde-fou échantillon (audit 2026-10-05) : les moteurs structurels (BLOWOUT/UPSET/STATSCONVERGENCE)
+# lisent le classement (points, buts/match). Sous MIN_PLAYED matchs joués (p.ex. U21/qualifs en début
+# de campagne), ppg et buts/match sont trop bruités pour fonder un palier — un « BLOWOUT 100 » sur
+# 1-2 matchs n'est PAS fiable. Ces signaux restent affichés mais ne peuvent plus être promus JOUER/
+# JOUER_PETIT : ils redescendent à SURVEILLER avec la mention « échantillon court ».
+MIN_PLAYED = 4
+_STRUCTURAL_SIGNALS = {"BLOWOUT", "UPSET", "STATSCONVERGENCE"}
+
 # ───────────────────────── gel de promotion (audit 2026-10-05) ─────────────────────────
 # Le digest WORM est un RADAR DE RECHERCHE, pas une autorité de mise : le modèle structurel ne bat
 # pas le marché (ROI backtest négatif, log-loss > marché). Tant que les verrous de décision et la
@@ -586,7 +594,14 @@ def recommend(rec):
     dq = rec["data_quality"]
     exch_conf = bool(rec.get("exchange_confirmation")) or bool(rec.get("rlm"))
     strong_extra = exch_conf or bool(out.get("value_1x2_directe"))
-    if sc >= 70 and dq >= 65 and strong_extra:
+    # Échantillon court sur un signal structurel : jamais de promotion (audit 2026-10-05).
+    mp = rec.get("min_played")
+    small_sample = (tag in _STRUCTURAL_SIGNALS and mp is not None and mp < MIN_PLAYED)
+    if small_sample:
+        out["small_sample"] = {"min_played": mp, "seuil": MIN_PLAYED, "provenance": OBSERVED,
+                               "note": f"{mp} match(s) joués < {MIN_PLAYED} — signal structurel NON FIABLE, non promu"}
+        tier, units = "SURVEILLER", 0.25
+    elif sc >= 70 and dq >= 65 and strong_extra:
         tier, units = "JOUER", 1.0
     elif sc >= 55 and dq >= 50:
         tier, units = "JOUER_PETIT", 0.5
@@ -1108,7 +1123,7 @@ def write_report(day):
               f"- Scores — Sharp {r.get('sharp')} · Blowout {r.get('blowout')} · Upset {r.get('upset')} · Convergence {r.get('convergence')} ({r.get('convergence_dir')})",
               f"- Confiance {r.get('confidence')}/100 · Qualité données {r.get('data_quality')}/100"]
         if r.get("expected_score"):
-            L.append(f"- Score attendu (xG structurel) : {r['expected_score']['xg_dom']} – {r['expected_score']['xg_ext']}")
+            L.append(f"- Buts attendus (λ Poisson sur moyennes du CLASSEMENT, PAS du xG) : {r['expected_score']['xg_dom']} – {r['expected_score']['xg_ext']}")
         if r.get("divergence_alert"):
             L.append(f"- ⚠ DIVERGENCE : {r['divergence_alert']['note']}")
         if r.get("compositions"):
@@ -1706,8 +1721,9 @@ def build_email_html(day) -> tuple:
               else "--money inactif ou aucun appariement"),
           _ok("arbworld (arbitrage)", "OK" if arbworld_ok else "UNAVAILABLE",
               "API autorisée configurée" if arbworld_ok else "pas d'API autorisée → aucun scraping (robots.txt)"),
-          _ok("FootyStats (xG historique)", "OK" if footystats_ok else "UNAVAILABLE",
-              "clé présente" if footystats_ok else "FOOTYSTATS_KEY absente"),
+          _ok("FootyStats (xG historique)", "NON UTILISÉ",
+              "clé présente, mais WORM price sur le CLASSEMENT (buts réels), pas le xG" if footystats_ok
+              else "FOOTYSTATS_KEY absente ; WORM n'utilise de toute façon pas le xG"),
           _ok("Notification e-mail", "OK",
               "connecteur Gmail (session)" if gmail_mode else "SMTP (secrets CI)"),
           "</table>",
