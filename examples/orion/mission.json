@@ -1,0 +1,39 @@
+{
+  "task_id": "orion:delivery-review",
+  "objective": "Examiner une échéance de livraison documentée — exemple fictif",
+  "as_of": "2026-10-06T17:00:00Z",
+  "mode": "analysis",
+  "proposed_action": "report",
+  "requirements": {"delivery_deadline": 2},
+  "evidence": [
+    {
+      "evidence_id": "purchase-order",
+      "fact_key": "delivery_deadline",
+      "value": "Friday",
+      "statement": "Delivery is due Friday",
+      "source_uri": "demo://purchase-order",
+      "origin_ids": ["buyer-record"],
+      "content": "Delivery is due Friday. Purchase order.",
+      "available_at": "2026-10-06T16:50:00Z",
+      "retrieved_at": "2026-10-06T16:55:00Z",
+      "kind": "document"
+    },
+    {
+      "evidence_id": "supplier-confirmation",
+      "fact_key": "delivery_deadline",
+      "value": "Friday",
+      "statement": "Delivery is due Friday",
+      "source_uri": "demo://supplier-confirmation",
+      "origin_ids": ["supplier-record"],
+      "content": "Delivery is due Friday. Supplier confirmation.",
+      "available_at": "2026-10-06T16:51:00Z",
+      "retrieved_at": "2026-10-06T16:56:00Z",
+      "kind": "document"
+    }
+  ],
+  "claims": [
+    {"claim_id": "deadline", "statement": "Delivery is due Friday", "kind": "fact", "critical": true,
+     "evidence_ids": ["purchase-order", "supplier-confirmation"]}
+  ],
+  "metadata": {"synthetic_fixture": true}
+}
