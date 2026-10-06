@@ -32,3 +32,6 @@ backtests/character-*/
 
 # État durable généré (APEX-LEDGER, étape 2) — non versionné
 state/
+
+# Règlements MI générés à l'exécution (append-only, non versionné ; audit point 4)
+journal/apex_mi_settlements.csv
