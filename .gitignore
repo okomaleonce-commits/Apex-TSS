@@ -35,3 +35,7 @@ state/
 
 # Règlements MI générés à l'exécution (append-only, non versionné ; audit point 4)
 journal/apex_mi_settlements.csv
+
+# APEX-FUSION (digest généré, éphémère)
+reports/fusion/
+data/fusion/

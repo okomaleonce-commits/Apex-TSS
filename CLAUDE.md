@@ -34,6 +34,15 @@ La captation du **bruit informationnel et comportemental** du marché avant le c
 
 Les secrets `WORM_SMTP_*` ne sont pas configurés dans l'environnement : `tools/apex_worm.py scan --email` **génère** seulement le HTML (`reports/worm/<jour>.email.html`) et affiche « Email non envoyé : WORM_SMTP_* non configurés ». L'envoi réel se fait **en session interactive via le connecteur Gmail** (`mcp__Gmail__send_message`), depuis `okoma.leonce@gmail.com` (OAuth géré par le connecteur, aucun secret manipulé). Procédure : (1) `scan --money --email`, (2) `apex_worm.build_email_html("<jour>")` → `(sujet, html)`, (3) `mcp__Gmail__send_message` avec `to`, `subject`, `htmlBody` (recharger l'outil via `ToolSearch` si le connecteur s'est déconnecté), (4) preuve = `id`/`threadId` Gmail. Pour un envoi 100 % autonome par le cron (GitHub Actions ou Routine à session fraîche), il faudrait renseigner les secrets `WORM_SMTP_*`.
 
+## Moteur unique : APEX-FUSION (un seul digest, un seul email)
+
+Les quatre cellules (WORM radar, MI bruit marché/comportemental, PROTOCOL/BSM simulation calibrée, ORION arbitrage) sont fondues dans un **moteur unique** : `tools/apex_fusion.py`. Il produit **UN seul digest et UN seul email**, au lieu de quatre sorties séparées.
+
+- `python3 tools/apex_fusion.py run --date <J>` : enchaîne (optionnellement `--scan` pour relancer WORM+MI, sinon lit le dernier snapshot), puis rend **par match un verdict ORION unique** (`ACCEPTER / REJETER / ATTENDRE / COLLECTER`) obtenu en fondant les couches présentes en voix **sourcées** via `tools/orion_consensus.py`. Le digest (`reports/fusion/<J>.email.html` + `.subject.txt` + `.txt`) porte la carte ORION en tête et réutilise tel quel le corps WORM/MI/SYNC/CHARACTER/bilan.
+- **Couches et sources honnêtes** : `W`=structure WORM (classement), `M`=marché/MI, `C`=comportemental, `S`=FORECAST BSM. La Poisson-classement WORM n'est **jamais** étiquetée BSM ; une voix `S` n'existe que pour une ligue backtestée ET une simulation calibrée réellement présente (`data/fusion/bsm/<J>.json`). META fond les sources partagées, le désaccord pénalise la confiance, **< 3 voix indépendantes → COLLECTER**. WORM peut dire « JOUER » : ORION refuse tant qu'une confirmation indépendante manque.
+- **Gel actif** : aucune mise réelle émise ; tout « ACCEPTER » est rétrogradé en ATTENDRE.
+- **Email unique** : `run` affiche la bannière « ENVOI EMAIL OBLIGATOIRE » avec `subject` + `htmlBody = reports/fusion/<J>.email.html`. Enchaîner `mcp__Gmail__send_message` (`to=["okoma.leonce@gmail.com"]`). Ce digest de fusion **remplace** les envois WORM/MI séparés pour un passage interactif.
+
 ## Environnement
 
 - Dépendances Python du module : `pip install numpy scipy`.
