@@ -211,6 +211,8 @@ def _orion_card_html(day: str, verdicts: list) -> str:
     from collections import Counter
     c = Counter(v["decision"] for v in verdicts)
     n_act = sum(1 for v in verdicts if v["decision"] in ("ACCEPTER", "REJETER", "ATTENDRE"))
+    repartition = " · ".join(f"{n} {lbl}" for lbl, n in
+                             sorted(c.items(), key=lambda kv: -kv[1]))
 
     badge = {
         "ACCEPTER": "background:#e7f6ec;color:#137333",
@@ -221,7 +223,7 @@ def _orion_card_html(day: str, verdicts: list) -> str:
     H = ["<div class='card' style='border:2px solid #4338ca'>",
          f"<h1>ORION — arbitrage unifié · {esc(day)}</h1>",
          f"<div class='muted'>Fusion WORM + MI + PROTOCOL/BSM en UN verdict par match. "
-         f"{len(verdicts)} matchs actifs · {dict(c)} · {n_act} avec signal d'arbitrage. "
+         f"{len(verdicts)} matchs actifs · {repartition} · {n_act} avec signal d'arbitrage. "
          f"<b>GEL actif</b> : aucune mise réelle — tout « ACCEPTER » devient ATTENDRE.</div>",
          "<table><tr><th>Match</th><th>Compét.</th><th>KO</th><th>Couches</th>"
          "<th class='r'>Voix&nbsp;ind.</th><th class='r'>Désac.</th><th class='r'>Conf.</th>"
