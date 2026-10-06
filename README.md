@@ -1,6 +1,21 @@
 # 🔺 TSS — Triangulation Signal System v1.0
 ### Apex-Engine | Système de Signal Autonome par Triangulation de Marchés
 
+## ORION SUPERBRAIN
+
+ORION ajoute 15 rôles spécialisés, un DAG borné à 4 workers, des contrôles de provenance et de temporalité,
+une critique contradictoire et une mémoire SQLite à quatre catégories. La v1 produit des rapports analytiques
+en lecture seule ; les prévisions restent WATCH, sans mise ni action externe. Les profils LLM sont fournis
+séparément pour les hôtes qui chargent les agents Claude.
+
+```bash
+python3 tools/orion_superbrain.py demo
+python3 -m unittest discover -s tests -p 'test_orion_superbrain.py' -v
+```
+
+Voir le [guide ORION](docs/ORION_SUPERBRAIN.md). ORION fonctionne avec la bibliothèque standard Python,
+sans clé API et sans modifier les moteurs APEX existants.
+
 ---
 
 ## 📐 PRINCIPE FONDAMENTAL

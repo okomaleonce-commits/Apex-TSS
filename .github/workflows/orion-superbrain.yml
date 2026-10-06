@@ -1,0 +1,41 @@
+name: ORION SUPERBRAIN checks
+
+on:
+  push:
+    branches: ["codex/orion-superbrain-20261006"]
+    paths:
+      - "orion/**"
+      - "tools/orion_superbrain.py"
+      - "tests/test_orion_superbrain.py"
+      - "examples/orion/**"
+      - ".github/workflows/orion-superbrain.yml"
+  pull_request:
+    paths:
+      - "orion/**"
+      - "tools/orion_superbrain.py"
+      - "tests/test_orion_superbrain.py"
+      - "examples/orion/**"
+      - ".github/workflows/orion-superbrain.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Adversarial protocol checks
+        run: python3 -m unittest discover -s tests -p 'test_orion_superbrain.py' -v
+      - name: Offline demonstration
+        run: python3 tools/orion_superbrain.py demo
