@@ -110,9 +110,38 @@ def passerelle_vers_texte(d):
     return ("\n".join(lignes) + "\n", n) if n else (None, 0)
 
 
+
+def carte_structure(o, prof=0, chemin="$", vus=None, lignes=None, max_lignes=120):
+    """
+    Carte compacte de la structure d'un JSON inconnu, pour le log du runner.
+    N'imprime PAS les valeurs en masse : des cles, des types, des tailles, et
+    un echantillon court. On cherche la forme, pas le contenu.
+    """
+    if lignes is None:
+        lignes = []
+    if len(lignes) >= max_lignes or prof > 5:
+        return lignes
+    if isinstance(o, dict):
+        lignes.append(f"{'  ' * prof}{chemin} dict[{len(o)}] cles: "
+                      + ", ".join(list(o)[:14]) + (" …" if len(o) > 14 else ""))
+        for k, v in list(o.items())[:14]:
+            if isinstance(v, (dict, list)):
+                carte_structure(v, prof + 1, f".{k}", vus, lignes, max_lignes)
+            else:
+                ech = str(v)
+                if len(ech) > 48:
+                    ech = ech[:48] + "…"
+                lignes.append(f"{'  ' * (prof + 1)}.{k} = {ech!r}")
+    elif isinstance(o, list):
+        lignes.append(f"{'  ' * prof}{chemin} list[{len(o)}]")
+        if o:
+            carte_structure(o[0], prof + 1, "[0]", vus, lignes, max_lignes)
+    return lignes
+
+
 # ------------------------------------------------------- chemin 2 : navigateur
 
-def via_navigateur(timeout_ms=90000, attente_ms=9000):
+def via_navigateur(timeout_ms=120000, attente_ms=20000):
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -135,7 +164,9 @@ def via_navigateur(timeout_ms=90000, attente_ms=9000):
         return None, f"navigateur : {type(e).__name__}: {str(e).splitlines()[0][:140]}"
     n = sum(1 for l in txt.splitlines() if CODE.match(l.strip()))
     if not n:
-        return None, "navigateur : page rendue mais aucun code R#C# (programme non publie ?)"
+        apercu = " / ".join(l.strip() for l in txt.splitlines() if l.strip())[:300]
+        return None, (f"navigateur : {len(txt)} caracteres rendus, aucun code R#C#. "
+                      f"Debut du texte : {apercu!r}")
     return txt, f"navigateur, {n} code(s) R#C#"
 
 
@@ -162,6 +193,12 @@ def main(argv=None):
                 print(f"SOURCE=passerelle\nCOURSES={n}\nFICHIER={a.out}")
                 return 0
             m = f"{m} : repondu, mais aucun code R#C# reconnu dans le JSON"
+            log("")
+            log("  --- carte de structure du JSON recu (pour ecrire le parseur) ---")
+            for l in carte_structure(d):
+                log("  " + l)
+            log("  --- fin de la carte ---")
+            log("")
         motifs.append(m)
         log(f"  echec : {m}")
 
