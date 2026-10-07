@@ -1,0 +1,43 @@
+# APEX-TURF — bloc INPUT. Remplir UN SEUL des trois blocs de requête.
+
+# ── MODE 1 : COURSE PRÉCISE ──────────────────────────────────────────────
+# `identifier` accepte un code de réunion (R1C4), un nom de prix, ou
+# « le Quinté ». Un code R.C. n'est unique que dans une journée d'un
+# opérateur : préciser l'hippodrome lève toute ambiguïté.
+request:
+  mode: race
+  race:
+    identifier: "R1C4"
+    racecourse: "Auteuil"
+    country: "FR"
+    date: "2026-09-22"
+
+# ── MODE 2 : RÉUNION / HIPPODROME ────────────────────────────────────────
+# request:
+#   mode: meeting
+#   meeting:
+#     racecourse: "Vincennes"
+#     meeting_code: null            # ou "R3"
+#     country: "FR"
+#     discipline_filter: []         # [plat, obstacle, trot_attele, trot_monte]
+#   window: {from: "2026-09-22", to: "2026-09-22"}
+
+# ── MODE 3 : DATE ────────────────────────────────────────────────────────
+# request:
+#   mode: date
+#   date: "2026-09-22"
+#   countries_filter: ["FRA"]       # vide = tous les pays du programme
+#   discipline_filter: []
+#   premium_only: false             # true = Quinté+ / MULTI / courses de Groupe
+#   include_tier_c: false
+
+# ── PARAMÈTRES COMMUNS ───────────────────────────────────────────────────
+timezone_input: "Europe/Paris"
+max_races: 10                       # au-delà, triage sur la qualité des données
+betting_system: auto                # auto | mutuel | fixed | exchange
+allowed_bet_types: [WIN, PLACE]     # exotiques désactivés par défaut
+bankroll_units: 100
+max_stake_per_bet: 1.0              # plus bas qu'en football : variance supérieure
+max_daily_exposure: 4.0
+max_parallel_pipelines: 3
+output_formats: [table, telegram, json]

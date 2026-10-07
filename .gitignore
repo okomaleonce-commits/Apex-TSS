@@ -7,3 +7,32 @@ logs/*.log
 reports/*.csv
 reports/*.md
 # NE PAS ignorer fbref_cache.db — il est commité pour Render
+runs/.cache/
+runs_hockey/.cache/
+runs_turf/.cache/
+runs_mi/.cache/
+
+# sorties de run APEX-MI (éphémères, par exécution) — on ne versionne que le .gitkeep
+runs_mi/*
+!runs_mi/.gitkeep
+
+# cache historique football-data (retéléchargeable)
+data/history/*
+!data/history/intl_supplement.csv
+data/apifootball/history/
+data/footystats/
+data/tsbase/
+data/worm/
+reports/worm/
+data/sync/
+
+# APEX-CHARACTER (sorties générées)
+data/character/
+backtests/character-*/
+
+# APEX-TURF-WORM / APEX-TURF-MI (meme convention que le WORM football :
+# snapshots et rapports partent en artefacts CI, pas en commits)
+data/turf_worm/
+reports/turf_worm/
+runs_turf_mi/*
+!runs_turf_mi/.gitkeep

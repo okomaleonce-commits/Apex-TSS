@@ -1,0 +1,42 @@
+# APEX-LEAD — bloc INPUT.
+# La requête accepte TROIS formes. On peut les combiner dans un même run :
+# les matchs nommés explicitement passent toujours avant les affiches
+# résolues en masse (un --limit ne les écarte jamais).
+
+# ── Forme libre : détectée automatiquement ────────────────────────────────
+# "Arsenal vs Chelsea"  → MATCH   (séparateur vs / contre / -)
+# "2026-09-27", "demain", "weekend", "48h" → DATE
+# "Premier League"      → LIGUE   (tout le reste)
+query: "Premier League"
+
+# ── Forme LIGUE ──────────────────────────────────────────────────────────
+# Fenêtre : "next" (défaut = prochaine journée, 1er coup d'envoi → +3 jours),
+# ou "7d", "48h", "weekend", "semaine".
+league: "Serie A"
+window: "next"
+
+# ── Forme DATE ───────────────────────────────────────────────────────────
+# Sans `leagues`, balaie toutes les compétitions actives du catalogue.
+date: "2026-10-10"
+leagues: ["Premier League", "Bundesliga"]
+
+# ── Forme MATCH explicite ────────────────────────────────────────────────
+# Seule voie pour les douze ligues à moteur dédié mais sans flux d'affiches
+# (Ligue 2, Jupiler Pro League, Liga Portugal, Süper Lig, RPL, Saudi Pro
+# League, Allsvenskan, Swiss SL, Arménie, Ligat Ha'Al, Oman, Roumanie).
+# `competition` + `kickoff_utc` renseignés = pris tel quel, sans résolution.
+match:
+  home: "Galatasaray"
+  away: "Fenerbahce"
+  competition: "Süper Lig"
+  kickoff_utc: "2026-10-11T17:00:00Z"
+
+# Compat ascendante : liste de matchs explicites.
+matches: []
+
+# ── Contrôle de bankroll (appliqué par finalize) ─────────────────────────
+bankroll_units: 100
+max_stake_per_bet: 2.0
+max_daily_exposure: 5.0
+max_parallel_pipelines: 3
+output_formats: [table, telegram, json]

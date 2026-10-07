@@ -1,0 +1,40 @@
+# APEX-HOCKEY — bloc INPUT.
+# Remplir UN SEUL des trois blocs de requête. Le reste est commun.
+
+# ── MODE 1 : MATCH PRÉCIS ────────────────────────────────────────────────
+# `league` lève les homonymies ; sans `date`, on prend le prochain match
+# programmé entre ces deux équipes.
+request:
+  mode: match
+  match:
+    home: "Toronto Maple Leafs"
+    away: "Montreal Canadiens"
+    league: "NHL"
+    date: null
+
+# ── MODE 2 : LIGUE ───────────────────────────────────────────────────────
+# request:
+#   mode: league
+#   league: "NHL"          # NHL, SHL, Liiga, KHL, DEL, NL, Extraliga, AHL…
+#   window:                # défaut : prochaines 24 h
+#     from: "2026-10-10"
+#     to: "2026-10-10"
+
+# ── MODE 3 : DATE ────────────────────────────────────────────────────────
+# request:
+#   mode: date
+#   date: "2026-10-10"
+#   leagues_filter: []     # vide = toutes les ligues TIER A et B
+#   include_tier_c: false
+
+# ── PARAMÈTRES COMMUNS ───────────────────────────────────────────────────
+# La date est interprétée dans ce fuseau, PAS en UTC : un match de NHL joué
+# le soir sur la côte est tombe le lendemain en UTC, et c'est la date locale
+# saisie qui décide s'il entre dans la fenêtre.
+timezone_input: "America/New_York"
+max_matches: 12                # plafond de pipelines complets ; au-delà, triage
+bankroll_units: 100
+max_stake_per_bet: 2.0
+max_daily_exposure: 5.0
+max_parallel_pipelines: 3
+output_formats: [table, telegram, json]

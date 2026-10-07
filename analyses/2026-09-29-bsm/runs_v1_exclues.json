@@ -1,0 +1,534 @@
+[
+ {
+  "fixture_id": 1639961,
+  "forecast_id": "e34c39c6b050",
+  "league": "CONCACAF Nations League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T02:00:00+00:00 --record --home Guatemala --away 'El Salvador' --lh 1.939 --la 0.614 --odds-1x2 2.04,3.39,3.77 --odds-ou25 2.03,1.82 --odds-btts 1.8,1.91 --odds-ah dom:-1.25:3.47 --odds-ah dom:-1.00:3.05 --odds-ah dom:-0.75:2.39 --odds-ah dom:-0.50:2.05 --odds-ah dom:-0.25:1.75 --odds-ah dom:+0.00:1.47 --odds-ah dom:+0.25:1.35 --odds-ah dom:+0.50:1.28 --odds-ah dom:-1.50:3.89 --odds-ah ext:-1.25:1.31 --odds-ah ext:-1.00:1.39 --odds-ah ext:-0.75:1.6 --odds-ah ext:-0.50:1.82 --odds-ah ext:-0.25:2.11 --odds-ah ext:+0.00:2.74 --odds-ah ext:+0.25:3.24 --odds-ah ext:+0.50:3.74 --odds-ah ext:-1.50:1.26 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:41+00:00",
+  "elo": [
+   1491,
+   1361
+  ],
+  "we": 0.79
+ },
+ {
+  "fixture_id": 1545844,
+  "forecast_id": "20ad742b327d",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T11:00:00+00:00 --record --home Comoros --away Namibia --lh 1.611 --la 0.761 --odds-1x2 1.86,2.98,4.85 --odds-ou25 2.6,1.46 --odds-btts 2.38,1.53 --odds-ah dom:-1.25:3.12 --odds-ah dom:-1.00:2.7 --odds-ah dom:-0.75:2.15 --odds-ah dom:-0.50:1.87 --odds-ah dom:-0.25:1.58 --odds-ah dom:+0.00:1.29 --odds-ah dom:+0.25:1.22 --odds-ah dom:+0.50:1.23 --odds-ah ext:-1.25:1.34 --odds-ah ext:-1.00:1.44 --odds-ah ext:-0.75:1.69 --odds-ah ext:-0.50:1.95 --odds-ah ext:-0.25:2.36 --odds-ah ext:+0.00:3.4 --odds-ah ext:+0.25:4.06 --odds-ah ext:+0.50:3.91 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:43+00:00",
+  "elo": [
+   1367,
+   1318
+  ],
+  "we": 0.702
+ },
+ {
+  "fixture_id": 1545841,
+  "forecast_id": "7cbd0564b4f4",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T13:00:00+00:00 --record --home Burundi --away Algeria --lh 0.375 --la 2.5 --odds-1x2 10.53,4.82,1.29 --odds-ou25 1.86,1.94 --odds-btts 2.5,1.5 --odds-ah dom:+0.75:3.08 --odds-ah dom:+1.00:2.67 --odds-ah dom:+2.00:1.46 --odds-ah dom:+1.25:2.14 --odds-ah dom:+1.50:1.87 --odds-ah dom:+1.75:1.66 --odds-ah ext:+0.75:1.35 --odds-ah ext:+1.00:1.45 --odds-ah ext:+2.00:2.63 --odds-ah ext:+1.25:1.7 --odds-ah ext:+1.50:1.95 --odds-ah ext:+1.75:2.2 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:44+00:00",
+  "elo": [
+   1276,
+   1759
+  ],
+  "we": 0.099
+ },
+ {
+  "fixture_id": 1545848,
+  "forecast_id": "7b36c2bd55ad",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T13:00:00+00:00 --record --home Ethiopia --away Senegal --lh 0.299 --la 2.649 --odds-1x2 5.91,3.69,1.36 --odds-ou25 1.79,1.81 --odds-btts 2.25,1.57 --odds-ah dom:-0.25:3.17 --odds-ah dom:+0.00:3.36 --odds-ah dom:+0.25:2.62 --odds-ah dom:+0.50:2.58 --odds-ah dom:+0.75:2.35 --odds-ah dom:+1.00:2.1 --odds-ah dom:+2.00:1.36 --odds-ah dom:+1.25:1.86 --odds-ah dom:+1.50:1.66 --odds-ah dom:+1.75:1.51 --odds-ah ext:-0.25:1.22 --odds-ah ext:+0.00:1.22 --odds-ah ext:+0.25:1.36 --odds-ah ext:+0.50:1.34 --odds-ah ext:+0.75:1.42 --odds-ah ext:+1.00:1.53 --odds-ah ext:+2.00:2.51 --odds-ah ext:+1.25:1.75 --odds-ah ext:+1.50:1.9 --odds-ah ext:+1.75:2.13 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:45+00:00",
+  "elo": [
+   1271,
+   1800
+  ],
+  "we": 0.078
+ },
+ {
+  "fixture_id": 1545853,
+  "forecast_id": "c1c415e9f6e9",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T13:00:00+00:00 --record --home Lesotho --away Morocco --lh 0.055 --la 3.08 --odds-1x2 34.0,14.85,1.03 --odds-btts 4.0,1.22 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:46+00:00",
+  "elo": [
+   1188,
+   1903
+  ],
+  "we": 0.028
+ },
+ {
+  "fixture_id": 1545855,
+  "forecast_id": "d1872eac6551",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T13:00:00+00:00 --record --home Madagascar --away Tanzania --lh 1.851 --la 0.651 --odds-1x2 2.42,2.75,3.33 --odds-ou25 2.55,1.48 --odds-btts 2.1,1.67 --odds-ah dom:-1.00:4.0 --odds-ah dom:-0.75:2.89 --odds-ah dom:-0.50:2.4 --odds-ah dom:-0.25:2.04 --odds-ah dom:+0.00:1.63 --odds-ah dom:+0.25:1.42 --odds-ah dom:+0.50:1.32 --odds-ah dom:+0.75:1.25 --odds-ah ext:-1.00:1.23 --odds-ah ext:-0.75:1.39 --odds-ah ext:-0.50:1.56 --odds-ah ext:-0.25:1.79 --odds-ah ext:+0.00:2.26 --odds-ah ext:+0.25:2.76 --odds-ah ext:+0.50:3.25 --odds-ah ext:+0.75:3.75 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:47+00:00",
+  "elo": [
+   1378,
+   1270
+  ],
+  "we": 0.768
+ },
+ {
+  "fixture_id": 1545856,
+  "forecast_id": "b861adf57690",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T13:00:00+00:00 --record --home Mozambique --away Sudan --lh 1.398 --la 0.873 --odds-1x2 1.94,2.84,4.75 --odds-ou25 2.95,1.37 --odds-btts 2.5,1.5 --odds-ah dom:-1.25:3.49 --odds-ah dom:-1.00:3.0 --odds-ah dom:-0.75:2.29 --odds-ah dom:-0.50:1.95 --odds-ah dom:-0.25:1.63 --odds-ah dom:+0.00:1.32 --odds-ah dom:+0.25:1.23 --odds-ah dom:-1.50:3.37 --odds-ah ext:-1.25:1.28 --odds-ah ext:-1.00:1.36 --odds-ah ext:-0.75:1.62 --odds-ah ext:-0.50:1.87 --odds-ah ext:-0.25:2.25 --odds-ah ext:+0.00:3.26 --odds-ah ext:+0.25:3.94 --odds-ah ext:-1.50:1.3 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:48+00:00",
+  "elo": [
+   1358,
+   1366
+  ],
+  "we": 0.629
+ },
+ {
+  "fixture_id": 1545858,
+  "forecast_id": "f6095ce9e911",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T13:00:00+00:00 --record --home 'South Sudan' --away Egypt --lh 0.158 --la 2.908 --odds-1x2 13.77,5.72,1.2 --odds-ou25 1.81,1.98 --odds-btts 3.0,1.36 --odds-ah dom:+1.00:3.41 --odds-ah dom:+2.00:1.66 --odds-ah dom:+1.25:2.55 --odds-ah dom:+1.50:2.16 --odds-ah dom:+1.75:1.93 --odds-ah ext:+1.00:1.29 --odds-ah ext:+2.00:2.18 --odds-ah ext:+1.25:1.47 --odds-ah ext:+1.50:1.67 --odds-ah ext:+1.75:1.87 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:48+00:00",
+  "elo": [
+   1101,
+   1728
+  ],
+  "we": 0.046
+ },
+ {
+  "fixture_id": 1528912,
+  "forecast_id": "94369f447d0e",
+  "league": "UEFA Nations League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T16:00:00+00:00 --record --home Finland --away Belarus --lh 1.694 --la 0.894 --odds-1x2 1.6,3.84,6.07 --odds-ou25 2.25,1.66 --odds-btts 2.38,1.53 --odds-ah dom:-1.25:2.53 --odds-ah dom:-1.00:2.13 --odds-ah dom:-0.75:1.8 --odds-ah dom:-0.50:1.6 --odds-ah dom:-0.25:1.4 --odds-ah dom:+0.00:1.21 --odds-ah dom:+0.25:1.17 --odds-ah dom:-2.00:5.16 --odds-ah dom:-1.75:3.66 --odds-ah dom:-1.50:2.91 --odds-ah ext:-1.25:1.54 --odds-ah ext:-1.00:1.75 --odds-ah ext:-0.75:2.09 --odds-ah ext:-0.50:2.4 --odds-ah ext:-0.25:3.03 --odds-ah ext:+0.00:4.59 --odds-ah ext:+0.25:5.28 --odds-ah ext:-2.00:1.18 --odds-ah ext:-1.75:1.29 --odds-ah ext:-1.50:1.42 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:49+00:00",
+  "elo": [
+   1539,
+   1507
+  ],
+  "we": 0.681
+ },
+ {
+  "fixture_id": 1528914,
+  "forecast_id": "3998c59aa2ba",
+  "league": "UEFA Nations League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T16:00:00+00:00 --record --home Moldova --away 'Faroe Islands' --lh 1.176 --la 1.276 --odds-1x2 2.89,2.87,2.86 --odds-ou25 2.67,1.49 --odds-btts 2.1,1.67 --odds-ah dom:-1.00:5.49 --odds-ah dom:-0.75:3.64 --odds-ah dom:-0.50:2.88 --odds-ah dom:-0.25:2.41 --odds-ah dom:+0.00:1.94 --odds-ah dom:+0.25:1.61 --odds-ah dom:+0.50:1.44 --odds-ah dom:+0.75:1.3 --odds-ah dom:+1.00:1.16 --odds-ah ext:-1.00:1.16 --odds-ah ext:-0.75:1.29 --odds-ah ext:-0.50:1.44 --odds-ah ext:-0.25:1.59 --odds-ah ext:+0.00:1.93 --odds-ah ext:+0.25:2.38 --odds-ah ext:+0.50:2.85 --odds-ah ext:+0.75:3.62 --odds-ah ext:+1.00:5.52 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:50+00:00",
+  "elo": [
+   1267,
+   1383
+  ],
+  "we": 0.477
+ },
+ {
+  "fixture_id": 1545842,
+  "forecast_id": "01853205a778",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T16:00:00+00:00 --record --home 'Cape Verde Islands' --away Rwanda --lh 2.359 --la 0.434 --odds-1x2 1.44,3.89,8.07 --odds-ou25 2.26,1.62 --odds-btts 2.5,1.5 --odds-ah dom:-1.25:2.12 --odds-ah dom:-1.00:1.79 --odds-ah dom:-0.75:1.56 --odds-ah dom:-0.50:1.42 --odds-ah dom:-0.25:1.27 --odds-ah dom:-1.75:2.94 --odds-ah dom:-1.50:2.43 --odds-ah ext:-1.25:1.71 --odds-ah ext:-1.00:2.04 --odds-ah ext:-0.75:2.41 --odds-ah ext:-0.50:2.75 --odds-ah ext:-0.25:3.62 --odds-ah ext:-1.75:1.38 --odds-ah ext:-1.50:1.53 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:51+00:00",
+  "elo": [
+   1595,
+   1356
+  ],
+  "we": 0.876
+ },
+ {
+  "fixture_id": 1545850,
+  "forecast_id": "a7dda484d5e1",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T16:00:00+00:00 --record --home Ghana --away Gambia --lh 1.974 --la 0.599 --odds-1x2 1.47,3.84,6.93 --odds-ou25 2.05,1.73 --odds-btts 2.1,1.67 --odds-ah dom:-1.25:2.21 --odds-ah dom:-1.00:1.87 --odds-ah dom:-0.75:1.61 --odds-ah dom:-0.50:1.46 --odds-ah dom:-0.25:1.3 --odds-ah dom:+0.00:1.2 --odds-ah dom:-1.75:3.07 --odds-ah dom:-1.50:2.53 --odds-ah ext:-1.25:1.65 --odds-ah ext:-1.00:1.93 --odds-ah ext:-0.75:2.28 --odds-ah ext:-0.50:2.61 --odds-ah ext:-0.25:3.34 --odds-ah ext:+0.00:4.29 --odds-ah ext:-1.75:1.34 --odds-ah ext:-1.50:1.48 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:52+00:00",
+  "elo": [
+   1560,
+   1421
+  ],
+  "we": 0.798
+ },
+ {
+  "fixture_id": 1545852,
+  "forecast_id": "38a35dac9d9e",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T16:00:00+00:00 --record --home Guinea-Bissau --away Nigeria --lh 0.383 --la 2.483 --odds-1x2 7.5,3.61,1.5 --odds-ou25 2.32,1.57 --odds-btts 2.62,1.44 --odds-ah dom:+0.25:3.33 --odds-ah dom:+0.50:2.55 --odds-ah dom:+0.75:2.27 --odds-ah dom:+1.00:1.96 --odds-ah dom:+1.25:1.69 --odds-ah dom:+1.50:1.53 --odds-ah dom:+1.75:1.38 --odds-ah ext:+0.25:1.31 --odds-ah ext:+0.50:1.49 --odds-ah ext:+0.75:1.62 --odds-ah ext:+1.00:1.86 --odds-ah ext:+1.25:2.15 --odds-ah ext:+1.50:2.43 --odds-ah ext:+1.75:2.92 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:52+00:00",
+  "elo": [
+   1291,
+   1769
+  ],
+  "we": 0.102
+ },
+ {
+  "fixture_id": 1545859,
+  "forecast_id": "3fe88463cfc8",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T16:00:00+00:00 --record --home Uganda --away Libya --lh 1.429 --la 0.854 --odds-1x2 1.95,2.95,4.43 --odds-ou25 2.64,1.45 --odds-btts 2.25,1.57 --odds-ah dom:-1.25:3.38 --odds-ah dom:-1.00:2.93 --odds-ah dom:-0.75:2.28 --odds-ah dom:-0.50:1.96 --odds-ah dom:-0.25:1.65 --odds-ah dom:+0.00:1.35 --odds-ah dom:+0.25:1.26 --odds-ah ext:-1.25:1.3 --odds-ah ext:-1.00:1.38 --odds-ah ext:-0.75:1.62 --odds-ah ext:-0.50:1.86 --odds-ah ext:-0.25:2.22 --odds-ah ext:+0.00:3.09 --odds-ah ext:+0.25:3.71 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:53+00:00",
+  "elo": [
+   1408,
+   1408
+  ],
+  "we": 0.64
+ },
+ {
+  "fixture_id": 1545860,
+  "forecast_id": "4eb95d91c514",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T16:00:00+00:00 --record --home Zambia --away Togo --lh 1.351 --la 0.901 --odds-1x2 1.93,3.11,4.07 --odds-ou25 2.55,1.47 --odds-btts 2.38,1.53 --odds-ah dom:-1.25:3.39 --odds-ah dom:-1.00:2.93 --odds-ah dom:-0.75:2.26 --odds-ah dom:-0.50:1.94 --odds-ah dom:-0.25:1.66 --odds-ah dom:+0.00:1.37 --odds-ah dom:+0.25:1.28 --odds-ah dom:+0.50:1.28 --odds-ah ext:-1.25:1.29 --odds-ah ext:-1.00:1.37 --odds-ah ext:-0.75:1.62 --odds-ah ext:-0.50:1.86 --odds-ah ext:-0.25:2.19 --odds-ah ext:+0.00:2.92 --odds-ah ext:+0.25:3.45 --odds-ah ext:+0.50:3.29 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:54+00:00",
+  "elo": [
+   1368,
+   1389
+  ],
+  "we": 0.612
+ },
+ {
+  "fixture_id": 1545839,
+  "forecast_id": "ae03fe01ff14",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T17:00:00+00:00 --record --home Benin --away Mauritania --lh 1.679 --la 0.729 --odds-1x2 2.52,2.55,3.46 --odds-ou25 2.77,1.41 --odds-btts 2.2,1.62 --odds-ah dom:-1.00:4.43 --odds-ah dom:-0.75:3.07 --odds-ah dom:-0.50:2.5 --odds-ah dom:-0.25:2.09 --odds-ah dom:+0.00:1.63 --odds-ah dom:+0.25:1.4 --odds-ah dom:+0.50:1.3 --odds-ah dom:+0.75:1.21 --odds-ah ext:-1.00:1.19 --odds-ah ext:-0.75:1.35 --odds-ah ext:-0.50:1.52 --odds-ah ext:-0.25:1.76 --odds-ah ext:+0.00:2.26 --odds-ah ext:+0.25:2.83 --odds-ah ext:+0.50:3.38 --odds-ah ext:+0.75:4.13 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:55+00:00",
+  "elo": [
+   1417,
+   1351
+  ],
+  "we": 0.722
+ },
+ {
+  "fixture_id": 1585266,
+  "forecast_id": "c61efb88a5f3",
+  "league": "National League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:00:00+00:00 --record --div EC --home 'Boreham Wood' --away Kidderminster --asof 2026-09-29 --seasons 2425,2526,2627 --odds-1x2 1.5,4.0,6.94 --odds-ou25 1.58,2.37 --odds-btts 1.7,2.05 --odds-ah dom:-1.25:2.07 --odds-ah dom:-1.00:1.81 --odds-ah dom:-0.75:1.61 --odds-ah dom:-0.50:1.49 --odds-ah dom:-0.25:1.32 --odds-ah dom:+0.00:1.16 --odds-ah dom:-2.00:3.53 --odds-ah dom:-1.75:2.75 --odds-ah dom:-1.50:2.34 --odds-ah ext:-1.25:1.77 --odds-ah ext:-1.00:2.04 --odds-ah ext:-0.75:2.34 --odds-ah ext:-0.50:2.63 --odds-ah ext:-0.25:3.38 --odds-ah ext:+0.00:5.39 --odds-ah ext:-2.00:1.3 --odds-ah ext:-1.75:1.45 --odds-ah ext:-1.50:1.61 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:55+00:00",
+  "mapping": [
+   [
+    "Boreham Wood",
+    "Boreham Wood",
+    0.9
+   ],
+   [
+    "Kidderminster Harriers",
+    "Kidderminster",
+    0.9
+   ]
+  ]
+ },
+ {
+  "fixture_id": 1528909,
+  "forecast_id": "198b44017f30",
+  "league": "UEFA Nations League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --home Spain --away Croatia --lh 2.971 --la 0.296 --odds-1x2 1.19,7.83,13.37 --odds-ou25 1.44,2.78 --odds-btts 2.1,1.67 --odds-ah dom:-1.25:1.4 --odds-ah dom:-1.00:1.24 --odds-ah dom:-2.00:1.93 --odds-ah dom:-1.75:1.7 --odds-ah dom:-1.50:1.55 --odds-ah ext:-1.25:3.01 --odds-ah ext:-1.00:4.11 --odds-ah ext:-2.00:1.95 --odds-ah ext:-1.75:2.22 --odds-ah ext:-1.50:2.48 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:56+00:00",
+  "elo": [
+   2277,
+   1895
+  ],
+  "we": 0.941
+ },
+ {
+  "fixture_id": 1528910,
+  "forecast_id": "6f187a24abb6",
+  "league": "UEFA Nations League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --home Czechia --away England --lh 0.523 --la 2.523 --odds-1x2 8.6,5.22,1.37 --odds-ou25 1.69,2.23 --odds-btts 2.0,1.73 --odds-ah dom:+0.25:4.22 --odds-ah dom:+0.50:3.31 --odds-ah dom:+0.75:2.93 --odds-ah dom:+1.00:2.56 --odds-ah dom:+2.00:1.44 --odds-ah dom:+1.25:2.1 --odds-ah dom:+1.50:1.86 --odds-ah dom:+1.75:1.64 --odds-ah ext:+0.25:1.25 --odds-ah ext:+0.50:1.36 --odds-ah ext:+0.75:1.43 --odds-ah ext:+1.00:1.56 --odds-ah ext:+2.00:2.95 --odds-ah ext:+1.25:1.79 --odds-ah ext:+1.50:2.05 --odds-ah ext:+1.75:2.36 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:57+00:00",
+  "elo": [
+   1666,
+   2107
+  ],
+  "we": 0.123
+ },
+ {
+  "fixture_id": 1528911,
+  "forecast_id": "50f52cc4cdf5",
+  "league": "UEFA Nations League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --home 'San Marino' --away Albania --lh 0.053 --la 3.378 --odds-1x2 39.79,19.72,1.04 --odds-btts 4.0,1.22 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:58+00:00",
+  "elo": [
+   822,
+   1631
+  ],
+  "we": 0.017
+ },
+ {
+  "fixture_id": 1528913,
+  "forecast_id": "155f19486e01",
+  "league": "UEFA Nations League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --home Slovakia --away Kazakhstan --lh 2.521 --la 0.521 --odds-1x2 1.27,5.65,11.88 --odds-ou25 1.85,2.02 --odds-btts 2.62,1.44 --odds-ah dom:-1.25:1.62 --odds-ah dom:-1.00:1.4 --odds-ah dom:-0.75:1.31 --odds-ah dom:-0.50:1.26 --odds-ah dom:-2.00:2.58 --odds-ah dom:-1.75:2.11 --odds-ah dom:-1.50:1.87 --odds-ah ext:-1.25:2.34 --odds-ah ext:-1.00:3.04 --odds-ah ext:-0.75:3.5 --odds-ah ext:-0.50:3.97 --odds-ah ext:-2.00:1.53 --odds-ah ext:-1.75:1.75 --odds-ah ext:-1.50:2.0 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:59+00:00",
+  "elo": [
+   1670,
+   1431
+  ],
+  "we": 0.876
+ },
+ {
+  "fixture_id": 1528915,
+  "forecast_id": "f56587a54f41",
+  "league": "UEFA Nations League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --home Bulgaria --away Estonia --lh 1.795 --la 0.845 --odds-1x2 1.7,3.53,5.67 --odds-ou25 2.39,1.59 --odds-btts 2.25,1.57 --odds-ah dom:-1.25:2.69 --odds-ah dom:-1.00:2.3 --odds-ah dom:-0.75:1.93 --odds-ah dom:-0.50:1.69 --odds-ah dom:-0.25:1.47 --odds-ah dom:+0.00:1.24 --odds-ah dom:+0.25:1.19 --odds-ah dom:-1.75:3.86 --odds-ah dom:-1.50:3.06 --odds-ah ext:-1.25:1.49 --odds-ah ext:-1.00:1.65 --odds-ah ext:-0.75:1.94 --odds-ah ext:-0.50:2.21 --odds-ah ext:-0.25:2.77 --odds-ah ext:+0.00:4.17 --odds-ah ext:+0.25:4.88 --odds-ah ext:-1.75:1.27 --odds-ah ext:-1.50:1.39 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:55:59+00:00",
+  "elo": [
+   1432,
+   1374
+  ],
+  "we": 0.713
+ },
+ {
+  "fixture_id": 1545606,
+  "forecast_id": "f08a9f9fedf6",
+  "league": "UEFA Nations League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --home Luxembourg --away Iceland --lh 1.29 --la 1.165 --odds-1x2 3.5,3.39,2.16 --odds-ou25 2.15,1.71 --odds-btts 1.83,1.83 --odds-ah dom:-0.75:4.5 --odds-ah dom:-0.50:3.45 --odds-ah dom:-0.25:3.0 --odds-ah dom:+0.00:2.52 --odds-ah dom:+0.25:2.01 --odds-ah dom:+0.50:1.73 --odds-ah dom:+0.75:1.53 --odds-ah dom:+1.00:1.33 --odds-ah dom:+1.25:1.27 --odds-ah ext:-0.75:1.21 --odds-ah ext:-0.50:1.32 --odds-ah ext:-0.25:1.41 --odds-ah ext:+0.00:1.55 --odds-ah ext:+0.25:1.86 --odds-ah ext:+0.50:2.15 --odds-ah ext:+0.75:2.56 --odds-ah ext:+1.00:3.37 --odds-ah ext:+1.25:3.85 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:00+00:00",
+  "elo": [
+   1476,
+   1554
+  ],
+  "we": 0.532
+ },
+ {
+  "fixture_id": 1545651,
+  "forecast_id": "acc39770235f",
+  "league": "UEFA Nations League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --home Scotland --away Switzerland --lh 0.975 --la 1.55 --odds-1x2 4.35,3.62,1.87 --odds-ou25 2.18,1.71 --odds-btts 2.0,1.73 --odds-ah dom:-0.50:4.29 --odds-ah dom:-0.25:3.75 --odds-ah dom:+0.00:3.22 --odds-ah dom:+0.25:2.38 --odds-ah dom:+0.50:2.01 --odds-ah dom:+0.75:1.73 --odds-ah dom:+1.00:1.47 --odds-ah dom:+1.25:1.36 --odds-ah dom:+1.50:1.29 --odds-ah ext:-0.50:1.24 --odds-ah ext:-0.25:1.29 --odds-ah ext:+0.00:1.37 --odds-ah ext:+0.25:1.62 --odds-ah ext:+0.50:1.88 --odds-ah ext:+0.75:2.17 --odds-ah ext:+1.00:2.8 --odds-ah ext:+1.25:3.27 --odds-ah ext:+1.50:3.74 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:01+00:00",
+  "elo": [
+   1747,
+   1942
+  ],
+  "we": 0.367
+ },
+ {
+  "fixture_id": 1545661,
+  "forecast_id": "9fbe2f93ceb2",
+  "league": "UEFA Nations League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --home Slovenia --away 'FYR Macedonia' --lh 1.985 --la 0.76 --odds-1x2 1.65,3.78,5.88 --odds-ou25 2.28,1.66 --odds-btts 2.2,1.62 --odds-ah dom:-1.25:2.6 --odds-ah dom:-1.00:2.2 --odds-ah dom:-0.75:1.85 --odds-ah dom:-0.50:1.64 --odds-ah dom:-0.25:1.43 --odds-ah dom:+0.00:1.23 --odds-ah dom:+0.25:1.18 --odds-ah dom:-1.75:3.74 --odds-ah dom:-1.50:2.97 --odds-ah ext:-1.25:1.53 --odds-ah ext:-1.00:1.71 --odds-ah ext:-0.75:2.05 --odds-ah ext:-0.50:2.34 --odds-ah ext:-0.25:2.94 --odds-ah ext:+0.00:4.4 --odds-ah ext:+0.25:5.09 --odds-ah ext:-1.75:1.29 --odds-ah ext:-1.50:1.41 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:02+00:00",
+  "elo": [
+   1680,
+   1575
+  ],
+  "we": 0.765
+ },
+ {
+  "fixture_id": 1585257,
+  "forecast_id": "96f246e0727e",
+  "league": "National League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --div EC --home Fylde --away Carlisle --asof 2026-09-29 --seasons 2425,2526,2627 --odds-1x2 2.49,3.96,2.49 --odds-ou25 1.44,2.76 --odds-btts 1.4,2.75 --odds-ah dom:-1.00:3.78 --odds-ah dom:-0.75:2.93 --odds-ah dom:-0.50:2.48 --odds-ah dom:-0.25:2.2 --odds-ah dom:+0.00:1.92 --odds-ah dom:+0.25:1.68 --odds-ah dom:+0.50:1.54 --odds-ah dom:+0.75:1.4 --odds-ah dom:+1.00:1.26 --odds-ah ext:-1.00:1.27 --odds-ah ext:-0.75:1.4 --odds-ah ext:-0.50:1.54 --odds-ah ext:-0.25:1.68 --odds-ah ext:+0.00:1.92 --odds-ah ext:+0.25:2.2 --odds-ah ext:+0.50:2.49 --odds-ah ext:+0.75:2.94 --odds-ah ext:+1.00:3.81 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:03+00:00",
+  "mapping": [
+   [
+    "AFC Fylde",
+    "Fylde",
+    0.9
+   ],
+   [
+    "Carlisle",
+    "Carlisle",
+    0.9
+   ]
+  ]
+ },
+ {
+  "fixture_id": 1585258,
+  "forecast_id": "30d63853553d",
+  "league": "National League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --div EC --home Barrow --away Scunthorpe --asof 2026-09-29 --seasons 2425,2526,2627 --odds-1x2 2.09,3.82,3.16 --odds-ou25 1.68,2.2 --odds-btts 1.62,2.2 --odds-ah dom:-1.25:3.47 --odds-ah dom:-1.00:3.07 --odds-ah dom:-0.75:2.43 --odds-ah dom:-0.50:2.09 --odds-ah dom:-0.25:1.84 --odds-ah dom:+0.00:1.58 --odds-ah dom:+0.25:1.45 --odds-ah dom:+0.50:1.36 --odds-ah dom:+0.75:1.25 --odds-ah ext:-1.25:1.3 --odds-ah ext:-1.00:1.37 --odds-ah ext:-0.75:1.56 --odds-ah ext:-0.50:1.76 --odds-ah ext:-0.25:2.0 --odds-ah ext:+0.00:2.41 --odds-ah ext:+0.25:2.78 --odds-ah ext:+0.50:3.14 --odds-ah ext:+0.75:3.95 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:03+00:00",
+  "mapping": [
+   [
+    "Barrow",
+    "Barrow",
+    0.9
+   ],
+   [
+    "Scunthorpe",
+    "Scunthorpe",
+    0.9
+   ]
+  ]
+ },
+ {
+  "fixture_id": 1585259,
+  "forecast_id": "11bbbaaf8759",
+  "league": "National League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --div EC --home Halifax --away 'Boston Utd' --asof 2026-09-29 --seasons 2425,2526,2627 --odds-1x2 2.23,3.67,2.99 --odds-ou25 1.76,2.06 --odds-btts 1.62,2.2 --odds-ah dom:-1.25:3.83 --odds-ah dom:-1.00:3.4 --odds-ah dom:-0.75:2.63 --odds-ah dom:-0.50:2.23 --odds-ah dom:-0.25:1.95 --odds-ah dom:+0.00:1.66 --odds-ah dom:+0.25:1.5 --odds-ah dom:+0.50:1.39 --odds-ah dom:+0.75:1.28 --odds-ah ext:-1.25:1.26 --odds-ah ext:-1.00:1.32 --odds-ah ext:-0.75:1.49 --odds-ah ext:-0.50:1.67 --odds-ah ext:-0.25:1.88 --odds-ah ext:+0.00:2.24 --odds-ah ext:+0.25:2.61 --odds-ah ext:+0.50:2.97 --odds-ah ext:+0.75:3.71 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:04+00:00",
+  "mapping": [
+   [
+    "FC Halifax Town",
+    "Halifax",
+    0.9
+   ],
+   [
+    "Boston United",
+    "Boston Utd",
+    0.9
+   ]
+  ]
+ },
+ {
+  "fixture_id": 1585260,
+  "forecast_id": "451c24fe9d4d",
+  "league": "National League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --div EC --home 'Forest Green' --away Wealdstone --asof 2026-09-29 --seasons 2425,2526,2627 --odds-1x2 1.74,4.14,4.13 --odds-ou25 1.48,2.61 --odds-btts 1.5,2.5 --odds-ah dom:-1.25:2.62 --odds-ah dom:-1.00:2.29 --odds-ah dom:-0.75:1.95 --odds-ah dom:-0.50:1.74 --odds-ah dom:-0.25:1.54 --odds-ah dom:+0.00:1.34 --odds-ah dom:+0.25:1.28 --odds-ah dom:-1.75:3.58 --odds-ah dom:-1.50:2.93 --odds-ah ext:-1.25:1.5 --odds-ah ext:-1.00:1.64 --odds-ah ext:-0.75:1.88 --odds-ah ext:-0.50:2.12 --odds-ah ext:-0.25:2.5 --odds-ah ext:+0.00:3.22 --odds-ah ext:+0.25:3.66 --odds-ah ext:-1.75:1.29 --odds-ah ext:-1.50:1.4 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:05+00:00",
+  "mapping": [
+   [
+    "Forest Green",
+    "Forest Green",
+    0.9
+   ],
+   [
+    "Wealdstone",
+    "Wealdstone",
+    0.9
+   ]
+  ]
+ },
+ {
+  "fixture_id": 1585261,
+  "forecast_id": "b68eef7d2eeb",
+  "league": "National League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --div EC --home Gateshead --away Altrincham --asof 2026-09-29 --seasons 2425,2526,2627 --odds-1x2 4.06,4.13,1.75 --odds-ou25 1.64,2.26 --odds-btts 1.62,2.2 --odds-ah dom:-0.25:3.6 --odds-ah dom:+0.00:3.16 --odds-ah dom:+0.25:2.47 --odds-ah dom:+0.50:2.1 --odds-ah dom:+0.75:1.86 --odds-ah dom:+1.00:1.61 --odds-ah dom:+1.25:1.47 --odds-ah dom:+1.50:1.38 --odds-ah dom:+1.75:1.27 --odds-ah ext:-0.25:1.29 --odds-ah ext:+0.00:1.35 --odds-ah ext:+0.25:1.55 --odds-ah ext:+0.50:1.75 --odds-ah ext:+0.75:1.98 --odds-ah ext:+1.00:2.35 --odds-ah ext:+1.25:2.69 --odds-ah ext:+1.50:3.02 --odds-ah ext:+1.75:3.75 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:06+00:00",
+  "mapping": [
+   [
+    "Gateshead",
+    "Gateshead",
+    0.9
+   ],
+   [
+    "Altrincham",
+    "Altrincham",
+    0.9
+   ]
+  ]
+ },
+ {
+  "fixture_id": 1585262,
+  "forecast_id": "5698fee6926f",
+  "league": "National League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --div EC --home Hartlepool --away Harrogate --asof 2026-09-29 --seasons 2425,2526,2627 --odds-1x2 3.56,3.85,1.93 --odds-ou25 1.75,2.08 --odds-btts 1.67,2.1 --odds-ah dom:-0.50:3.53 --odds-ah dom:-0.25:3.12 --odds-ah dom:+0.00:2.72 --odds-ah dom:+0.25:2.17 --odds-ah dom:+0.50:1.89 --odds-ah dom:+0.75:1.66 --odds-ah dom:+1.00:1.44 --odds-ah dom:+1.25:1.35 --odds-ah dom:+1.50:1.29 --odds-ah ext:-0.50:1.3 --odds-ah ext:-0.25:1.36 --odds-ah ext:+0.00:1.47 --odds-ah ext:+0.25:1.7 --odds-ah ext:+0.50:1.94 --odds-ah ext:+0.75:2.24 --odds-ah ext:+1.00:2.8 --odds-ah ext:+1.25:3.19 --odds-ah ext:+1.50:3.59 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:06+00:00",
+  "mapping": [
+   [
+    "Hartlepool",
+    "Hartlepool",
+    0.9
+   ],
+   [
+    "Harrogate Town",
+    "Harrogate",
+    0.9
+   ]
+  ]
+ },
+ {
+  "fixture_id": 1585263,
+  "forecast_id": "8129c42be65e",
+  "league": "National League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --div EC --home Hornchurch --away Aldershot --asof 2026-09-29 --seasons 2425,2526,2627 --odds-1x2 2.13,3.75,3.12 --odds-ou25 1.69,2.16 --odds-btts 1.57,2.25 --odds-ah dom:-1.25:3.55 --odds-ah dom:-1.00:3.15 --odds-ah dom:-0.75:2.49 --odds-ah dom:-0.50:2.13 --odds-ah dom:-0.25:1.88 --odds-ah dom:+0.00:1.6 --odds-ah dom:+0.25:1.46 --odds-ah dom:+0.50:1.37 --odds-ah dom:+0.75:1.26 --odds-ah ext:-1.25:1.29 --odds-ah ext:-1.00:1.36 --odds-ah ext:-0.75:1.54 --odds-ah ext:-0.50:1.72 --odds-ah ext:-0.25:1.96 --odds-ah ext:+0.00:2.36 --odds-ah ext:+0.25:2.73 --odds-ah ext:+0.50:3.09 --odds-ah ext:+0.75:3.88 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:07+00:00",
+  "mapping": [
+   [
+    "AFC Hornchurch",
+    "Hornchurch",
+    0.9
+   ],
+   [
+    "Aldershot Town",
+    "Aldershot",
+    0.9
+   ]
+  ]
+ },
+ {
+  "fixture_id": 1585264,
+  "forecast_id": "1a9cadf6416b",
+  "league": "National League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --div EC --home Woking --away Solihull --asof 2026-09-29 --seasons 2425,2526,2627 --odds-1x2 1.95,3.75,3.58 --odds-ou25 1.6,2.33 --odds-btts 1.53,2.38 --odds-ah dom:-1.25:2.98 --odds-ah dom:-1.00:2.66 --odds-ah dom:-0.75:2.22 --odds-ah dom:-0.50:1.96 --odds-ah dom:-0.25:1.71 --odds-ah dom:+0.00:1.47 --odds-ah dom:+0.25:1.36 --odds-ah dom:+0.50:1.3 --odds-ah dom:-1.50:3.3 --odds-ah ext:-1.25:1.39 --odds-ah ext:-1.00:1.48 --odds-ah ext:-0.75:1.68 --odds-ah ext:-0.50:1.87 --odds-ah ext:-0.25:2.16 --odds-ah ext:+0.00:2.71 --odds-ah ext:+0.25:3.12 --odds-ah ext:+0.50:3.55 --odds-ah ext:-1.50:1.33 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:08+00:00",
+  "mapping": [
+   [
+    "Woking",
+    "Woking",
+    0.9
+   ],
+   [
+    "Solihull Moors",
+    "Solihull",
+    0.9
+   ]
+  ]
+ },
+ {
+  "fixture_id": 1585265,
+  "forecast_id": "a04f532a084f",
+  "league": "National League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T18:45:00+00:00 --record --div EC --home Yeovil --away Worthing --asof 2026-09-29 --seasons 2425,2526,2627 --odds-1x2 2.14,4.04,2.93 --odds-ou25 1.5,2.59 --odds-btts 1.44,2.62 --odds-ah dom:-1.25:3.75 --odds-ah dom:-1.00:3.3 --odds-ah dom:-0.75:2.53 --odds-ah dom:-0.50:2.14 --odds-ah dom:-0.25:1.9 --odds-ah dom:+0.00:1.65 --odds-ah dom:+0.25:1.5 --odds-ah dom:+0.50:1.41 --odds-ah dom:+0.75:1.3 --odds-ah ext:-1.25:1.27 --odds-ah ext:-1.00:1.33 --odds-ah ext:-0.75:1.53 --odds-ah ext:-0.50:1.72 --odds-ah ext:-0.25:1.93 --odds-ah ext:+0.00:2.27 --odds-ah ext:+0.25:2.6 --odds-ah ext:+0.50:2.91 --odds-ah ext:+0.75:3.53 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:09+00:00",
+  "mapping": [
+   [
+    "Yeovil Town",
+    "Yeovil",
+    0.9
+   ],
+   [
+    "Worthing",
+    "Worthing",
+    0.9
+   ]
+  ]
+ },
+ {
+  "fixture_id": 1545845,
+  "forecast_id": "79ed30a889bd",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T19:00:00+00:00 --record --home Congo --away Cameroon --lh 0.461 --la 2.311 --odds-1x2 5.98,3.47,1.61 --odds-ou25 2.25,1.62 --odds-btts 2.2,1.62 --odds-ah dom:+0.00:4.44 --odds-ah dom:+0.25:2.89 --odds-ah dom:+0.50:2.32 --odds-ah dom:+0.75:2.04 --odds-ah dom:+1.00:1.73 --odds-ah dom:+1.25:1.53 --odds-ah dom:+1.50:1.42 --odds-ah dom:+1.75:1.32 --odds-ah ext:+0.00:1.19 --odds-ah ext:+0.25:1.39 --odds-ah ext:+0.50:1.6 --odds-ah ext:+0.75:1.79 --odds-ah ext:+1.00:2.09 --odds-ah ext:+1.25:2.42 --odds-ah ext:+1.50:2.76 --odds-ah ext:+1.75:3.24 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:09+00:00",
+  "elo": [
+   1192,
+   1621
+  ],
+  "we": 0.131
+ },
+ {
+  "fixture_id": 1545849,
+  "forecast_id": "e915c0b23780",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T19:00:00+00:00 --record --home Gabon --away Niger --lh 1.46 --la 0.835 --odds-1x2 1.56,3.51,6.52 --odds-ou25 2.3,1.6 --odds-btts 2.38,1.53 --odds-ah dom:-1.25:2.4 --odds-ah dom:-1.00:2.05 --odds-ah dom:-0.75:1.73 --odds-ah dom:-0.50:1.55 --odds-ah dom:-0.25:1.36 --odds-ah dom:-1.75:3.37 --odds-ah dom:-1.50:2.73 --odds-ah ext:-1.25:1.56 --odds-ah ext:-1.00:1.78 --odds-ah ext:-0.75:2.09 --odds-ah ext:-0.50:2.39 --odds-ah ext:-0.25:3.04 --odds-ah ext:-1.75:1.3 --odds-ah ext:-1.50:1.43 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:10+00:00",
+  "elo": [
+   1400,
+   1392
+  ],
+  "we": 0.651
+ },
+ {
+  "fixture_id": 1545854,
+  "forecast_id": "bec30d31ee86",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T19:00:00+00:00 --record --home Liberia --away Mali --lh 0.623 --la 1.923 --odds-1x2 7.17,3.74,1.49 --odds-ou25 2.19,1.65 --odds-btts 2.5,1.5 --odds-ah dom:+0.25:3.32 --odds-ah dom:+0.50:2.57 --odds-ah dom:+0.75:2.28 --odds-ah dom:+1.00:1.97 --odds-ah dom:+1.25:1.69 --odds-ah dom:+1.50:1.53 --odds-ah dom:+1.75:1.38 --odds-ah ext:+0.25:1.31 --odds-ah ext:+0.50:1.48 --odds-ah ext:+0.75:1.62 --odds-ah ext:+1.00:1.85 --odds-ah ext:+1.25:2.15 --odds-ah ext:+1.50:2.43 --odds-ah ext:+1.75:2.92 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:11+00:00",
+  "elo": [
+   1285,
+   1612
+  ],
+  "we": 0.213
+ },
+ {
+  "fixture_id": 1545857,
+  "forecast_id": "f4be5d933b8e",
+  "league": "Africa Cup of Nations - Qualification",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T19:00:00+00:00 --record --home Somalia --away 'Ivory Coast' --lh 0.056 --la 3.106 --odds-1x2 33.31,13.15,1.04 --odds-btts 3.0,1.36 --odds-source API-Football/Bet365+Pinnacle --odds-time 2026-09-29T00:56:12+00:00",
+  "elo": [
+   976,
+   1739
+  ],
+  "we": 0.022
+ },
+ {
+  "fixture_id": 1639962,
+  "forecast_id": "942857816528",
+  "league": "CONCACAF Nations League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T19:00:00+00:00 --record --home 'British Virgin Islands' --away 'Turks and Caicos Islands' --lh 1.762 --la 0.687 --odds-source aucune --odds-time 2026-09-29T00:56:12+00:00",
+  "elo": [
+   729,
+   644
+  ],
+  "we": 0.744
+ },
+ {
+  "fixture_id": 1639963,
+  "forecast_id": "2fcde44f2dad",
+  "league": "CONCACAF Nations League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T20:00:00+00:00 --record --home 'US Virgin Islands' --away Bahamas --lh 1.445 --la 0.845 --odds-source aucune --odds-time 2026-09-29T00:56:13+00:00",
+  "elo": [
+   679,
+   674
+  ],
+  "we": 0.647
+ },
+ {
+  "fixture_id": 1639964,
+  "forecast_id": "4ddae3ae22d2",
+  "league": "CONCACAF Nations League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T21:00:00+00:00 --record --home 'French Guyana' --away 'Sint Maarten' --lh 2.341 --la 0.441 --odds-source aucune --odds-time 2026-09-29T00:56:14+00:00",
+  "elo": [
+   1198,
+   964
+  ],
+  "we": 0.872
+ },
+ {
+  "fixture_id": 1639965,
+  "forecast_id": "456fdd420008",
+  "league": "CONCACAF Nations League",
+  "cmd": "python3 tools/apex_bsm.py simulate --kickoff 2026-09-29T23:00:00+00:00 --record --home Anguilla --away Aruba --lh 0.555 --la 2.08 --odds-source aucune --odds-time 2026-09-29T00:56:15+00:00",
+  "elo": [
+   634,
+   1000
+  ],
+  "we": 0.178
+ }
+]

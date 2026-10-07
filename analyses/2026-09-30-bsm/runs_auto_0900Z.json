@@ -1,0 +1,32 @@
+[
+ {
+  "fixture_id": 1640070,
+  "forecast_id": "f120e01c86ef",
+  "league": "Friendlies",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1545847,
+  "forecast_id": "8186eab0147c",
+  "league": "Africa Cup of Nations - Qualification",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1610878,
+  "forecast_id": "62187ec7c322",
+  "league": "Friendlies",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1585267,
+  "forecast_id": "92ff12e885ae",
+  "league": "National League",
+  "kind": "club"
+ },
+ {
+  "fixture_id": 1585268,
+  "forecast_id": "b98a89c39c3d",
+  "league": "National League",
+  "kind": "club"
+ }
+]
