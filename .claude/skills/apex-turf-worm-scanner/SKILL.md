@@ -258,6 +258,18 @@ l'environnement porte `WORM_SMTP_HOST`, `WORM_SMTP_USER`, `WORM_SMTP_PASS` et
 l'utilisateur). STARTTLS obligatoire, jamais en clair. C'est **la seule voie pour une
 Routine à session fraîche ou un cron**, où le connecteur Gmail n'existe pas.
 
+> **Mesuré le 07/10/2026 : l'envoi SMTP ne fonctionne PAS depuis un conteneur
+> claude.ai.** Les ports 587, 465 et 25 expirent tous vers `smtp.gmail.com` (en IPv4 ;
+> l'IPv6 n'est pas routée). La sortie réseau de l'environnement passe par un proxy HTTPS,
+> pas par du TCP brut. Renseigner les `WORM_SMTP_*` seuls ne suffit donc pas : il faudrait
+> aussi élargir *Network access* dans les réglages de l'environnement, et rien ne garantit
+> que le port 587 s'ouvre, le chemin de sortie étant orienté HTTPS.
+>
+> **Là où cette voie fonctionne vraiment : GitHub Actions.** Le workflow
+> `.github/workflows/apex-turf-worm.yml` tourne sur un runner GitHub, où la sortie SMTP est
+> ouverte. Y déclarer `WORM_SMTP_*` en *Actions secrets* rend l'envoi autonome sans aucun
+> connecteur. En session claude.ai, c'est le connecteur Gmail qui reste la voie fiable.
+
 **2. Connecteur Gmail — en session interactive.** Si le SMTP n'est pas configuré, le script
 construit le digest, **n'envoie rien**, et le dit : il affiche les deux voies et les
 chemins des fichiers à passer à `mcp__Gmail__send_message`.
