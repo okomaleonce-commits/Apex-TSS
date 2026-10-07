@@ -60,6 +60,20 @@ Flux (comme INFERSPORT) : l'agent appelle `mcp__SHARPAPI__find_ev_opportunities`
 > des gains. **`get_closing_lines` est l'apport majeur : il permet enfin de mesurer le CLV réel** —
 > et le CLV reste le seul juge pour (un jour) lever le gel.
 
+### CLV réel vs clôture sharp (apex_sources)
+
+`closing_clv(entry_odd, fair_prob_close)` = `entry_odd × fair_prob_close − 1` : **positif = on a battu
+la ligne de clôture sharp** (meilleur prédicteur de bord réel). Comme le MCP n'est appelable que par
+l'agent, le flux est en deux temps :
+1. **L'agent** appelle `mcp__SHARPAPI__get_closing_lines` (ou `get_event_odds` dé-viggé) après coup
+   d'envoi, et dépose les probas justes de clôture via `save_closing_cache(day, {"<home>|<away>":
+   {"<market>": p_close}})` → `data/sources/closing/<day>.json` (non versionné).
+2. **apex_clv / apex_sources** lisent ce cache (`sharp_close_for`, `closing_clv`) et calculent le CLV
+   des entrées enregistrées. Cache absent ⇒ « absent », jamais de clôture inventée.
+
+Prérequis pour des chiffres réels : des **entrées enregistrées** (APEX ne journalise rien sous gel sur
+ces ligues) — donc le CLV vs sharp se mesurera dès qu'on couvrira un vrai créneau grandes ligues.
+
 ### 2) Clés API REST (variables d'environnement de l'environnement cloud)
 
 | Source | Variable | Tier gratuit |

@@ -280,6 +280,70 @@ def sharp_voice(div: str, home: str, away: str, market: str = "over25"):
     return {"p": None, "source": "marche_sharp", "raison": "aucune source sharp disponible", "trace": trace}
 
 
+# ───────────────────────── CLV réel vs clôture sharp ─────────────────────────
+CLOSING = CACHE / "closing"
+
+
+def closing_clv(entry_odd: float, fair_prob_close: float):
+    """CLV d'un pari : as-tu battu la ligne de CLÔTURE sharp ?
+
+    entry_odd = cote décimale obtenue à l'entrée. fair_prob_close = proba JUSTE (dé-viggée Pinnacle)
+    de l'issue à la clôture. La cote juste de clôture = 1/fair_prob_close. On a battu la clôture si
+    entry_odd > cote juste de clôture, i.e. CLV = entry_odd * fair_prob_close − 1 > 0.
+    (C'est l'EV du pari évalué au prix sharp de clôture — le meilleur prédicteur de bord réel.)
+    Renvoie None si entrées invalides (anti-invention)."""
+    try:
+        eo, p = float(entry_odd), float(fair_prob_close)
+    except (TypeError, ValueError):
+        return None
+    if eo <= 1.0 or not (0.0 < p <= 1.0):
+        return None
+    return round(eo * p - 1.0, 4)
+
+
+def load_closing_cache(day: str) -> dict:
+    """Lit le cache de clôtures sharp écrit par l'agent (via MCP). Absent = {} (jamais inventé).
+    Format : data/sources/closing/<day>.json = {"<home>|<away>": {"<market>": fair_prob_close}}."""
+    p = CLOSING / f"{day}.json"
+    try:
+        import json
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_closing_cache(day: str, entries: dict):
+    """Écrit/fusionne le cache de clôtures sharp (l'agent y dépose les get_closing_lines dé-viggés)."""
+    import json
+    CLOSING.mkdir(parents=True, exist_ok=True)
+    cur = load_closing_cache(day)
+    cur.update(entries or {})
+    (CLOSING / f"{day}.json").write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
+    return len(cur)
+
+
+def sharp_close_for(day: str, home: str, away: str, market: str = "over25"):
+    """Proba juste de clôture (sharp) pour un match/marché depuis le cache. None + raison sinon."""
+    cache = load_closing_cache(day)
+    if not cache:
+        return {"absent": "cache de clôtures sharp vide (l'agent ne l'a pas encore rempli)"}
+    best, bestsc = None, 0.0
+    for key, mk in cache.items():
+        try:
+            h, a = key.split("|", 1)
+        except ValueError:
+            continue
+        sc = (_sim(home, h) + _sim(away, a)) / 2
+        if sc > bestsc:
+            best, bestsc = mk, sc
+    if not best or bestsc < 0.6:
+        return {"absent": f"match absent du cache clôtures (score {bestsc:.2f})"}
+    p = best.get(market)
+    if p is None:
+        return {"absent": f"marché {market} absent du cache clôtures pour ce match"}
+    return {"fair_prob_close": float(p), "score_appariement": round(bestsc, 2)}
+
+
 def registry() -> list[dict]:
     """Inventaire honnête des sources et de leur statut de configuration."""
     return [

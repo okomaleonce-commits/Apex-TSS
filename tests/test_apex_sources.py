@@ -50,6 +50,22 @@ def test_parse_sharpapi_sharp_ok_and_fail():
     assert S.parse_sharpapi_sharp("nope").get("absent")
 
 
+def test_closing_clv_sign_and_guards():
+    assert S.closing_clv(2.05, 0.556) > 0          # cote > juste clôture -> battu la clôture
+    assert S.closing_clv(1.70, 0.556) < 0          # cote < juste clôture -> sous la clôture
+    assert S.closing_clv(0.9, 0.5) is None          # cote invalide
+    assert S.closing_clv(2.0, 1.4) is None          # proba hors bornes
+
+
+def test_closing_cache_roundtrip_and_absent(tmp_path, monkeypatch):
+    monkeypatch.setattr(S, "CLOSING", tmp_path)
+    S.save_closing_cache("2026-10-10", {"Union Berlin|Elversberg": {"home": 0.556}})
+    got = S.sharp_close_for("2026-10-10", "Union Berlin", "Elversberg", "home")
+    assert abs(got["fair_prob_close"] - 0.556) < 1e-9
+    assert S.sharp_close_for("2026-10-10", "Foo", "Bar", "home").get("absent")   # pas d'invention
+    assert S.sharp_close_for("2099-01-01", "X", "Y").get("absent")               # cache vide
+
+
 def test_registry_lists_sources():
     noms = {s["nom"] for s in S.registry()}
     assert "football-data.co.uk" in noms and "Infersports" in noms
