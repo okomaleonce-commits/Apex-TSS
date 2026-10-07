@@ -40,6 +40,16 @@ def test_parse_infersports_fails_cleanly():
     assert S.parse_infersports_sharp("nope").get("absent")
 
 
+def test_parse_sharpapi_sharp_ok_and_fail():
+    row = {"fair_probability": 0.5561, "ev_percentage": 14, "sharp_book": "pinnacle",
+           "warnings": ["STALE_PREMATCH_ODDS"]}
+    r = S.parse_sharpapi_sharp(row, "home")
+    assert r["p"] == 0.5561 and r["provider"] == "sharpapi" and r["ev_percentage"] == 14
+    assert S.parse_sharpapi_sharp({"ev_percentage": 9}).get("absent")      # pas de fair_probability
+    assert S.parse_sharpapi_sharp({"fair_probability": 1.4}).get("absent")  # hors bornes
+    assert S.parse_sharpapi_sharp("nope").get("absent")
+
+
 def test_registry_lists_sources():
     noms = {s["nom"] for s in S.registry()}
     assert "football-data.co.uk" in noms and "Infersports" in noms

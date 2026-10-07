@@ -46,6 +46,20 @@ proba absente ⇒ voix absente.
 
 SSB : à ajouter de la même façon ; adaptateur `ssb_sharp()` à brancher une fois les outils visibles.
 
+**SHARPAPI : CONNECTÉ ✅ (tier « sharp » testé)** — `mcp__SHARPAPI__*` : `get_events`, `get_event_odds`,
+`get_best_odds`, `compare_odds`, `find_ev_opportunities` (+EV ancré Pinnacle, dé-vig POWER),
+`find_arbitrage`, `find_middles`, `find_low_hold`, et surtout `get_closing_lines` (**CLV réel**).
+30+ books, Pinnacle en référence, couvre les grandes ligues (Bundesliga, Liga, Serie A, Europa…).
+
+Flux (comme INFERSPORT) : l'agent appelle `mcp__SHARPAPI__find_ev_opportunities` /
+`get_event_odds`, passe une ligne à `apex_sources.parse_sharpapi_sharp(row, market)` → voix ORION
+`marche_sharp` (avec `fair_probability`, `ev_percentage`, `kelly_percent`, `warnings`).
+
+> ⚠️ Les lignes +EV portent souvent `STALE_PREMATCH_ODDS` / `SINGLE_SHARP_REF` et visent des **books
+> soft** (ballybet, rebet…) pas forcément accessibles localement. Ce sont des pistes à vérifier, pas
+> des gains. **`get_closing_lines` est l'apport majeur : il permet enfin de mesurer le CLV réel** —
+> et le CLV reste le seul juge pour (un jour) lever le gel.
+
 ### 2) Clés API REST (variables d'environnement de l'environnement cloud)
 
 | Source | Variable | Tier gratuit |

@@ -208,10 +208,37 @@ def ssb_sharp(home, away):
 
 
 def sharpapi(home, away):
-    key = os.environ.get("SHARPAPI_KEY")
-    if not key:
-        return _needs("SHARPAPI_KEY")
-    return {"absent": "adaptateur SharpAPI à brancher (clé présente) — endpoint get_ev/get_arbitrage"}
+    """SharpAPI (MCP connecté : mcp__SHARPAPI__*) — 30+ books, Pinnacle de référence, EV/arbitrage,
+    closing lines. Comme INFERSPORT, les outils MCP sont appelables par l'AGENT EN SESSION, pas par ce
+    sous-processus. Flux : l'agent appelle get_event_odds / find_ev_opportunities / get_closing_lines,
+    passe le résultat à parse_sharpapi_sharp() ci-dessous, et injecte la voix dans orion_votes(sharp=…).
+    En REST autonome (cron), poser SHARPAPI_KEY et brancher l'appel HTTP ici."""
+    if os.environ.get("SHARPAPI_KEY"):
+        return {"absent": "SharpAPI REST à brancher (clé présente) ; sinon MCP via l'agent"}
+    return _needs("MCP SHARPAPI (agent) ou SHARPAPI_KEY (REST)")
+
+
+def parse_sharpapi_sharp(row: dict, market: str = "over25"):
+    """Transforme une ligne SharpAPI (find_ev_opportunities ou get_event_odds dé-viggé) en voix ORION
+    {p, source=marche_sharp, provider=sharpapi, ev, phase} ou {absent}. Anti-invention : sans
+    fair_probability exploitable, renvoie {absent}. `market` sert d'étiquette (SharpAPI donne déjà la
+    proba juste de la sélection concernée)."""
+    if not isinstance(row, dict):
+        return {"absent": "ligne SharpAPI non exploitable"}
+    fp = row.get("fair_probability")
+    try:
+        p = float(fp)
+    except (TypeError, ValueError):
+        return {"absent": "fair_probability absente dans la ligne SharpAPI"}
+    if not (0.0 < p <= 1.0):
+        return {"absent": f"fair_probability hors bornes ({fp})"}
+    out = {"p": round(p, 4), "source": "marche_sharp", "provider": "sharpapi",
+           "market": market, "phase": "prematch"}
+    for k in ("ev_percentage", "ev_calibrated", "kelly_percent", "quality_tier",
+              "confidence", "sharp_book", "warnings"):
+        if k in row:
+            out[k] = row[k]
+    return out
 
 
 def oddsapi_io(home, away):
