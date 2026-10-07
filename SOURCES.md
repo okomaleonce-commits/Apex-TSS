@@ -28,9 +28,23 @@ claude mcp add --transport http infersports https://api.infersports.dev/mcp
 # suivre la procédure d'ajout MCP fournie par PropProfessor (URL + token)
 ```
 
-Une fois ajoutés, leurs outils apparaissent comme `mcp__infersports__*` / `mcp__ssb__*` dans la
-session. Dis-le moi : je brancherai les adaptateurs `infersports()` / `ssb_sharp()` de
-`apex_sources.py` sur ces outils (aujourd'hui ils renvoient « MCP côté client »).
+**INFERSPORT : CONNECTÉ ✅** — outils vus en session : `get_sharp_line` (cotes justes dé-viggées
+du book sharp + best price par issue), `find_value` (+EV vs ligne sharp), `find_arbitrage`,
+`get_opening_line` / `get_result` (utiles au **CLV** : ligne d'ouverture vs clôture), `scan_slate`,
+`score_prob`. Il couvre les **books asiatiques** → donc des ligues que football-data ignore (Chine…).
+
+Flux d'intégration (important) : les outils MCP sont appelables par **l'agent en session**, pas par
+le sous-processus `apex_sources.py`. Donc, en passage interactif, l'agent appelle
+`mcp__INFERSPORT__get_sharp_line(query, market_type, format="probability")`, passe le résultat à
+`apex_sources.parse_infersports_sharp(result, market)`, et injecte la voix dans
+`apex_fusion.orion_votes(..., sharp=<voix>)`. Aucune valeur n'est fabriquée : résultat ambigu ou
+proba absente ⇒ voix absente.
+
+> ⚠️ **Tier gratuit sans clé = 200 requêtes/jour/IP**, partagé sur l'IP de l'environnement cloud —
+> il peut être déjà épuisé (c'est le cas au moment de ce branchement). Une clé/limite supérieure
+> lève ce plafond. Quand le quota est épuisé, APEX l'écrit comme tel et n'invente rien.
+
+SSB : à ajouter de la même façon ; adaptateur `ssb_sharp()` à brancher une fois les outils visibles.
 
 ### 2) Clés API REST (variables d'environnement de l'environnement cloud)
 

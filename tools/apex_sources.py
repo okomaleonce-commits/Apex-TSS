@@ -154,10 +154,52 @@ def _needs(env_or_mcp: str) -> dict:
 
 
 def infersports(home, away):
-    """MCP Infersports (Pinnacle + books asiatiques dé-viggés). Connecté côté client :
-    `claude mcp add --transport http infersports https://api.infersports.dev/mcp`.
-    Depuis cette session on ne peut pas appeler le MCP du client → non configuré ici."""
-    return _needs("MCP infersports (client)")
+    """MCP INFERSPORT (Pinnacle + books ASIATIQUES dé-viggés — couvre Chine/Asie).
+    Connecté via `claude mcp add --transport http infersports https://api.infersports.dev/mcp`.
+
+    Les outils MCP (`mcp__INFERSPORT__get_sharp_line`, `find_value`, `find_arbitrage`,
+    `get_opening_line`) sont appelables par l'AGENT EN SESSION, pas par ce sous-processus Python.
+    Le flux est donc : l'agent appelle get_sharp_line, passe le résultat à parse_infersports_sharp()
+    ci-dessous, et injecte la voix dans apex_fusion.orion_votes(sharp=...).
+    Tier gratuit : 200 req/jour/IP (quota partagé sur l'IP de l'environnement)."""
+    return _needs("MCP INFERSPORT — appelé par l'agent en session (voir parse_infersports_sharp)")
+
+
+def parse_infersports_sharp(result: dict, market: str = "over25"):
+    """Transforme une sortie INFERSPORT (get_sharp_line, format probability de préférence) en voix
+    ORION {p, source, provider, phase} ou {"absent": raison}. Défensif : cherche les champs usuels
+    sans rien inventer. `market` ∈ {over25, under25, home, draw, away}.
+
+    N.B. le schéma exact varie ; on tente plusieurs chemins (fair/devig/probability) et on échoue
+    proprement si la proba de l'issue demandée n'est pas trouvée.
+    """
+    if not isinstance(result, dict):
+        return {"absent": "résultat INFERSPORT non exploitable"}
+    if result.get("status") == "ambiguous":
+        return {"absent": "fixture ambigu côté INFERSPORT (ask_user)"}
+    # Cherche un bloc de probabilités dé-viggées, quel que soit son nom.
+    cand = {}
+    for key in ("fair_probability", "fair_prob", "devig", "probability", "fair", "comparison"):
+        v = result.get(key)
+        if isinstance(v, dict):
+            cand = v
+            break
+    key_map = {"over25": ("over", "over_2_5", "o2.5", "over25"),
+               "under25": ("under", "under_2_5", "u2.5", "under25"),
+               "home": ("home", "1", "h"), "draw": ("draw", "x", "d"), "away": ("away", "2", "a")}
+    for k in key_map.get(market, ()):  # essaie les alias du marché
+        for src in (cand, result):
+            if isinstance(src, dict) and k in src:
+                try:
+                    p = float(src[k])
+                    if p > 1.0:            # cote décimale → proba
+                        p = 1.0 / p
+                    if 0.0 < p <= 1.0:
+                        return {"p": round(p, 4), "source": "marche_sharp",
+                                "provider": "infersports", "phase": "live", "market": market}
+                except (TypeError, ValueError):
+                    pass
+    return {"absent": f"proba sharp introuvable pour {market} dans le résultat INFERSPORT"}
 
 
 def ssb_sharp(home, away):
