@@ -151,14 +151,37 @@ proxy** (`ERR_CERT_AUTHORITY_INVALID`). Sur un runner GitHub, ni l'un ni l'autre
 
 Deux chemins, essayés dans cet ordre, et la sortie dit **toujours** lequel a servi :
 
-| Chemin | État mesuré depuis un conteneur claude.ai |
-|---|---|
-| **1. passerelle JSON** (`turf_gateway` lu dans `assets/config/config.json`) | injoignable — `Connection reset by peer` au ClientHello |
-| **2. navigateur** (Playwright + Chromium) | `ERR_CERT_AUTHORITY_INVALID` |
+| Chemin | Conteneur claude.ai | Runner GitHub |
+|---|---|---|
+| **1. passerelle JSON** (`turf_gateway` lu dans `assets/config/config.json`) | injoignable — reset au ClientHello | ✅ **répond en ~6 s** |
+| **2. navigateur** (Playwright + Chromium) | `ERR_CERT_AUTHORITY_INVALID` | rend la page en ~25 s |
 
-Les deux échecs sont **propres au conteneur**. Sur un runner GitHub le chemin 2 est celui
-qui est prévu pour marcher ; le chemin 1 est essayé d'abord parce qu'il est gratuit et
-qu'il pourrait répondre sans proxy MITM.
+**C'est la passerelle qui sert en production** : structurée, six fois plus rapide, et elle
+donne plus que la page (hippodrome, libellé, heure, partants, distance). Le navigateur
+reste en repli.
+
+### La structure de la passerelle, observée le 07/10/2026
+
+Elle n'avait jamais pu l'être depuis un conteneur. Le premier passage sur le runner l'a
+donnée :
+
+```
+$ list[4]                                    ← les réunions du programme
+  [0] int_Numero '1'   str_Name 'ENGHIEN'   Course list[8]
+        [0] int_Numero            '1'
+            Condition             'PRIX DES GOBELINS'
+            str_City              'ENGHIEN'
+            dt_Course_Date        '2026-10-07 11:55:00'
+            by_Participant_Number '18'
+            Int_Distance          '2875'
+```
+
+**Le code `R#C#` n'est pas un champ : il se construit**, `R{réunion.int_Numero}C{course.int_Numero}`.
+La première version le cherchait comme une chaîne déjà formée, d'où le « répondu, mais
+aucun code reconnu ».
+
+Et la **page** affiche « R1 » et « C1 » sur **deux lignes séparées**, jamais « R1C1 » :
+`_recoller_codes()` les rejoint. Le rendu marchait depuis le début.
 
 **Si les deux échouent, le script sort en erreur sans rien écrire.** Il ne faut surtout pas
 qu'un fichier vide devienne un périmètre : `scope` refuserait de toute façon, mais mieux
@@ -200,9 +223,14 @@ zéro, c'est-à-dire sans trajectoire, c'est-à-dire sans signal.
 scan 57 → 35 à venir → **5 retenues**, pont H-30, résumé GitHub, et le message d'envoi
 dans les deux cas (secrets absents, puis hôte invalide).
 
-**Non éprouvé : l'étape de rendu**, qui ne peut pas fonctionner dans ce conteneur. Elle ne
-sera prouvée qu'au premier passage réel sur le runner. Si elle échoue, le workflow échoue
-en nommant lequel des deux chemins a cédé et pourquoi.
+**Éprouvé sur le runner le 07/10/2026** (passage `37636418885`, conclusion `success`) :
+rendu par la **passerelle**, 24 courses au programme LONACI → 8 dans le périmètre → scan
+57 découvertes → 3 à venir retenues → 1 signal → **`EMAIL ENVOYE par SMTP`**, artefacts
+publiés. La chaîne tourne seule, sans connecteur ni modèle.
+
+Il a fallu trois passages pour y arriver, et les deux premiers ont servi : le premier a
+révélé que la passerelle répondait, le second a imprimé sa structure. Aucune des deux
+corrections n'est une supposition.
 
 ## Équipe d'agents
 
