@@ -72,74 +72,79 @@ def passerelle_vers_texte(d):
     """
     Met la reponse de la passerelle au format attendu par le parseur.
 
-    La forme exacte du JSON n'est pas documentee et n'a jamais pu etre observee
-    (passerelle injoignable depuis les reseaux testes). On cherche donc les champs
-    de facon defensive, et on REND None si on ne trouve pas de code R#C# : il vaut
-    mieux basculer sur le navigateur que de produire un perimetre devine.
+    Structure REELLE, observee le 07/10/2026 sur le runner (c'est la seule
+    facon dont elle pouvait l'etre : la passerelle est injoignable depuis un
+    conteneur claude.ai) :
+
+        $ list[4]                              <- les reunions du programme
+          [0] int_Numero  '1'                  <- numero de REUNION
+              str_Name    'ENGHIEN'
+              Course list[8]
+                [0] int_Numero            '1'  <- numero de COURSE
+                    Condition             'PRIX DES GOBELINS'
+                    str_City              'ENGHIEN'
+                    dt_Course_Date        '2026-10-07 11:55:00'
+                    by_Participant_Number '18'
+                    str_Status            'cloturer'
+                    Int_Distance          '2875'
+
+    LE CODE R#C# N'EST PAS UN CHAMP : il se construit en recollant le numero
+    de reunion et celui de la course. C'est precisement ce que la premiere
+    version cherchait en vain comme une chaine deja formee.
     """
+    reunions = d if isinstance(d, list) else [d]
     lignes, n = ["Courses du jour", ""], 0
-
-    def descendre(o):
-        nonlocal n
-        if isinstance(o, dict):
-            code = None
-            for k in ("code", "raceCode", "course", "id", "label", "name"):
-                v = o.get(k)
-                if isinstance(v, str) and CODE.match(v.strip()):
-                    code = v.strip()
-                    break
-            if code:
-                hip = next((str(o[k]) for k in ("hippodrome", "reunion", "track",
-                                                "reunionName", "place")
-                            if o.get(k)), "")
-                lib = next((str(o[k]) for k in ("libelle", "raceName", "title",
-                                                "name", "label")
-                            if o.get(k) and str(o[k]).strip() != code), "")
-                heu = next((str(o[k]) for k in ("heure", "time", "startTime",
-                                                "heureDepart")
-                            if o.get(k)), "")
-                lignes.extend([code, hip, lib, heu, ""])
-                n += 1
-            for v in o.values():
-                descendre(v)
-        elif isinstance(o, list):
-            for v in o:
-                descendre(v)
-
-    descendre(d)
+    for r in reunions:
+        if not isinstance(r, dict):
+            continue
+        rn = str(r.get("int_Numero") or "").strip()
+        hippo_r = (r.get("str_Name") or "").strip()
+        courses = r.get("Course") or []
+        if isinstance(courses, dict):          # une seule course : pas de liste
+            courses = [courses]
+        for c in courses:
+            if not isinstance(c, dict):
+                continue
+            cn = str(c.get("int_Numero") or "").strip()
+            if not (rn.isdigit() and cn.isdigit()):
+                continue
+            hippo = (c.get("str_City") or hippo_r or "").strip()
+            lib = (c.get("Condition") or "").strip()
+            dt = (c.get("dt_Course_Date") or "").strip()
+            heure = ""
+            if len(dt) >= 16 and " " in dt:
+                hh, mm = dt.split(" ")[1].split(":")[:2]
+                heure = f"{hh}h{mm}"
+            # 4e ligne : l'etat, comme la page l'affiche. Le parseur de
+            # perimetre ne s'en sert pas, mais il rend le fichier lisible.
+            etat = (c.get("str_Status") or "").strip()
+            part = str(c.get("by_Participant_Number") or "").strip()
+            dist = str(c.get("Int_Distance") or "").strip()
+            detail = (f"{dist}m-{part} Partants" if dist and part else etat)
+            lignes += [f"R{rn}C{cn}", hippo, lib, heure, detail, ""]
+            n += 1
     return ("\n".join(lignes) + "\n", n) if n else (None, 0)
 
 
-
-def carte_structure(o, prof=0, chemin="$", vus=None, lignes=None, max_lignes=120):
-    """
-    Carte compacte de la structure d'un JSON inconnu, pour le log du runner.
-    N'imprime PAS les valeurs en masse : des cles, des types, des tailles, et
-    un echantillon court. On cherche la forme, pas le contenu.
-    """
-    if lignes is None:
-        lignes = []
-    if len(lignes) >= max_lignes or prof > 5:
-        return lignes
-    if isinstance(o, dict):
-        lignes.append(f"{'  ' * prof}{chemin} dict[{len(o)}] cles: "
-                      + ", ".join(list(o)[:14]) + (" …" if len(o) > 14 else ""))
-        for k, v in list(o.items())[:14]:
-            if isinstance(v, (dict, list)):
-                carte_structure(v, prof + 1, f".{k}", vus, lignes, max_lignes)
-            else:
-                ech = str(v)
-                if len(ech) > 48:
-                    ech = ech[:48] + "…"
-                lignes.append(f"{'  ' * (prof + 1)}.{k} = {ech!r}")
-    elif isinstance(o, list):
-        lignes.append(f"{'  ' * prof}{chemin} list[{len(o)}]")
-        if o:
-            carte_structure(o[0], prof + 1, "[0]", vus, lignes, max_lignes)
-    return lignes
-
-
 # ------------------------------------------------------- chemin 2 : navigateur
+
+RN = re.compile(r"^R\d+$")
+CN = re.compile(r"^C\d+$")
+
+
+def _recoller_codes(txt):
+    """« R1 » puis « C1 » sur deux lignes deviennent « R1C1 »."""
+    L = [l.strip() for l in txt.splitlines()]
+    out, i = [], 0
+    while i < len(L):
+        if i + 1 < len(L) and RN.match(L[i]) and CN.match(L[i + 1]):
+            out.append(L[i] + L[i + 1])
+            i += 2
+        else:
+            out.append(L[i])
+            i += 1
+    return "\n".join(out)
+
 
 def via_navigateur(timeout_ms=120000, attente_ms=20000):
     try:
@@ -162,6 +167,9 @@ def via_navigateur(timeout_ms=120000, attente_ms=20000):
             b.close()
     except Exception as e:
         return None, f"navigateur : {type(e).__name__}: {str(e).splitlines()[0][:140]}"
+    # La page affiche le code en DEUX elements : une ligne « R1 », une ligne « C1 ».
+    # Observe le 07/10 sur le runner. On les recolle avant de chercher R#C#.
+    txt = _recoller_codes(txt)
     n = sum(1 for l in txt.splitlines() if CODE.match(l.strip()))
     if not n:
         apercu = " / ".join(l.strip() for l in txt.splitlines() if l.strip())[:300]
