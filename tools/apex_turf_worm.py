@@ -427,7 +427,9 @@ def cmd_scan(a):
     # --lonaci : restreindre au programme officiel PMU LONACI (Cote d'Ivoire).
     # LONACI emploie les memes codes R#C# que le PMU francais (verifie sur les
     # 30 courses du 02/10/2026), le perimetre est donc une liste de codes.
-    lonaci = None
+    # par_course doit exister meme sans --lonaci : chaque instantane porte le
+    # champ lonaci_course, et sans perimetre il vaut simplement None.
+    lonaci, par_course = None, {}
     if a.lonaci:
         if _lonaci_scope is None:
             print("apex_turf_lonaci.py introuvable a cote de ce script.", file=sys.stderr)
