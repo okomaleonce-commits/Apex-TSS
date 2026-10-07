@@ -1,39 +1,66 @@
 name: APEX-TURF-WORM
 
-# Un passage par heure. Les snapshots et rapports partent en ARTEFACTS, pas en
-# commits : 24 commits par jour rendraient l'historique illisible.
+# Passage horaire, entierement autonome : aucun connecteur, aucun modele.
+#
+#   rendu du programme LONACI  ->  perimetre  ->  scan  ->  pont MI  ->  email SMTP
+#
+# Pourquoi ici et pas dans une Routine claude.ai : mesure du 07/10/2026, depuis un
+# conteneur claude.ai les ports SMTP 587, 465 et 25 expirent tous (la sortie passe par
+# un proxy HTTPS, pas par du TCP brut), et Chromium refuse la CA de ce proxy. Sur un
+# runner GitHub il n'y a ni l'un ni l'autre : c'est le seul endroit ou la chaine peut
+# tourner seule.
+#
+# Les snapshots partent en ARTEFACTS, pas en commits : 12 commits par jour rendraient
+# l'historique illisible. Le passage suivant les retelecharge, sans quoi il n'y aurait
+# pas de COMPARE et chaque passage repartirait de zero.
+
 on:
   schedule:
-    - cron: '17 * * * *'      # minute 17 : evite la bousculade de la minute 0
+    - cron: '17 8-19 * * *'      # minute 17 : evite la bousculade de la minute 0
   workflow_dispatch:
     inputs:
       date:
         description: "DDMMYYYY (vide = aujourd'hui)"
         required: false
       max_courses:
-        description: "limite de courses"
+        description: "limite de courses (diagnostic)"
         required: false
 
 concurrency:
   group: apex-turf-worm
-  cancel-in-progress: false   # ne jamais annuler un passage en cours : on perdrait un releve
+  cancel-in-progress: false      # ne jamais annuler : on perdrait un releve
+
+permissions:
+  contents: read
 
 jobs:
-  scan:
+  passage:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
-      APEX_TIMEZONE: ${{ vars.APEX_TIMEZONE || 'Europe/Paris' }}
+      APEX_TIMEZONE: ${{ vars.APEX_TIMEZONE || 'Africa/Abidjan' }}
+      WORM_SMTP_HOST: ${{ secrets.WORM_SMTP_HOST }}
+      WORM_SMTP_PORT: ${{ secrets.WORM_SMTP_PORT }}
+      WORM_SMTP_USER: ${{ secrets.WORM_SMTP_USER }}
+      WORM_SMTP_PASS: ${{ secrets.WORM_SMTP_PASS }}
+      WORM_EMAIL_TO: ${{ secrets.WORM_EMAIL_TO }}
+      WORM_EMAIL_FROM: ${{ secrets.WORM_EMAIL_FROM }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
 
-      # Les snapshots du passage precedent sont necessaires : sans eux il n'y a
-      # pas de COMPARE, et chaque passage repartirait de zero.
-      - name: Recuperer les snapshots du passage precedent
+      - name: Navigateur pour le rendu du programme LONACI
+        run: |
+          python3 -m pip install --quiet playwright
+          python3 -m playwright install --with-deps chromium
+
+      # Sans les snapshots du passage precedent il n'y a pas de trajectoire, et la
+      # trajectoire est LA donnee du pari mutuel : il n'y a qu'une cote.
+      - name: Reprendre les snapshots du passage precedent
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
@@ -43,18 +70,67 @@ jobs:
       - name: Fenetre APEX
         run: python3 tools/apex_turf_worm.py window
 
-      - name: Scan
+      - name: Rendu du programme officiel PMU LONACI
+        id: rendu
         run: |
-          ARGS=""
+          set -o pipefail
+          mkdir -p data/turf_worm/lonaci
+          python3 tools/apex_turf_lonaci_render.py --out /tmp/lonaci.txt | tee /tmp/rendu.out
+          cat /tmp/rendu.out >> "$GITHUB_OUTPUT"
+
+      - name: Perimetre LONACI
+        run: |
+          D="${{ inputs.date }}"
+          [ -z "$D" ] && D=$(TZ="$APEX_TIMEZONE" date +%d%m%Y)
+          echo "date LONACI : $D"
+          python3 tools/apex_turf_lonaci.py scope --date "$D" --from-text /tmp/lonaci.txt
+
+      # Le scan construit ET envoie le digest : apex_turf_worm.envoyer_smtp() part seule
+      # des que les secrets WORM_SMTP_* sont la. Sans eux il le dit et n'envoie rien.
+      - name: Scan restreint au perimetre LONACI
+        run: |
+          ARGS="--lonaci"
           [ -n "${{ inputs.date }}" ] && ARGS="$ARGS --date ${{ inputs.date }}"
           [ -n "${{ inputs.max_courses }}" ] && ARGS="$ARGS --max-courses ${{ inputs.max_courses }}"
           python3 tools/apex_turf_worm.py scan $ARGS
 
-      - name: Activation APEX-TURF-MI (H-30)
+      - name: Pont APEX-TURF-MI (H-30)
         run: python3 tools/apex_turf_mi.py worm-hook --within 30
         continue-on-error: true
 
+      - name: Resume du passage
+        if: always()
+        env:
+          RENDU_SOURCE: ${{ steps.rendu.outputs.SOURCE }}
+          RENDU_COURSES: ${{ steps.rendu.outputs.COURSES }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import os, glob, datetime
+          from zoneinfo import ZoneInfo
+          tz = os.environ.get("APEX_TIMEZONE", "UTC")
+          jour = datetime.datetime.now(ZoneInfo(tz)).date().isoformat()
+          src = os.environ.get("RENDU_SOURCE") or "echec"
+          n = os.environ.get("RENDU_COURSES") or "0"
+          L = [f"## APEX-TURF-WORM — passage {datetime.datetime.now(datetime.timezone.utc):%H:%M} UTC", "",
+               f"- rendu du programme : `{src}` · {n} course(s) au programme LONACI"]
+          L.append("- email : SMTP configure" if os.environ.get("WORM_SMTP_HOST")
+                   else "- email : **secrets `WORM_SMTP_*` absents** — digest construit, non envoye")
+          L += ["",
+                "> Palier maximal **SURVEILLER**. Les deux gates de pari turf sont fermees par le",
+                "> backtest (trot ROI -4,58 % sur 118 paris, obstacle -89,05 % sur 21).",
+                "> `autorite_pari = false` sur chaque ligne.",
+                "",
+                "> Cotes : **PMU_FRANCE**. La masse d'enjeux LONACI n'est pas verifiee.",
+                ""]
+          r = f"reports/turf_worm/{jour}.md"
+          if os.path.exists(r):
+              L += ["<details><summary>Rapport du passage</summary>", "",
+                    open(r, encoding="utf-8").read(), "</details>", ""]
+          print("\n".join(L))
+          PY
+
       - name: Publier les snapshots
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: turf-worm-snapshots
@@ -62,10 +138,13 @@ jobs:
           retention-days: 7
           overwrite: true
 
-      - name: Publier les rapports
+      - name: Publier les rapports et le perimetre
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: turf-worm-reports
-          path: reports/turf_worm
+          path: |
+            reports/turf_worm
+            data/turf_worm/lonaci
           retention-days: 14
           overwrite: true

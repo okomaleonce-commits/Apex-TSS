@@ -133,6 +133,77 @@ Ordre de grandeur utile : en trot, la variation médiane d'un partant sur une jo
 **34,8 %**, le q75 de 69 %, le q90 de 132 %. Une variation de 12 % est sous le premier
 quartile — c'est du bruit. Le seuil de signalement est à 18 %.
 
+## Voie entièrement autonome : GitHub Actions
+
+`.github/workflows/apex-turf-worm.yml` — passage horaire **sans connecteur et sans
+modèle**, toutes les heures de 08h à 19h (minute 17).
+
+```
+rendu du programme LONACI → périmètre → scan --lonaci → pont MI → email SMTP
+```
+
+C'est le seul endroit où la chaîne peut tourner seule, et pour deux raisons mesurées le
+07/10/2026 : depuis un conteneur claude.ai les ports SMTP 587, 465 et 25 **expirent tous**
+(la sortie passe par un proxy HTTPS, pas par du TCP brut) et Chromium **refuse la CA de ce
+proxy** (`ERR_CERT_AUTHORITY_INVALID`). Sur un runner GitHub, ni l'un ni l'autre.
+
+### Le rendu du programme : `tools/apex_turf_lonaci_render.py`
+
+Deux chemins, essayés dans cet ordre, et la sortie dit **toujours** lequel a servi :
+
+| Chemin | État mesuré depuis un conteneur claude.ai |
+|---|---|
+| **1. passerelle JSON** (`turf_gateway` lu dans `assets/config/config.json`) | injoignable — `Connection reset by peer` au ClientHello |
+| **2. navigateur** (Playwright + Chromium) | `ERR_CERT_AUTHORITY_INVALID` |
+
+Les deux échecs sont **propres au conteneur**. Sur un runner GitHub le chemin 2 est celui
+qui est prévu pour marcher ; le chemin 1 est essayé d'abord parce qu'il est gratuit et
+qu'il pourrait répondre sans proxy MITM.
+
+**Si les deux échouent, le script sort en erreur sans rien écrire.** Il ne faut surtout pas
+qu'un fichier vide devienne un périmètre : `scope` refuserait de toute façon, mais mieux
+vaut échouer là, avec le motif.
+
+Réserve honnête : la forme du JSON de la passerelle **n'a jamais pu être observée**. Le
+convertisseur cherche les champs de façon défensive et rend `None` s'il ne trouve aucun
+code `R#C#`, pour basculer sur le navigateur plutôt que de produire un périmètre devine.
+
+### Secrets à déclarer
+
+`Settings → Secrets and variables → Actions` du dépôt :
+
+| Secret | Pour Gmail |
+|---|---|
+| `WORM_SMTP_HOST` | `smtp.gmail.com` |
+| `WORM_SMTP_PORT` | `587` |
+| `WORM_SMTP_USER` | l'adresse d'envoi |
+| `WORM_SMTP_PASS` | un **mot de passe d'application** à 16 caractères, pas celui du compte (exige la validation en deux étapes) |
+| `WORM_EMAIL_TO` | le destinataire |
+| `WORM_EMAIL_FROM` | optionnel, défaut `WORM_SMTP_USER` |
+
+Variable facultative : `APEX_TIMEZONE`, défaut `Africa/Abidjan`.
+
+Sans ces secrets, le workflow tourne quand même et le résumé affiche
+« **secrets `WORM_SMTP_*` absents** — digest construit, non envoyé ». Jamais d'envoi
+silencieusement raté.
+
+### Snapshots entre passages
+
+Ils partent en **artefacts**, pas en commits : douze commits par jour rendraient
+l'historique illisible. L'étape *Reprendre les snapshots du passage précédent* les
+retélécharge — sans quoi il n'y aurait pas de COMPARE et chaque passage repartirait de
+zéro, c'est-à-dire sans trajectoire, c'est-à-dire sans signal.
+
+### Ce qui est éprouvé, et ce qui ne l'est pas
+
+Éprouvé avec les commandes exactes du workflow (07/10/2026) : périmètre 24 → 8 courses,
+scan 57 → 35 à venir → **5 retenues**, pont H-30, résumé GitHub, et le message d'envoi
+dans les deux cas (secrets absents, puis hôte invalide).
+
+**Non éprouvé : l'étape de rendu**, qui ne peut pas fonctionner dans ce conteneur. Elle ne
+sera prouvée qu'au premier passage réel sur le runner. Si elle échoue, le workflow échoue
+en nommant lequel des deux chemins a cédé et pourquoi.
+
 ## Équipe d'agents
 
 `apex-turf-worm-conductor` lance le scan, puis délègue : `apex-turf-worm-market`
