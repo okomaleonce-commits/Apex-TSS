@@ -67,14 +67,14 @@ _TIER_EDGE = {"JOUER": 0.72, "JOUER_PETIT": 0.62, "SURVEILLER": 0.46,
               "NO BET": 0.32, "SURVEILLER_FORME": 0.46}
 
 
-def orion_votes(worm_rec: dict, mi_item: dict | None, bsm: dict | None):
+def orion_votes(worm_rec: dict, mi_item: dict | None, bsm: dict | None, sharp: dict | None = None):
     """Assemble les voix ORION SOURCÉES d'un match à partir des couches réellement présentes.
 
     Renvoie (votes, couches) où couches note ce qui a parlé (W/M/C/S) et ce qui est absent.
     Chaque voix = {agent, p, source}. META fusionnera les sources partagées en aval.
     """
     votes = []
-    couches = {"W": False, "M": False, "C": False, "S": False}
+    couches = {"W": False, "M": False, "C": False, "S": False, "K": False}
 
     # (W) Couche structurelle WORM — Sharp/Blowout/Upset/Convergence + reco lisent le MÊME
     #     classement : UNE SEULE source "worm_classement" (sinon fausse illusion de consensus).
@@ -93,9 +93,9 @@ def orion_votes(worm_rec: dict, mi_item: dict | None, bsm: dict | None):
 
     # (M) Couche marché — sharp move / RLM / MI watch. Source "marche" (indépendante du classement).
     market_ps = []
-    sharp = _score(worm_rec.get("sharp"))
-    if sharp is not None and sharp >= 50:
-        market_ps.append(0.58 + min(0.12, (sharp - 50) / 200))   # 50→0.58 … 100→0.70
+    sharp_score = _score(worm_rec.get("sharp"))
+    if sharp_score is not None and sharp_score >= 50:
+        market_ps.append(0.58 + min(0.12, (sharp_score - 50) / 200))   # 50→0.58 … 100→0.70
     if worm_rec.get("rlm"):
         market_ps.append(0.62)
     if mi_item:
@@ -134,6 +134,17 @@ def orion_votes(worm_rec: dict, mi_item: dict | None, bsm: dict | None):
         except (TypeError, ValueError):
             pass
 
+    # (K) Couche MARCHÉ SHARP — Pinnacle DÉ-VIGGÉ (football-data / Infersports…), via tools/apex_sources.
+    #     Source "marche_sharp" : INDÉPENDANTE du classement WORM ET du bruit MI (livre réel, pas modèle).
+    #     p = proba sharp de l'issue recommandée par WORM. Absente hors ligue couverte (anti-invention).
+    if sharp and sharp.get("p") is not None:
+        try:
+            votes.append({"agent": "SENSOR/sharp", "p": max(0.0, min(1.0, float(sharp["p"]))),
+                          "source": "marche_sharp"})
+            couches["K"] = True
+        except (TypeError, ValueError):
+            pass
+
     return votes, couches
 
 
@@ -164,6 +175,44 @@ def _load_bsm_cache(day: str) -> dict:
         return {}
 
 
+def _reco_market_param(worm_rec: dict):
+    """Mappe le marché recommandé par WORM vers un paramètre de proba sharp (over25/home/away).
+    Renvoie None si le marché recommandé n'a pas d'équivalent sharp simple (anti-invention)."""
+    d0 = (worm_rec.get("reco", {}).get("decision") or {})
+    m = (d0.get("marche") or "").lower()
+    if "over 2.5" in m:
+        return "over25"
+    if "under 2.5" in m:
+        return "under25"
+    if "domicile" in m or "home" in m:
+        return "home"
+    if "extérieur" in m or "exterieur" in m or "away" in m:
+        return "away"
+    return None
+
+
+def _sharp_for(worm_rec: dict, div):
+    """Récupère la proba sharp (Pinnacle dé-viggé) de l'issue recommandée. None/raison sinon.
+    Jamais inventé : repose entièrement sur tools/apex_sources (football-data / MCP configurés)."""
+    try:
+        import apex_sources as SRC
+    except Exception:
+        return None
+    if not div or div not in SRC.FD_DIVS:
+        return None
+    param = _reco_market_param(worm_rec)
+    if param is None:
+        return None
+    base = "over25" if param in ("over25", "under25") else param
+    v = SRC.sharp_voice(div, worm_rec.get("home", ""), worm_rec.get("away", ""), base)
+    p = v.get("p")
+    if p is None:
+        return None
+    if param == "under25":          # proba Under = 1 − proba Over
+        p = 1.0 - p
+    return {"p": p, "provider": v.get("provider"), "phase": v.get("phase"), "market": param}
+
+
 def arbitrate_day(day: str):
     """Rend la liste des verdicts ORION par match actif, triés par pertinence WORM décroissante."""
     d = dt.date.fromisoformat(day)
@@ -181,7 +230,8 @@ def arbitrate_day(day: str):
         bsm_rec = bsm.get(fid)
         # Marqueur de périmètre BSM : une voix FORECAST n'est légitime QUE pour une ligue backtestée.
         in_scope = bool(div and div in scope)
-        votes, couches = orion_votes(r, mi.get(fid), bsm_rec if in_scope else None)
+        sharp_rec = _sharp_for(r, div)       # voix marché sharp (Pinnacle dé-viggé) si dispo
+        votes, couches = orion_votes(r, mi.get(fid), bsm_rec if in_scope else None, sharp_rec)
         verdict = O.arbitrate(votes)
         verdict.update({
             "fixture_id": fid,
@@ -245,7 +295,8 @@ def _orion_card_html(day: str, verdicts: list) -> str:
             f"<td><span style='font-weight:700;border-radius:6px;padding:1px 7px;{st}'>{esc(v['decision'])}</span></td></tr>")
     H += ["</table>",
           "<div class='muted'>Couches : <b>W</b>=structure WORM (classement) · <b>M</b>=marché/MI · "
-          "<b>C</b>=comportemental · <b>S</b>=FORECAST BSM (seulement si ligue backtestée ET sim calibrée). "
+          "<b>C</b>=comportemental · <b>S</b>=FORECAST BSM (si ligue backtestée ET sim calibrée) · "
+          "<b>K</b>=marché SHARP (Pinnacle dé-viggé, football-data/MCP). "
           "Verdict via tools/orion_consensus.py : META fond les sources partagées, le désaccord pénalise "
           "la confiance, &lt;3 voix indépendantes → COLLECTER. L'abstention est une décision pleine.</div>",
           "</div>"]

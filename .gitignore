@@ -39,3 +39,6 @@ journal/apex_mi_settlements.csv
 # APEX-FUSION (digest généré, éphémère)
 reports/fusion/
 data/fusion/
+
+# APEX-SOURCES (cache CSV football-data, retéléchargeable)
+data/sources/

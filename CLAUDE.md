@@ -43,6 +43,13 @@ Les quatre cellules (WORM radar, MI bruit marché/comportemental, PROTOCOL/BSM s
 - **Gel actif** : aucune mise réelle émise ; tout « ACCEPTER » est rétrogradé en ATTENDRE.
 - **Email unique** : `run` affiche la bannière « ENVOI EMAIL OBLIGATOIRE » avec `subject` + `htmlBody = reports/fusion/<J>.email.html`. Enchaîner `mcp__Gmail__send_message` (`to=["okoma.leonce@gmail.com"]`). Ce digest de fusion **remplace** les envois WORM/MI séparés pour un passage interactif.
 
+## Sources externes & voix sharp : APEX-SOURCES
+
+`tools/apex_sources.py` agrège des sources externes pour renforcer la robustesse (voix indépendantes). **Câblé par défaut** : `football-data.co.uk` (cotes Pinnacle ouverture/clôture dé-viggées + O/U 2.5 — référence sharp et CLV, gratuit). **À configurer côté client/clés** (jamais simulé sinon) : Infersports (MCP), SSB/PropProfessor (MCP), SharpAPI/`SHARPAPI_KEY`, odds-api.io/`ODDSAPI_IO_KEY`, TheStatsAPI/`THESTATSAPI_KEY`. Procédure complète dans `SOURCES.md`.
+
+- Ces sources ajoutent à ORION une voix **`marche_sharp`** (couche **K** d'`apex_fusion`), indépendante du classement WORM et du bruit MI — c'est elle qui peut porter le nombre de voix indépendantes à ≥ 3 et permettre un vrai arbitrage (hors COLLECTER). **Anti-invention absolu** : ligue non couverte ou source absente ⇒ voix écrite absente, jamais fabriquée.
+- **Ajouter des sources ne lève pas le gel** : plus de données ≠ bord. Le CLV (`tools/apex_clv.py`) reste le seul juge ; le dé-vigging est une estimation de la proba implicite, pas une vérité.
+
 ## Environnement
 
 - Dépendances Python du module : `pip install numpy scipy`.
