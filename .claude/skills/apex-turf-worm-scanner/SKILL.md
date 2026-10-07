@@ -250,8 +250,20 @@ alors qu'on a demandé LONACI serait ignorer la demande silencieusement.
 **Règle du dépôt (`CLAUDE.md`) : un passage sans email envoyé est INCOMPLET.** Elle vaut
 ici comme pour le WORM football.
 
-Les secrets `WORM_SMTP_*` ne sont pas configurés : le script **construit** le digest et
-**n'envoie rien**. L'envoi réel se fait en session par le connecteur Gmail.
+Deux voies, et le script dit toujours laquelle a servi :
+
+**1. SMTP — autonome, sans modèle ni connecteur.** `envoyer_smtp()` envoie seul dès que
+l'environnement porte `WORM_SMTP_HOST`, `WORM_SMTP_USER`, `WORM_SMTP_PASS` et
+`WORM_EMAIL_TO` (plus `WORM_SMTP_PORT`, défaut 587, et `WORM_EMAIL_FROM`, défaut
+l'utilisateur). STARTTLS obligatoire, jamais en clair. C'est **la seule voie pour une
+Routine à session fraîche ou un cron**, où le connecteur Gmail n'existe pas.
+
+**2. Connecteur Gmail — en session interactive.** Si le SMTP n'est pas configuré, le script
+construit le digest, **n'envoie rien**, et le dit : il affiche les deux voies et les
+chemins des fichiers à passer à `mcp__Gmail__send_message`.
+
+Un envoi raté ne fait jamais perdre le snapshot du passage : `envoyer_smtp()` ne lève
+jamais, elle retourne le motif.
 
 ```bash
 python3 tools/apex_turf_worm.py email          # ecrit reports/turf_worm/<jour>.email.html

@@ -65,6 +65,8 @@ Les deux premiers sont les miroirs exacts d'`UPSET_WATCH` et `BLOWOUT_WATCH`. Le
 
 ### Email
 
+**Voie autonome (cron, Routine à session fraîche) :** `apex_turf_worm.py` envoie seul par SMTP dès que l'environnement porte `WORM_SMTP_HOST`, `WORM_SMTP_USER`, `WORM_SMTP_PASS`, `WORM_EMAIL_TO` (+ `WORM_SMTP_PORT` défaut 587, `WORM_EMAIL_FROM` défaut l'utilisateur), STARTTLS obligatoire. C'est la **seule** voie quand il n'y a pas de connecteur, et donc la condition pour qu'une Routine soit réellement autonome.
+
 La règle ci-dessous s'applique aussi au turf. `apex_turf_worm.py scan` construit le digest en fin de passage (`reports/turf_worm/<jour>.email.html`, + `build_email_html(day)` importable) ; `apex_turf_mi.py finalize` construit toujours `email.html` / `email.txt` / `email.subject.txt` dans le run. Aucun des deux n'envoie : enchaîner avec `mcp__Gmail__send_message`.
 
 ## Envoi des emails APEX (WORM et MI) : connecteur Gmail (MCP), pas SMTP — OBLIGATOIRE À CHAQUE PASSAGE

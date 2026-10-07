@@ -500,7 +500,7 @@ def cmd_scan(a):
     # Regle maison (CLAUDE.md) : tout passage se termine par un digest.
     # Le script ne l'envoie pas (pas de SMTP configure) ; il le construit et le dit.
     try:
-        cmd_email(argparse.Namespace(date=day))
+        cmd_email(argparse.Namespace(date=day, to=None))
     except Exception as e:
         print(f"digest non construit : {type(e).__name__}: {e}", file=sys.stderr)
     return 0
@@ -782,6 +782,61 @@ turf manque serait pire que l'absence du turf.
     return "\n".join(h)
 
 
+def envoyer_smtp(sujet, html, dest=None):
+    """
+    Envoi autonome par SMTP, sans modele et sans connecteur.
+
+    C'est la voie que le CLAUDE.md du depot nomme pour un passage declenche par
+    cron ou par une Routine a session fraiche : le connecteur Gmail n'y est pas
+    disponible, donc seul le SMTP permet de respecter la regle « un passage sans
+    email envoye est INCOMPLET ».
+
+    Variables d'environnement (les memes que le WORM football) :
+        WORM_SMTP_HOST   obligatoire
+        WORM_SMTP_PORT   defaut 587
+        WORM_SMTP_USER   obligatoire
+        WORM_SMTP_PASS   obligatoire
+        WORM_EMAIL_TO    obligatoire si `dest` n'est pas fourni
+        WORM_EMAIL_FROM  defaut WORM_SMTP_USER
+
+    Retourne (True, detail) ou (False, motif). Ne leve jamais : un envoi rate
+    ne doit pas faire perdre le snapshot du passage.
+    """
+    host = os.environ.get("WORM_SMTP_HOST")
+    user = os.environ.get("WORM_SMTP_USER")
+    pwd = os.environ.get("WORM_SMTP_PASS")
+    to = dest or os.environ.get("WORM_EMAIL_TO")
+    if not (host and user and pwd and to):
+        manque = [k for k, v in (("WORM_SMTP_HOST", host), ("WORM_SMTP_USER", user),
+                                 ("WORM_SMTP_PASS", pwd), ("WORM_EMAIL_TO", to)) if not v]
+        return False, f"non configure : {', '.join(manque)}"
+    port = int(os.environ.get("WORM_SMTP_PORT") or 587)
+    expediteur = os.environ.get("WORM_EMAIL_FROM") or user
+    try:
+        import smtplib, ssl
+        from email.message import EmailMessage
+        m = EmailMessage()
+        m["Subject"] = sujet
+        m["From"] = expediteur
+        m["To"] = to
+        m.set_content("Digest APEX-TURF-WORM — version HTML requise.\n")
+        m.add_alternative(html, subtype="html")
+        ctx = ssl.create_default_context()
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, context=ctx, timeout=45) as sv:
+                sv.login(user, pwd)
+                sv.send_message(m)
+        else:
+            with smtplib.SMTP(host, port, timeout=45) as sv:
+                sv.ehlo()
+                sv.starttls(context=ctx)   # jamais en clair
+                sv.login(user, pwd)
+                sv.send_message(m)
+        return True, f"{expediteur} -> {to} via {host}:{port}"
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
 def cmd_email(a):
     day = a.date or apex_day()[0]
     sujet, html = build_email_html(day)
@@ -794,16 +849,27 @@ def cmd_email(a):
     print(f"html    -> {ph}")
     print(f"sujet   -> {ps}")
     print()
+    ok, detail = envoyer_smtp(sujet, html, dest=getattr(a, "to", None))
     print("=" * 68)
-    print("ENVOI EMAIL OBLIGATOIRE — un passage sans email envoye est INCOMPLET.")
-    print("Les secrets WORM_SMTP_* ne sont pas configures : ce script n'envoie RIEN.")
-    print("Enchainer en session avec mcp__Gmail__send_message :")
-    print('  to=["okoma.leonce@gmail.com"]')
-    print(f"  subject = <{os.path.basename(ps)}>")
-    print(f"  htmlBody = <{os.path.basename(ph)}>")
-    print("Preuve d'envoi = l'id/threadId Gmail renvoye par l'outil.")
+    if ok:
+        print(f"EMAIL ENVOYE par SMTP : {detail}")
+        print("Passage complet.")
+    else:
+        print("ENVOI EMAIL OBLIGATOIRE — un passage sans email envoye est INCOMPLET.")
+        print(f"SMTP indisponible ({detail}) : ce script n'a RIEN envoye.")
+        print("Deux voies pour completer le passage :")
+        print("  1. en session, avec le connecteur Gmail :")
+        print("       mcp__Gmail__send_message")
+        print('       to=["okoma.leonce@gmail.com"]')
+        print(f"       subject  = <{os.path.basename(ps)}>")
+        print(f"       htmlBody = <{os.path.basename(ph)}>")
+        print("     preuve d'envoi = l'id/threadId Gmail renvoye par l'outil.")
+        print("  2. sans modele ni connecteur, renseigner dans l'environnement :")
+        print("       WORM_SMTP_HOST, WORM_SMTP_USER, WORM_SMTP_PASS, WORM_EMAIL_TO")
+        print("       (+ WORM_SMTP_PORT, defaut 587 ; WORM_EMAIL_FROM, defaut l'utilisateur)")
+        print("     ce script enverra alors seul a chaque passage.")
     print("=" * 68)
-    return 0
+    return 0 if ok else 0
 
 
 def main(argv=None):
@@ -818,7 +884,9 @@ def main(argv=None):
                    help="restreindre au programme officiel PMU LONACI du jour")
     r = sp.add_parser("report"); r.add_argument("--date", help="YYYY-MM-DD")
     b = sp.add_parser("bilan");  b.add_argument("--date", help="YYYY-MM-DD")
-    e = sp.add_parser("email");  e.add_argument("--date", help="YYYY-MM-DD")
+    e = sp.add_parser("email")
+    e.add_argument("--date", help="YYYY-MM-DD")
+    e.add_argument("--to", help="destinataire (defaut : WORM_EMAIL_TO)")
     a = p.parse_args(argv)
     return {"window": cmd_window, "scan": cmd_scan,
             "report": cmd_report, "bilan": cmd_bilan,
