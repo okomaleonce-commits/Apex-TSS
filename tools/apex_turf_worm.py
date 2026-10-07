@@ -47,6 +47,12 @@ DISCIPLINES_MOTEUR = {"TROT_ATTELE": "trot", "TROT_MONTE": "trot",
                       "HAIES": "obst", "STEEPLE_CHASE": "obst", "CROSS": "obst"}
 
 
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from apex_turf_lonaci import charger_scope as _lonaci_scope
+except ImportError:
+    _lonaci_scope = None
+
 QFILE = os.path.join(ROOT, "tools", "params", "turf_worm_quantiles.json")
 try:
     QUANT = json.load(open(QFILE, encoding="utf-8"))
@@ -417,6 +423,38 @@ def cmd_scan(a):
     # Statuts reellement observes le 02/10/2026 : ARRIVEE_DEFINITIVE_COMPLETE,
     # FIN_COURSE, ARRIVEE_PROVISOIRE (termines) ; PROGRAMMEE, ROUGE_AUX_PARTANTS (a venir).
     sel = [c for c in courses if c.get("statut") in STATUTS_A_VENIR]
+
+    # --lonaci : restreindre au programme officiel PMU LONACI (Cote d'Ivoire).
+    # LONACI emploie les memes codes R#C# que le PMU francais (verifie sur les
+    # 30 courses du 02/10/2026), le perimetre est donc une liste de codes.
+    lonaci = None
+    if a.lonaci:
+        if _lonaci_scope is None:
+            print("apex_turf_lonaci.py introuvable a cote de ce script.", file=sys.stderr)
+            return 2
+        codes, meta = _lonaci_scope(day)
+        if codes is None:
+            print(f"AUCUN perimetre LONACI pour {day}. Le construire d'abord :",
+                  file=sys.stderr)
+            print(f"  python3 tools/apex_turf_lonaci.py scope --date {ddmmyyyy} "
+                  f"--from-text <fichier>", file=sys.stderr)
+            print("Sans perimetre, --lonaci NE SCANNE RIEN : scanner tout le programme "
+                  "francais serait ignorer la demande.", file=sys.stderr)
+            return 2
+        avant = len(sel)
+        sel = [c for c in sel if f"R{c['reunion']}C{c['course']}" in codes]
+        par_course = {c["code"]: c for c in (meta.get("courses") or [])}
+        lonaci = dict(journee=meta.get("journee"), source=meta.get("source"),
+                      releve=meta.get("releve"), n_lonaci=meta.get("n_lonaci"),
+                      repartition=meta.get("repartition"),
+                      cotes_origine=meta.get("cotes_origine"),
+                      avertissement_masse=meta.get("avertissement_masse"))
+        print(f"LONACI : perimetre du {meta.get('journee')} "
+              f"({meta.get('n_lonaci')} courses au programme, "
+              f"{len(codes)} dans le perimetre des moteurs) "
+              f"-> {len(sel)} a venir sur {avant}")
+        print(f"  cotes : {meta.get('cotes_origine')} — masse d'enjeux non verifiee, "
+              f"voir avertissement_masse")
     if a.max_courses:
         sel = sel[:a.max_courses]
     print(f"passage {npass} | {len(sel)} courses non terminees retenues")
@@ -434,7 +472,9 @@ def cmd_scan(a):
                 journee_apex=day, course=c, marche=m,
                 minutes_avant_depart=(round((dep - now).total_seconds() / 60)
                                       if dep else None),
-                moteur_calibre=DISCIPLINES_MOTEUR.get(c["discipline"]))
+                moteur_calibre=DISCIPLINES_MOTEUR.get(c["discipline"]),
+                lonaci=lonaci,
+                lonaci_course=par_course.get(c["course_id"].split("-")[-1]))
             prev = last_pass(hist, c["course_id"])
             # ANOMALIES : seules celles-ci classent la course. Ce sont des ecarts
             # a une distribution, donc informatifs.
@@ -477,7 +517,19 @@ def write_report(day, snaps, npass):
     L = [f"# APEX-TURF-WORM — journee APEX {day}", "",
          f"Passage **{npass}** · relevé {dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds')}"
          f" · fuseau `{TZ}` · {len(snaps)} courses",
-         "",
+         ""]
+    lon = next((x.get("lonaci") for x in snaps if x.get("lonaci")), None)
+    if lon:
+        r = lon.get("repartition") or {}
+        L += [f"> **Périmètre restreint au programme officiel PMU LONACI** du "
+              f"{lon.get('journee')} : {lon.get('n_lonaci')} courses au programme, dont "
+              f"{r.get('ANALYSABLE', 0)} analysables (trot attelé), "
+              f"{r.get('INDICATIF', 0)} en indicatif plafonné, "
+              f"{r.get('REFUSE_PLAT', 0)} refusées (plat), "
+              f"{r.get('ABSENT_SOURCE', 0)} absentes de la source (Nationale 3 marocaine).",
+              f"> Cotes : **{lon.get('cotes_origine')}**. {lon.get('avertissement_masse')}",
+              ""]
+    L += [
          "> Le palier maximal de ce scanner est **SURVEILLER**. Les deux gates de pari turf",
          "> sont fermées par le backtest (trot ROI −4,58 % sur 118 paris, obstacle −89,05 %",
          "> sur 21). `autorite_pari = false` sur chaque ligne.", ""]
@@ -517,6 +569,11 @@ def write_report(day, snaps, npass):
             L.append(f"- non-terminaisons attendues {nt['attendu_non_finissants']} "
                      f"(taux de base {nt['taux_base']:.1%}, tranche {nt['tranche_champ']}"
                      + (", **champ à risque**" if nt.get("champ_a_risque") else "") + ")")
+        lc = x.get("lonaci_course")
+        if lc and lc.get("statut") == "INDICATIF":
+            L.append(f"- ⚠ **LONACI {lc['statut']}** — {lc.get('motif','')}")
+        elif lc:
+            L.append(f"- LONACI : `{lc['statut']}`")
         L.append("")
     L += ["## Moteurs structurellement indisponibles", "",
           "| Moteur | Statut | Motif |", "|---|---|---|"]
@@ -654,6 +711,77 @@ def build_email_html(day=None):
     return sujet, "\n".join(h)
 
 
+def fragment_email_turf(day=None):
+    """
+    Fragment HTML du turf, a joindre au digest du WORM FOOTBALL.
+
+    Volontairement NON INVASIF : ce fichier ne modifie pas tools/apex_worm.py.
+    Pour brancher les deux digests, UNE SEULE ligne a ajouter dans
+    apex_worm.build_email_html, juste avant la fermeture du corps :
+
+        try:
+            from apex_turf_worm import fragment_email_turf
+            html += fragment_email_turf(day)
+        except Exception:
+            pass        # le turf absent ne doit jamais casser le digest football
+
+Le `except` large est deliberé : un digest football qui echoue parce que le
+turf manque serait pire que l'absence du turf.
+
+    Retourne "" s'il n'y a rien a dire, pour ne pas polluer le digest d'une
+    section vide.
+    """
+    day = day or apex_day()[0]
+    hist = read_snapshots(day)
+    if not hist:
+        return ""
+    npass = max(h["passage"] for h in hist)
+    last = {h["course"]["course_id"]: h for h in hist if h["passage"] == npass}
+    snaps = list(last.values())
+    tops = sorted((x for x in snaps if x["decision"].startswith("SURVEILLER")),
+                  key=lambda x: -(x["score_global"] or 0))
+    lon = next((x.get("lonaci") for x in snaps if x.get("lonaci")), None)
+
+    h = ["<hr style='margin:22px 0;border:0;border-top:1px solid #ddd'>",
+         f"<div style='{_CSS}'>",
+         "<h3 style='margin:0 0 4px'>APEX-TURF-WORM — courses</h3>",
+         f"<p style='color:#555;margin:0 0 10px'>journée APEX {day} · passage {npass} · "
+         f"{len(snaps)} course(s) · {len(tops)} signal(aux)</p>"]
+    if lon:
+        r = lon.get("repartition") or {}
+        h.append(
+            "<p style='background:#f6ffed;border-left:3px solid #52c41a;padding:7px 10px;"
+            f"margin:0 0 10px;font-size:13px'><b>Périmètre PMU LONACI</b> du "
+            f"{lon.get('journee')} : {lon.get('n_lonaci')} courses au programme, dont "
+            f"<b>{r.get('ANALYSABLE', 0)}</b> analysables (trot attelé), "
+            f"{r.get('INDICATIF', 0)} en indicatif plafonné, "
+            f"{r.get('REFUSE_PLAT', 0)} refusées (plat), "
+            f"{r.get('ABSENT_SOURCE', 0)} absentes de la source (Nationale 3 marocaine)."
+            f"<br>Cotes : <b>{lon.get('cotes_origine')}</b> — masse d'enjeux LONACI non "
+            "vérifiée.</p>")
+    if tops:
+        h.append("<table cellpadding='5' cellspacing='0' style='border-collapse:collapse;"
+                 "width:100%;font-size:13px'><tr style='background:#f0f0f0;text-align:left'>"
+                 "<th>Course</th><th>Hippodrome</th><th>H-</th><th>Anomalie</th>"
+                 "<th>Score</th></tr>")
+        for x in tops[:10]:
+            c = x["course"]
+            m = x.get("minutes_avant_depart")
+            h.append(f"<tr style='border-bottom:1px solid #eee'><td><b>{c['course_id']}</b>"
+                     f"<br><span style='color:#666'>{(c['libelle'] or '')[:34]}</span></td>"
+                     f"<td>{c['hippodrome']}</td>"
+                     f"<td>{('H-' + str(m)) if m is not None else '—'}</td>"
+                     f"<td><code>{x['signal_dominant']}</code></td>"
+                     f"<td><b>{x['score_global']}</b>/100</td></tr>")
+        h.append("</table>")
+    else:
+        h.append("<p>Aucun signal au-dessus de 45/100. <i>Sortie valide.</i></p>")
+    h.append("<p style='color:#888;font-size:12px'>Palier maximal <b>SURVEILLER</b> : les "
+             "deux gates de pari turf sont fermées par le backtest. "
+             "<code>autorite_pari = false</code>.</p></div>")
+    return "\n".join(h)
+
+
 def cmd_email(a):
     day = a.date or apex_day()[0]
     sujet, html = build_email_html(day)
@@ -686,6 +814,8 @@ def main(argv=None):
     s = sp.add_parser("scan")
     s.add_argument("--date", help="DDMMYYYY (defaut : aujourd'hui dans APEX_TIMEZONE)")
     s.add_argument("--max-courses", type=int)
+    s.add_argument("--lonaci", action="store_true",
+                   help="restreindre au programme officiel PMU LONACI du jour")
     r = sp.add_parser("report"); r.add_argument("--date", help="YYYY-MM-DD")
     b = sp.add_parser("bilan");  b.add_argument("--date", help="YYYY-MM-DD")
     e = sp.add_parser("email");  e.add_argument("--date", help="YYYY-MM-DD")

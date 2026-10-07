@@ -17,6 +17,7 @@ DISCOVER → COLLECT → NORMALIZE → STORE → COMPARE → ANALYZE → RANK �
 ```bash
 python3 tools/apex_turf_worm.py window
 python3 tools/apex_turf_worm.py scan
+python3 tools/apex_turf_worm.py scan --lonaci          # perimetre officiel LONACI
 python3 tools/apex_turf_worm.py scan --date 02102026 --max-courses 20
 python3 tools/apex_turf_worm.py report
 python3 tools/apex_turf_worm.py bilan
@@ -168,6 +169,81 @@ Sorties : `data/turf_worm/mi/<jour>.json` et `reports/turf_worm/<jour>.mi.md`.
 
 Source unique : l'API publique turfinfo du PMU. Pas de clé, pas de login, rien à
 contourner. User-Agent identifiable, trois tentatives avec attente exponentielle.
+
+## Périmètre LONACI — restreindre aux courses réellement au programme
+
+```bash
+python3 tools/apex_turf_lonaci.py scope --date DDMMYYYY --from-text <fichier>
+python3 tools/apex_turf_lonaci.py show  --date DDMMYYYY
+python3 tools/apex_turf_worm.py   scan  --lonaci
+```
+
+### Le fait qui rend la restriction simple
+
+**LONACI emploie les mêmes codes `R#C#` que le PMU français.** Vérifié sur les 30 courses
+du 02/10/2026 : chaque code français tombe sur le bon hippodrome et le bon nom de course
+(`R1C4` = Vincennes Prix Ludovica, `R3C5` = Borély Prix des Camélias). Le périmètre se
+réduit donc à une **liste de codes**.
+
+### Trois conséquences mesurées, pas supposées
+
+**1. L'heure n'est pas une clé de validation.** Sur 30 courses : 9 heures identiques,
+13 écarts de 1 à 5 min, aucun au-delà. LONACI publie une heure programmée, le PMU une
+`heureDepart`. La validation porte donc sur le **nom de la course**, avec une tolérance
+d'heure de 6 min. Un nom discordant est signalé : le périmètre est peut-être périmé.
+
+**2. La Nationale 3 est marocaine et absente de l'API française.** Les 8 courses `R9`
+d'Anfa du 02/10 n'existent pas dans la source : ni partant, ni cote, ni rien. Elles
+sortent `ABSENT_SOURCE`. Ce n'est pas un refus de périmètre, c'est une absence de données,
+et le dire est la seule réponse honnête.
+
+**3. Le plat domine le reste du programme.** Sur les 22 courses françaises du 02/10 :
+**11 trot attelé, 1 trot monté, 1 obstacle, 9 plat**. Soit, avec les 8 marocaines,
+**13 courses analysables sur 30** — dont 11 seulement en trot attelé, la seule discipline
+dont le DCS atteint 82.
+
+C'est la lecture la plus utile de ce module : **deux tiers du programme LONACI sont hors
+de ce que les moteurs peuvent chiffrer.**
+
+### Question ouverte, non tranchée : de qui sont les cotes ?
+
+LONACI sert ses propres rapports par sa propre passerelle
+(`api.lonacionline.flexbet-software.com`, endpoint `ws_web_mobile_rapport.jsp`). **Rien ne
+prouve que sa masse d'enjeux soit celle du PMU français.** Or les moteurs sont calibrés sur
+les cotes françaises, qu'ils utilisent comme **offset de marché**. Si les deux masses sont
+distinctes, l'offset est celui d'un autre marché que celui où l'on joue.
+
+Cette question n'est **pas** résolue : la passerelle LONACI est injoignable depuis le
+réseau de cette session (le tunnel s'ouvre, le serveur coupe). Le champ `cotes_origine`
+vaut donc `PMU_FRANCE` et `avertissement_masse` le dit, dans le fichier de périmètre comme
+dans le rapport et dans l'email.
+
+**Ne jamais présenter une analyse LONACI comme fondée sur les cotes LONACI** tant que la
+comparaison n'a pas été faite. Pour la trancher : relever, sur une vingtaine de courses, le
+rapport LONACI d'un Simple Gagnant et le rapport français du même cheval. Identiques =
+masse commune, l'offset est bon. Différents = il faut les cotes LONACI, et ce module est
+alors incomplet.
+
+### D'où vient le programme LONACI
+
+`https://pmu.lonacionline.ci/mobile/` — page **publique**, sans login. C'est une
+application Angular : **un `curl` ne rend rien**, le texte doit venir d'un moteur de rendu
+(session avec un outil de récupération de page, ou navigateur). La passerelle JSON serait
+plus propre mais est injoignable d'ici.
+
+`pmu.lonaci.ci`, que l'on cite parfois, **ne résout pas en DNS** — le domaine servant le
+programme est `pmu.lonacionline.ci`.
+
+Collecte : page publique, aucun `robots.txt` interdisant quoi que ce soit, User-Agent
+identifiable, deux requêtes par passage. **Aucun contournement de login ni de CAPTCHA**, et
+aucun appel aux points d'entrée de pari ou de compte de la passerelle — seulement la
+lecture du programme.
+
+### Sans périmètre, `--lonaci` ne scanne rien
+
+Le scan **refuse** plutôt que de retomber sur le programme français entier : scanner tout
+alors qu'on a demandé LONACI serait ignorer la demande silencieusement.
+
 
 ## Email — obligatoire à chaque passage
 

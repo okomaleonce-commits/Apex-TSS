@@ -37,6 +37,22 @@ Une course est un **classement de N partants**, pas un score entre deux équipes
 3. **Le plat sort `HORS_PERIMETRE`.** Aucun moteur calibré, et les coefficients ne sont pas transposables : `cf` vaut 0,0 en trot contre 0,4 en obstacle, la règle du top 3 change de camp. Hors discipline le résultat n'est pas moins précis, il est de signe faux. Même interdiction pour les quantiles de `tools/params/turf_worm_quantiles.json`.
 4. **Les scores sont des percentiles empiriques**, pas des formules — mesurés sur 14 861 courses de trot et 2 952 d'obstacle. Une première version en formule linéaire notait 100/100 presque partout, ce qui ne porte aucune information. Et le contexte structurel (`non_terminaison`) ne classe **pas** la course : constant à discipline et champ donnés, il mettait tout l'attelé à 51/100.
 
+### Périmètre LONACI — les courses réellement jouables en Côte d'Ivoire
+
+`tools/apex_turf_lonaci.py` restreint le scan au **programme officiel PMU LONACI**, et non à tout le programme français. `apex_turf_worm.py scan --lonaci` applique le périmètre ; **sans périmètre du jour, il refuse de scanner** plutôt que de retomber silencieusement sur les 57 courses françaises.
+
+**Le fait qui rend la restriction simple :** LONACI emploie **les mêmes codes `R#C#`** que le PMU français. Vérifié sur les 30 courses du 02/10/2026 et les 24 du 07/10 : chaque code tombe sur le bon hippodrome et le bon nom de course. Le périmètre est donc une liste de codes.
+
+Trois conséquences mesurées :
+
+1. **L'heure n'est pas une clé de validation.** Sur 30 courses : 9 heures identiques, 13 écarts de 1 à 5 min, aucun au-delà. On valide sur le **nom de la course**, tolérance d'heure 6 min. Un nom discordant est signalé comme périmètre peut-être périmé.
+2. **La Nationale 3 est marocaine et absente de l'API française** (Anfa, Khemisset). Ni partant, ni cote : `ABSENT_SOURCE`. Ce n'est pas un refus de périmètre, c'est une absence de données.
+3. **Le plat domine.** Au 07/10 : 24 courses LONACI → 6 trot attelé, 2 indicatif (monté), 9 plat refusées, 7 marocaines. **8 sur 24 entrent dans le périmètre des moteurs.** C'est la lecture la plus utile de ce module : les deux tiers du programme LONACI sont hors de ce que les moteurs peuvent chiffrer.
+
+**Question ouverte, non tranchée — de qui sont les cotes ?** LONACI sert ses propres rapports par sa propre passerelle (`api.lonacionline.flexbet-software.com`, injoignable depuis le réseau de ces sessions : le tunnel s'ouvre, le serveur coupe). Rien ne prouve que sa masse d'enjeux soit celle du PMU français. Or les moteurs utilisent la cote **française** comme offset de marché. Le champ `cotes_origine` vaut `PMU_FRANCE` et `avertissement_masse` le dit, dans le périmètre, le rapport et l'email. **Ne jamais présenter une analyse LONACI comme fondée sur les cotes LONACI** tant que la comparaison n'a pas été faite — relever, sur une vingtaine de courses, le rapport LONACI et le rapport français du même cheval.
+
+**Source du programme** : `https://pmu.lonacionline.ci/mobile/`, page publique sans login. Application Angular : **un `curl` ne rend rien**, le texte doit venir d'un moteur de rendu. Le domaine `pmu.lonaci.ci` que l'on cite parfois **ne résout pas en DNS**. Aucun appel aux points d'entrée de pari ou de compte de la passerelle : lecture du programme uniquement.
+
 ### Pont WORM → MI, trois axes
 
 ```
