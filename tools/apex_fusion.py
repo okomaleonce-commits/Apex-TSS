@@ -293,13 +293,7 @@ def _orion_card_html(day: str, verdicts: list) -> str:
             f"<td class='r'>{conf if conf is not None else '—'}</td>"
             f"<td>{esc(v.get('tier_worm') or '—')}</td>"
             f"<td><span style='font-weight:700;border-radius:6px;padding:1px 7px;{st}'>{esc(v['decision'])}</span></td></tr>")
-    H += ["</table>",
-          "<div class='muted'>Couches : <b>W</b>=structure WORM (classement) · <b>M</b>=marché/MI · "
-          "<b>C</b>=comportemental · <b>S</b>=FORECAST BSM (si ligue backtestée ET sim calibrée) · "
-          "<b>K</b>=marché SHARP (Pinnacle dé-viggé, football-data/MCP). "
-          "Verdict via tools/orion_consensus.py : META fond les sources partagées, le désaccord pénalise "
-          "la confiance, &lt;3 voix indépendantes → COLLECTER. L'abstention est une décision pleine.</div>",
-          "</div>"]
+    H += ["</table>", "</div>"]
     return "\n".join(H)
 
 
