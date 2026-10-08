@@ -30,6 +30,8 @@ import orion_consensus as O  # noqa: E402  (seuil de désaccord partagé)
 # Seuil de désaccord « faible » = celui d'ORION (une seule vérité).
 LOW_DISAGREEMENT = O.HIGH_DISAGREEMENT
 MIN_VOICES = O.MIN_INDEP_VOICES
+EV_MIN = 0.03          # EV ≥ 3 % requis sur le marché recommandé (fraction)
+DQ_FLOOR = 45          # data_quality plancher (seuil APEX-SYNC) sous lequel les données vétoisent
 
 # États de case
 OK, NO, NA = "ok", "no", "na"
@@ -45,7 +47,7 @@ def glyph(state: str) -> str:
 def evaluate_global(day: str | None = None) -> dict:
     """État des deux portes globales. Rouge = gel maintenu pour TOUS les matchs.
     Jamais inventé : lit les fichiers réels ; donnée absente ⇒ porte 'na' (= rouge prudent)."""
-    g = {"modele_sup_marche": NA, "clv_cumule_ok": NA,
+    g = {"modele_sup_marche": NA, "clv_cumule_ok": NA, "audit_council": NA,
          "statut_backtest": None, "clv_moyen": None, "pnl_units": None, "clv_n": 0}
 
     # Porte 1 — modèle supérieur au marché
@@ -80,7 +82,12 @@ def evaluate_global(day: str | None = None) -> dict:
     except Exception:
         g["clv_cumule_ok"] = NA
 
-    g["portes_vertes"] = (g["modele_sup_marche"] == OK and g["clv_cumule_ok"] == OK)
+    # Porte 3 — audit council/preflight (S8). Agents non exécutés par le cron horaire : on ne peut
+    # pas affirmer qu'ils sont passés ⇒ 'na' = rouge prudent, jamais coché ✅ sans exécution réelle.
+    g["audit_council"] = NA
+
+    g["portes_vertes"] = (g["modele_sup_marche"] == OK and g["clv_cumule_ok"] == OK
+                          and g["audit_council"] == OK)
     return g
 
 
@@ -92,8 +99,8 @@ CELLS = [
     ("sim", "Sim BSM", "Simulation BSM calibrée présente"),
     ("voix", "≥3 voix", "≥ 3 voix indépendantes"),
     ("accord", "Accord", "Désaccord interne faible"),
-    ("cote", "Cote/EV", "Cote vérifiée + EV ≥ 3 % stable"),
-    ("veto", "Sans veto", "Aucun veto (intégrité / modèle / council)"),
+    ("cote", "Cote/EV", "Cote horodatée + EV ≥ 3 % stable"),
+    ("veto", "Intégrité", "Aucun veto d'intégrité (handicap AH non suspect, données fiables)"),
 ]
 
 
@@ -120,10 +127,27 @@ def evaluate_match(verdict: dict, g: dict | None = None, day: str | None = None)
         cells["accord"] = NA
     else:
         cells["accord"] = OK if des < LOW_DISAGREEMENT else NO
-    # Cote vérifiée + EV ≥ 3 % stable : non câblé dans la fusion ⇒ inconnu (anti-invention)
-    cells["cote"] = NA
-    # Aucun veto : council/preflight non exécutés dans la fusion ⇒ inconnu (anti-invention)
-    cells["veto"] = NA
+    wm = verdict.get("worm_meta") or {}
+    # Cote horodatée + EV ≥ 3 % stable (depuis le snapshot WORM) :
+    #   • pas de cote dans le snapshot ⇒ non vérifiable ⇒ ❌ (jamais ✅ sans cote réelle)
+    #   • EV absente ⇒ inconnu
+    #   • sinon ✅ seulement si EV ≥ EV_MIN ET signal stable
+    ev = wm.get("ev_best")
+    if not wm.get("odds_present"):
+        cells["cote"] = NO
+    elif ev is None:
+        cells["cote"] = NA
+    else:
+        cells["cote"] = OK if (ev >= EV_MIN and wm.get("signal_stable")) else NO
+    # Veto d'intégrité (calculable à chaque scan) : handicap asiatique suspect / reco neutralisée,
+    # ou données trop faibles. L'audit council/preflight (S8) reste une PORTE GLOBALE séparée.
+    dq = wm.get("data_quality")
+    if wm.get("integrity_suspect"):
+        cells["veto"] = NO
+    elif dq is None:
+        cells["veto"] = NA
+    else:
+        cells["veto"] = OK if dq >= DQ_FLOOR else NO
 
     local_ok = all(cells[k] == OK for k, _, _ in CELLS)
     verrou = "PRÊT" if (local_ok and g.get("portes_vertes")) else "GELÉ"
@@ -133,6 +157,8 @@ def evaluate_match(verdict: dict, g: dict | None = None, day: str | None = None)
             manquants.append("Modèle supérieur au marché (porte globale)")
         if g.get("clv_cumule_ok") != OK:
             manquants.append("CLV cumulé non négatif (porte globale)")
+        if g.get("audit_council") != OK:
+            manquants.append("Audit council/preflight passé (porte globale)")
 
     return {"cells": cells, "verrou": verrou, "manquants": manquants, "portes": g}
 

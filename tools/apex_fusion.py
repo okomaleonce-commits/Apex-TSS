@@ -249,6 +249,16 @@ def arbitrate_day(day: str):
             "bsm_in_scope": in_scope,
             "relevance": round(W.relevance(r), 3),
         })
+        # Métadonnées WORM utiles à la matrice du gel (cote horodatée, EV, stabilité, intégrité).
+        verdict["worm_meta"] = {
+            "odds_present": bool(r.get("odds")),
+            "scan_time": r.get("scan_time_utc"),
+            "ev_best": r.get("ev_best"),
+            "signal_stable": r.get("signal_stable"),
+            "data_quality": r.get("data_quality"),
+            "integrity_suspect": bool((r.get("asian_integrity") or {}).get("suspect")
+                                      or (r.get("reco") or {}).get("integrity_blocked")),
+        }
         verdict["gel"] = GM.evaluate_match(verdict, g_gel)   # matrice du gel pour ce match
         # La matrice fait autorité : un ACCEPTER non PRÊT est rétrogradé en ATTENDRE (gel calculé).
         if verdict["decision"] == "ACCEPTER" and verdict["gel"]["verrou"] != "PRÊT":
@@ -339,7 +349,9 @@ def _gel_matrix_html(day: str, verdicts: list) -> str:
          "<b>Portes globales</b> (dures, communes à tous les matchs) :<br>"
          + gate(g.get("modele_sup_marche"), "Modèle supérieur au marché",
                 f" — {esc((g.get('statut_backtest') or 'statut inconnu'))}") + "<br>"
-         + gate(g.get("clv_cumule_ok"), "CLV cumulé non négatif", clv_detail)
+         + gate(g.get("clv_cumule_ok"), "CLV cumulé non négatif", clv_detail) + "<br>"
+         + gate(g.get("audit_council"), "Audit council/preflight passé",
+                " — non exécuté par le cron horaire (étape agents S8)")
          + "<br><span style='font-weight:700;color:"
          + ("#137333" if portes_vertes else "#b3261e") + "'>"
          + ("Portes vertes : le gel peut se lever au cas par cas." if portes_vertes
