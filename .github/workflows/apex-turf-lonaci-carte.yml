@@ -67,6 +67,24 @@ jobs:
           PY
           echo "=== FIN DE LA CARTE ==="
 
+      - name: Nationale, paris proposes et cotes LONACI
+        if: always()
+        run: |
+          echo "=== MARCHES LONACI — NATIONALE DU JOUR ==="
+          python3 tools/apex_turf_lonaci.py marches --depuis /tmp/c/brut.json || true
+          echo
+          echo "=== RECAP DE TOUT LE PROGRAMME (type LONACI + nb de paris) ==="
+          python3 - /tmp/c/brut.json <<'PY'
+          import json, sys, os
+          sys.path.insert(0, "tools")
+          from apex_turf_lonaci import marches_lonaci
+          for c in marches_lonaci(json.load(open(sys.argv[1], encoding="utf-8"))):
+              n = sum(1 for p in c["participants"] if p["cote_lonaci"])
+              print(f"  {c['code']:<7} {str(c['type_lonaci']):<22} "
+                    f"nationale={str(c['nationale']):<5} paris={len(c['paris']):<3} "
+                    f"cotes={n}/{len(c['participants']):<3} {str(c['libelle'])[:34]}")
+          PY
+
       - name: Verite sur les participants et les cotes LONACI
         if: always()
         run: |
@@ -112,22 +130,4 @@ jobs:
                         f"sms={str(b.get('str_SMS_Code')):<8} mise={b.get('dec_Base_Price')} "
                         f"ordre={b.get('b_Tout_Ordre')} rapports={len(b.get('rapport') or [])}")
               break
-          PY
-
-      - name: Nationale, paris proposes et cotes LONACI
-        if: always()
-        run: |
-          echo "=== MARCHES LONACI — NATIONALE DU JOUR ==="
-          python3 tools/apex_turf_lonaci.py marches --depuis /tmp/c/brut.json || true
-          echo
-          echo "=== RECAP DE TOUT LE PROGRAMME (type LONACI + nb de paris) ==="
-          python3 - /tmp/c/brut.json <<'PY'
-          import json, sys, os
-          sys.path.insert(0, "tools")
-          from apex_turf_lonaci import marches_lonaci
-          for c in marches_lonaci(json.load(open(sys.argv[1], encoding="utf-8"))):
-              n = sum(1 for p in c["participants"] if p["cote_lonaci"])
-              print(f"  {c['code']:<7} {str(c['type_lonaci']):<22} "
-                    f"nationale={str(c['nationale']):<5} paris={len(c['paris']):<3} "
-                    f"cotes={n}/{len(c['participants']):<3} {str(c['libelle'])[:34]}")
           PY
