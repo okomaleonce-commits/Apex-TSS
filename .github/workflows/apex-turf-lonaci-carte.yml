@@ -67,6 +67,53 @@ jobs:
           PY
           echo "=== FIN DE LA CARTE ==="
 
+      - name: Verite sur les participants et les cotes LONACI
+        if: always()
+        run: |
+          python3 - /tmp/c/brut.json <<'PY'
+          import json, sys, re
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          def courses(d):
+              for r in (d if isinstance(d, list) else [d]):
+                  cs = r.get("Course") or []
+                  if isinstance(cs, dict): cs = [cs]
+                  for c in cs:
+                      yield f"R{r.get('int_Numero')}C{c.get('int_Numero')}", c
+          print("=== CLES REELLES D'UN PARTICIPANT ===")
+          for code, c in courses(d):
+              ps = c.get("participants") or []
+              if ps and isinstance(ps[0], dict):
+                  print(f"  {code} : {sorted(ps[0])}")
+                  print(f"  exemple : {json.dumps(ps[0], ensure_ascii=False)[:500]}")
+                  break
+          print()
+          print("=== DISPERSION DES COTES PAR NATIONALE ===")
+          for code, c in courses(d):
+              t = (c.get("lg_Type_Course_ID") or "")
+              if not re.search(r"NATIONALE", t, re.I): continue
+              ps = c.get("participants") or []
+              vals = []
+              for x in ps:
+                  v = x.get("str_Dernieres_cotes")
+                  try: vals.append(float(str(v).replace(",", ".")))
+                  except (TypeError, ValueError): pass
+              uniq = sorted(set(vals))
+              print(f"  {code} {t} · {len(ps)} partants · {len(vals)} cotes · "
+                    f"{len(uniq)} valeur(s) distincte(s)")
+              print(f"     valeurs : {uniq[:14]}")
+              print(f"     somme 1/c = {sum(1/v for v in vals if v):.3f}" if vals else "")
+              print(f"     statut={c.get('str_Status')} clos={c.get('dt_Date_Fin_Paris')}")
+          print()
+          print("=== LIBELLES DE PARIS, UNE NATIONALE ===")
+          for code, c in courses(d):
+              if not re.search(r"NATIONALE", c.get("lg_Type_Course_ID") or "", re.I): continue
+              for b in (c.get("BetType") or []):
+                  print(f"  {str(b.get('str_Libelle')):<24} complexe={str(b.get('str_Complexe')):<30} "
+                        f"sms={str(b.get('str_SMS_Code')):<8} mise={b.get('dec_Base_Price')} "
+                        f"ordre={b.get('b_Tout_Ordre')} rapports={len(b.get('rapport') or [])}")
+              break
+          PY
+
       - name: Nationale, paris proposes et cotes LONACI
         if: always()
         run: |
