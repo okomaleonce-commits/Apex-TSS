@@ -512,6 +512,19 @@ def cmd_scan(a):
               f"-> {len(sel)} a venir sur {avant}")
         print(f"  cotes : {meta.get('cotes_origine')} — masse d'enjeux non verifiee, "
               f"voir avertissement_masse")
+    # --codes : restreindre a des courses NOMMEES. C'est ce qui permet a un passage
+    # de ne porter que sur les Nationale, sans toucher au filtre LONACI general.
+    if getattr(a, "codes", None):
+        voulus = {c.strip().upper() for c in a.codes.split(",") if c.strip()}
+        avant = len(sel)
+        sel = [c for c in sel if f"R{c['reunion']}C{c['course']}" in voulus]
+        manquants = voulus - {f"R{c['reunion']}C{c['course']}" for c in sel}
+        print(f"CODES : {len(sel)} retenue(s) sur {avant} "
+              f"({len(voulus)} demandee(s))")
+        if manquants:
+            # Jamais en silence : une course demandee et absente est soit deja
+            # partie, soit hors du programme francais, et ca se dit.
+            print(f"  absentes des courses a venir : {', '.join(sorted(manquants))}")
     if a.max_courses:
         sel = sel[:a.max_courses]
     print(f"passage {npass} | {len(sel)} courses non terminees retenues")
@@ -553,6 +566,14 @@ def cmd_scan(a):
         fh.close()
 
     print(f"STORE : {len(out)} releves ajoutes (append-only) -> {SNAP}/{day}.jsonl")
+    if not out:
+        # Un passage qui n'a RIEN releve ne doit pas produire de digest : le
+        # rapport serait construit sur le dernier passage non vide du registre et
+        # annoncerait des signaux qui ne viennent pas de celui-ci. Mesure a l'appui :
+        # un passage a 0 course annoncait « 2 signaux sur 6 courses ».
+        print("AUCUN releve sur ce passage : ni rapport, ni digest. "
+              "Il n'y a rien a annoncer, et annoncer le passage precedent serait faux.")
+        return 0
     write_report(day, out, npass)
     # Regle maison (CLAUDE.md) : tout passage se termine par un digest. Deux
     # amenagements, et ils ne l'affaiblissent pas :
@@ -579,7 +600,8 @@ def cmd_scan(a):
         print(f"signaux modifies -> envoi. avant={(ancien or {}).get('empreinte','(aucun)')[:12]} "
               f"apres={sig['empreinte'][:12]}")
     try:
-        cmd_email(argparse.Namespace(date=day, to=None))
+        cmd_email(argparse.Namespace(date=day, to=None,
+                                     phase=getattr(a, "phase", None)))
         if getattr(a, "email_si_changement", False):
             _ecrire_signature(signature_signaux(day))
     except Exception as e:
@@ -666,6 +688,182 @@ def cmd_serie(a):
     print(f"\nSERIE TERMINEE : {faits} passage(s) en "
           f"{int((dt.datetime.now(dt.timezone.utc) - debut).total_seconds() / 60)} min")
     return derniere_sortie
+
+
+# -------------------------------------------- les trois passages des Nationale
+
+# Les fenetres sont LARGES et le marquage est « une fois par course et par phase ».
+# C'est deliberé : le cron de GitHub abandonne la plupart des declenchements (mesure
+# du 08/10 : deux executes sur vingt-quatre attendus). Viser un INSTANT precis, c'est
+# viser quelque chose qu'on n'attrapera pas. Une fenetre de trente minutes, elle,
+# attrape un declenchement.
+PHASES = {
+    # phase      : (minutes avant le depart, borne haute -> borne basse)
+    "H-60": (75, 45),
+    "H-20": (28, 12),
+}
+OUVERTURE_DEBUT = (8, 0)     # heure APEX (APEX_TIMEZONE), passage d'ouverture
+OUVERTURE_FIN = (9, 30)
+
+
+def _fichier_phases(day):
+    # Dans le dossier des snapshots : c'est lui qui part en artefact et revient au
+    # run suivant. Ailleurs, l'etat serait perdu et chaque run rejouerait tout.
+    return os.path.join(SNAP, f"phases_{day}.json")
+
+
+def _lire_phases(day):
+    try:
+        return json.load(open(_fichier_phases(day), encoding="utf-8")).get("faites", {})
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _marquer_phase(day, cle):
+    faites = _lire_phases(day)
+    faites[cle] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    try:
+        os.makedirs(SNAP, exist_ok=True)
+        json.dump(dict(jour=day, faites=faites),
+                  open(_fichier_phases(day), "w", encoding="utf-8"),
+                  ensure_ascii=False, indent=1)
+    except OSError as e:
+        # Si l'etat ne s'ecrit pas, le prochain run REFERA la phase. C'est le bon
+        # sens de l'erreur : un passage en double vaut mieux qu'un passage manque.
+        print(f"etat des phases non ecrit ({e}) : la phase sera refaite.", file=sys.stderr)
+
+
+def nationales_du_jour(depuis=None):
+    """
+    Les Nationale du jour, d'apres l'ETIQUETTE OFFICIELLE de LONACI
+    (lg_Type_Course_ID contient « NATIONALE »), avec leur heure de depart.
+
+    Les heures de la passerelle sont en UTC : verifie le 07/10/2026, elle donnait
+    11:55 pour le Prix des Gobelins que le PMU donne a 13:55 Paris (UTC+2).
+    Abidjan etant a UTC+0, le fuseau APEX coincide.
+
+    Renvoie (liste, motif_si_vide). On ne DEVINE jamais trois courses : sans
+    etiquette, le choix serait arbitraire et le mauvais choix est pire que rien.
+    """
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from apex_turf_lonaci import marches_lonaci
+    except ImportError as e:
+        return [], f"apex_turf_lonaci introuvable : {e}"
+    if depuis:
+        try:
+            d = json.load(open(depuis, encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            return [], f"dump illisible : {e}"
+    else:
+        try:
+            from apex_turf_lonaci_render import via_passerelle
+        except ImportError as e:
+            return [], f"apex_turf_lonaci_render introuvable : {e}"
+        d, m = via_passerelle()
+        if d is None:
+            return [], (f"passerelle LONACI injoignable ({m}). Elle ne repond pas "
+                        f"depuis un conteneur claude.ai : lancer sur un runner.")
+    out = []
+    for c in marches_lonaci(d):
+        if not c["nationale"]:
+            continue
+        dep = None
+        if c["depart"]:
+            try:
+                dep = dt.datetime.strptime(c["depart"], "%Y-%m-%d %H:%M:%S").replace(
+                    tzinfo=dt.timezone.utc)
+            except ValueError:
+                pass
+        out.append(dict(code=c["code"], libelle=c["libelle"], depart=dep,
+                        type_lonaci=c["type_lonaci"], paris=c["paris"],
+                        hippodrome=c["hippodrome"]))
+    if not out:
+        return [], ("aucune course ne porte l'etiquette NATIONALE dans la passerelle. "
+                    "Ne pas en designer trois au hasard.")
+    return out, None
+
+
+def cmd_nationale(a):
+    """
+    Les trois passages demandes sur les Nationale, et rien d'autre :
+
+        OUVERTURE   une fois par jour, fenetre 08:00 -> 09:30 (heure APEX),
+                    sur les TROIS Nationale ensemble
+        H-60        une fois par course, fenetre H-75 -> H-45
+        H-20        une fois par course, fenetre H-28 -> H-12
+
+    A lancer SOUVENT (cron toutes les 10-15 min) : la commande decide elle-meme
+    si une phase est due, et ne rejoue jamais une phase deja faite. Lancee hors
+    de toute fenetre, elle ne fait rien et le dit — c'est une sortie normale.
+
+    Chaque phase produit son propre digest, avec la phase dans le sujet. Les trois
+    passages donnent exactement les deux comparaisons qui portent l'information en
+    pari mutuel : H-60 contre l'ouverture (comment l'argent de la journee s'est
+    forme) et H-20 contre H-60 (l'argent tardif).
+    """
+    day = (dt.datetime.strptime(a.date, "%d%m%Y").date().isoformat() if a.date
+           else apex_day()[0])
+    ddmmyyyy = a.date or dt.datetime.now(ZoneInfo(TZ)).strftime("%d%m%Y")
+    maintenant = dt.datetime.now(dt.timezone.utc)
+    local = maintenant.astimezone(ZoneInfo(TZ))
+
+    courses, motif = nationales_du_jour(a.depuis)
+    if motif:
+        print(f"REFUS : {motif}", file=sys.stderr)
+        return 2
+    print(f"NATIONALE du {day} : {len(courses)} course(s)")
+    for c in courses:
+        h = c["depart"].strftime("%H:%M") if c["depart"] else "heure inconnue"
+        reste = (round((c["depart"] - maintenant).total_seconds() / 60)
+                 if c["depart"] else None)
+        print(f"  {c['code']:<7} {h} UTC  "
+              + (f"H{reste:+}min  " if reste is not None else "")
+              + f"{str(c['libelle'])[:38]:<38} {len(c['paris'])} pari(s)")
+
+    faites = _lire_phases(day)
+    dues = []
+
+    # --- phase d'ouverture : une seule, sur les trois courses
+    if a.forcer == "OUVERTURE" or (
+            not a.forcer and "OUVERTURE" not in faites
+            and (OUVERTURE_DEBUT <= (local.hour, local.minute) <= OUVERTURE_FIN)):
+        dues.append(("OUVERTURE", [c["code"] for c in courses]))
+
+    # --- H-60 et H-20 : une fois par course
+    for nom, (haut, bas) in PHASES.items():
+        for c in courses:
+            cle = f"{nom}|{c['code']}"
+            if cle in faites and a.forcer != nom:
+                continue
+            if a.forcer == nom:
+                dues.append((nom, [c["code"]]))
+                continue
+            if not c["depart"]:
+                continue
+            reste = (c["depart"] - maintenant).total_seconds() / 60
+            if bas <= reste <= haut:
+                dues.append((nom, [c["code"]]))
+
+    if not dues:
+        print()
+        print("AUCUNE phase due maintenant. Sortie normale.")
+        print(f"  heure APEX : {local:%H:%M} ({TZ})")
+        print(f"  deja faites : {', '.join(sorted(faites)) or 'aucune'}")
+        return 0
+
+    sortie = 0
+    for nom, codes in dues:
+        print()
+        print(f"=== PHASE {nom} sur {', '.join(codes)}")
+        r = cmd_scan(argparse.Namespace(
+            date=a.date, max_courses=None, lonaci=a.lonaci,
+            codes=",".join(codes), phase=nom,
+            sans_email=False, email_si_changement=False))
+        sortie = r or sortie
+        for code in codes:
+            _marquer_phase(day, "OUVERTURE" if nom == "OUVERTURE" else f"{nom}|{code}")
+    return sortie
 
 
 # --------------------------------------------------------------------- rapport
@@ -789,7 +987,7 @@ _CSS = ("font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;"
         "line-height:1.5;color:#1a1a1a")
 
 
-def build_email_html(day=None):
+def build_email_html(day=None, phase=None):
     """
     Construit (sujet, html) pour le digest d'un passage.
 
@@ -811,12 +1009,15 @@ def build_email_html(day=None):
     tops = [x for x in snaps if x["decision"].startswith("SURVEILLER")]
     hp = [x for x in snaps if x["decision"] == "HORS_PERIMETRE"]
 
-    sujet = (f"APEX-TURF-WORM {day} · passage {npass} · "
-             f"{len(tops)} signal(aux) sur {len(snaps)} courses")
+    sujet = (f"APEX-TURF-WORM {day} · "
+             + (f"{phase} · " if phase else f"passage {npass} · ")
+             + f"{len(tops)} signal(aux) sur {len(snaps)} courses")
 
     h = [f"<div style='{_CSS}'>",
          f"<h2 style='margin:0 0 4px'>APEX-TURF-WORM — journée APEX {day}</h2>",
-         f"<p style='color:#555;margin:0 0 14px'>Passage <b>{npass}</b> · "
+         f"<p style='color:#555;margin:0 0 14px'>"
+         + (f"Phase <b>{phase}</b> · " if phase else "")
+         + f"Passage <b>{npass}</b> · "
          f"{dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds')} · "
          f"fuseau {TZ} · {len(snaps)} courses</p>",
          "<p style='background:#fff7e6;border-left:3px solid #d48806;padding:8px 10px;"
@@ -1001,7 +1202,7 @@ def envoyer_smtp(sujet, html, dest=None):
 
 def cmd_email(a):
     day = a.date or apex_day()[0]
-    sujet, html = build_email_html(day)
+    sujet, html = build_email_html(day, phase=getattr(a, "phase", None))
     os.makedirs(REPO, exist_ok=True)
     ph = os.path.join(REPO, f"{day}.email.html")
     ps = os.path.join(REPO, f"{day}.email.subject.txt")
@@ -1058,6 +1259,15 @@ def main(argv=None):
     se.add_argument("--max-courses", type=int)
     se.add_argument("--lonaci", action="store_true")
     se.add_argument("--email-si-changement", action="store_true")
+
+    na = sp.add_parser("nationale",
+                       help="les 3 passages (ouverture, H-60, H-20) sur les Nationale")
+    na.add_argument("--date", help="DDMMYYYY")
+    na.add_argument("--lonaci", action="store_true",
+                    help="croiser avec le perimetre LONACI des moteurs")
+    na.add_argument("--depuis", help="dump JSON de la passerelle, au lieu de l'appeler")
+    na.add_argument("--forcer", choices=["OUVERTURE", "H-60", "H-20"],
+                    help="jouer cette phase quoi qu'il arrive (diagnostic)")
     r = sp.add_parser("report"); r.add_argument("--date", help="YYYY-MM-DD")
     b = sp.add_parser("bilan");  b.add_argument("--date", help="YYYY-MM-DD")
     e = sp.add_parser("email")
@@ -1065,6 +1275,7 @@ def main(argv=None):
     e.add_argument("--to", help="destinataire (defaut : WORM_EMAIL_TO)")
     a = p.parse_args(argv)
     return {"window": cmd_window, "scan": cmd_scan, "serie": cmd_serie,
+            "nationale": cmd_nationale,
             "report": cmd_report, "bilan": cmd_bilan,
             "email": cmd_email}[a.cmd](a)
 

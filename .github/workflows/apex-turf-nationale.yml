@@ -1,0 +1,116 @@
+# APEX-TURF — les trois passages des Nationale LONACI.
+#
+# CE QUE FAIT CE WORKFLOW
+#   OUVERTURE   une fois par jour, 08:00 -> 09:30 (heure APEX), sur les TROIS
+#               Nationale ensemble
+#   H-60        une fois par course, fenetre H-75 -> H-45
+#   H-20        une fois par course, fenetre H-28 -> H-12
+#
+# Les trois passages donnent exactement les deux comparaisons qui portent
+# l'information en pari mutuel : H-60 contre l'ouverture (comment l'argent de la
+# journee s'est forme) et H-20 contre H-60 (l'argent tardif).
+#
+# POURQUOI UN CRON AUSSI DENSE POUR TROIS PASSAGES
+# Le cron de GitHub n'est pas une horloge : mesure du 08/10/2026, douze
+# declenchements planifies attendus, DEUX executes en deux jours, avec 22 a 24 min
+# de retard. Viser un instant precis, c'est viser ce qu'on n'attrapera pas.
+#
+# D'ou la construction : le cron est dense (toutes les 10 min), mais la commande
+# `nationale` decide elle-meme si une phase est DUE, dans une fenetre LARGE, et ne
+# rejoue jamais une phase deja faite (etat marque, qui voyage avec l'artefact).
+# Lancee hors fenetre, elle ne fait rien et sort en 0. Le depot etant public, les
+# minutes de runner sont gratuites : la densite ne coute rien.
+#
+# Les Nationale sont identifiees par l'ETIQUETTE OFFICIELLE de LONACI
+# (lg_Type_Course_ID contient « NATIONALE »), relevee sur la passerelle. Sans
+# etiquette, la commande REFUSE d'en designer trois : le mauvais choix serait pire
+# que l'absence de choix.
+name: APEX-TURF-NATIONALE
+
+on:
+  schedule:
+    - cron: '*/10 7-20 * * *'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "DDMMYYYY (vide = aujourd'hui)"
+        required: false
+      forcer:
+        description: "forcer une phase : OUVERTURE, H-60 ou H-20 (diagnostic)"
+        required: false
+
+concurrency:
+  group: apex-turf-nationale
+  cancel-in-progress: false      # ne jamais annuler : on perdrait un releve
+
+permissions:
+  contents: read
+
+jobs:
+  phases:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APEX_TIMEZONE: ${{ vars.APEX_TIMEZONE || 'Africa/Abidjan' }}
+      WORM_SMTP_HOST: ${{ secrets.WORM_SMTP_HOST }}
+      WORM_SMTP_PORT: ${{ secrets.WORM_SMTP_PORT }}
+      WORM_SMTP_USER: ${{ secrets.WORM_SMTP_USER }}
+      WORM_SMTP_PASS: ${{ secrets.WORM_SMTP_PASS }}
+      WORM_EMAIL_TO: ${{ secrets.WORM_EMAIL_TO }}
+      WORM_EMAIL_FROM: ${{ secrets.WORM_EMAIL_FROM }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # L'etat des phases vit dans ce dossier : sans lui, chaque run rejouerait
+      # les trois passages, et le marquage ne servirait a rien.
+      - name: Reprendre snapshots et etat des phases
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: turf-nationale-etat
+          path: data/turf_worm/snapshots
+
+      - name: Perimetre LONACI du jour
+        continue-on-error: true
+        run: |
+          mkdir -p data/turf_worm/lonaci
+          python3 tools/apex_turf_lonaci_render.py --only passerelle \
+            --out /tmp/lonaci.txt || true
+          D="${{ inputs.date }}"
+          [ -z "$D" ] && D=$(TZ="$APEX_TIMEZONE" date +%d%m%Y)
+          [ -f /tmp/lonaci.txt ] && \
+            python3 tools/apex_turf_lonaci.py scope --date "$D" --from-text /tmp/lonaci.txt || true
+
+      - name: Paris proposes par LONACI sur les Nationale
+        continue-on-error: true
+        run: python3 tools/apex_turf_lonaci.py marches
+
+      - name: Phases dues (ouverture, H-60, H-20)
+        run: |
+          ARGS=""
+          [ -n "${{ inputs.date }}" ] && ARGS="$ARGS --date ${{ inputs.date }}"
+          [ -n "${{ inputs.forcer }}" ] && ARGS="$ARGS --forcer ${{ inputs.forcer }}"
+          python3 tools/apex_turf_worm.py nationale $ARGS
+
+      - name: Publier snapshots et etat des phases
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: turf-nationale-etat
+          path: data/turf_worm/snapshots
+          retention-days: 7
+          overwrite: true
+
+      - name: Publier rapports et perimetre
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: turf-nationale-rapports
+          path: |
+            reports/turf_worm
+            data/turf_worm/lonaci
+          retention-days: 14
+          overwrite: true
