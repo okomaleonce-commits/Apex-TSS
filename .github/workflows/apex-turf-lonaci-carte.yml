@@ -1,0 +1,68 @@
+# Diagnostic : imprimer la FORME REELLE de la passerelle LONACI, et rien d'autre.
+#
+# Pourquoi un workflow a lui seul : la passerelle est injoignable depuis un
+# conteneur claude.ai (reset au ClientHello), donc sa forme ne s'observe que sur
+# un runner ; et les artefacts d'un run sont servis par un hote que le client gh
+# de la session ne contacte pas, donc un dump en artefact est illisible d'ici.
+# Le JOURNAL d'un job, lui, se lit. En faisant de la carte la SEULE sortie du job,
+# elle tient dans la fin du journal.
+#
+# A declencher quand on doit ecrire un parseur sur cette source, ou verifier
+# qu'elle n'a pas change de structure.
+name: apex-turf-lonaci-carte
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  carte:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Carte de structure de la passerelle
+        run: |
+          mkdir -p /tmp/c
+          python3 tools/apex_turf_lonaci_render.py --only passerelle \
+            --out /tmp/c/lonaci.txt --dump-json /tmp/c/brut.json >/dev/null 2>&1 || true
+          if [ ! -f /tmp/c/brut.json ]; then
+            echo "LA PASSERELLE N'A PAS REPONDU — rien a cartographier."
+            exit 1
+          fi
+          echo "=== OCTETS : $(wc -c < /tmp/c/brut.json)"
+          echo "=== CARTE DE STRUCTURE ==="
+          cat /tmp/c/brut.json.carte.txt
+          echo "=== CLES ET VALEURS CANDIDATES (Nationale, paris, cotes) ==="
+          python3 - /tmp/c/brut.json <<'PY'
+          import json, re, sys
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          motifs = re.compile(r"nation|pari|bet|jeu|game|rapport|cote|odds|market|"
+                              r"combi|trio|quart|quint|simple|couple|place|tierce|"
+                              r"multi|flexi|libel|label|categ", re.I)
+          vus = {}
+          def parcours(o, chemin="$"):
+              if isinstance(o, dict):
+                  for k, v in o.items():
+                      if motifs.search(str(k)):
+                          vus.setdefault(f"{chemin}.{k}", repr(v)[:200])
+                      parcours(v, f"{chemin}.{k}")
+              elif isinstance(o, list):
+                  for v in o[:2]:
+                      parcours(v, f"{chemin}[]")
+              elif isinstance(o, str) and motifs.search(o):
+                  vus.setdefault(f"{chemin} (valeur)", o[:200])
+          parcours(d)
+          if not vus:
+              print("AUCUNE correspondance : la passerelle ne porte NI etiquette")
+              print("Nationale, NI type de pari, NI cote. A acter comme tel.")
+          for k, v in sorted(vus.items())[:80]:
+              print(f"  {k} = {v}")
+          PY
+          echo "=== FIN DE LA CARTE ==="
