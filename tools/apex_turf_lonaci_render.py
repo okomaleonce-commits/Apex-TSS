@@ -178,6 +178,43 @@ def via_navigateur(timeout_ms=120000, attente_ms=20000):
     return txt, f"navigateur, {n} code(s) R#C#"
 
 
+# ------------------------------------------------- diagnostic de structure
+
+def carte_structure(o, prefixe="$", profondeur=0, max_profondeur=4):
+    """
+    Carte des CLES du JSON recu : noms, types, tailles, un echantillon court.
+    Jamais les valeurs en masse.
+
+    C'est cette carte qui a permis d'ecrire passerelle_vers_texte() sur la forme
+    reelle de la passerelle, le 07/10/2026, au lieu de la supposer. Elle n'est
+    imprimee que si la passerelle REPOND et qu'aucun code R#C# n'est reconnu —
+    c'est-a-dire si LONACI a change sa structure. Ce jour-la, il faudra la relire.
+
+    Elle etait appelee par main() sans etre definie : supprimee par megarde quand
+    le parseur a ete ecrit, l'appel est reste. Sur ce chemin, au lieu du
+    diagnostic, on obtenait un NameError. Retablie ici, avec un garde-fou de
+    profondeur pour ne pas derouler un document entier.
+    """
+    lignes = []
+    if profondeur > max_profondeur:
+        return [f"{prefixe} … (profondeur {max_profondeur} atteinte)"]
+    if isinstance(o, dict):
+        lignes.append(f"{prefixe} dict[{len(o)}] cles={list(o)[:12]}")
+        for k, v in list(o.items())[:12]:
+            lignes += carte_structure(v, f"{prefixe}.{k}", profondeur + 1, max_profondeur)
+    elif isinstance(o, list):
+        lignes.append(f"{prefixe} list[{len(o)}]")
+        for i, v in enumerate(o[:3]):
+            lignes += carte_structure(v, f"{prefixe}[{i}]", profondeur + 1, max_profondeur)
+        if len(o) > 3:
+            lignes.append(f"{prefixe}[…] {len(o) - 3} autre(s) element(s) du meme type")
+    else:
+        ech = repr(o)
+        lignes.append(f"{prefixe} {type(o).__name__} "
+                      f"{ech[:60] + '…' if len(ech) > 60 else ech}")
+    return lignes
+
+
 # ----------------------------------------------------------------------- main
 
 def main(argv=None):

@@ -13,10 +13,50 @@ name: APEX-TURF-WORM
 # Les snapshots partent en ARTEFACTS, pas en commits : 12 commits par jour rendraient
 # l'historique illisible. Le passage suivant les retelecharge, sans quoi il n'y aurait
 # pas de COMPARE et chaque passage repartirait de zero.
+#
+# ---------------------------------------------------------------------------------
+# MESURE DU 08/10/2026 ET CE QU'ELLE A CHANGE ICI
+#
+# Le cron precedent etait '17 8-19 * * *', soit douze passages attendus par jour.
+# Executes reellement, en deux jours :
+#
+#     2026-10-08T15:41:55Z  success
+#     2026-10-07T20:39:50Z  success
+#
+# DEUX sur vingt-quatre, et les deux rendus 22 a 24 minutes apres l'heure prevue. Le
+# cron de GitHub Actions n'est pas une horloge : les declenchements planifies sont
+# rendus au mieux et la plupart sont abandonnes.
+#
+# Consequence directe, verifiee dans le registre : `derive` sortait UNAVAILABLE
+# « premier passage du jour » sur CHAQUE course, et la decision ne reposait que sur
+# favori_dominant — un seul moteur actif sur quatre. Or en pari mutuel la derive est
+# LE signal : il n'y a qu'une cote, et elle est l'argent.
+#
+# Deux corrections, et la premiere est la vraie :
+#
+#   1. CHAQUE RUN FAIT SA PROPRE TRAJECTOIRE. Il enchaine deux passages espaces de
+#      12 minutes (sous-commande `serie`). Un declenchement recu suffit desormais a
+#      produire une comparaison : on ne depend plus de DEUX declenchements separes,
+#      ce qui etait precisement ce qui ne se produisait jamais.
+#   2. REDONDANCE. '*/15' au lieu de '17' : 48 tentatives par jour au lieu de 12. Le
+#      depot est PUBLIC, donc les minutes de runner sont gratuites et illimitees —
+#      il n'y a aucune raison d'etre econome de tentatives.
+#
+# L'intervalle de 12 minutes n'est pas arbitraire. Mesure du 08/10 : a UNE minute
+# d'intervalle l'amplitude maximale releve 0,0 % — les cotes PMU n'ont pas bouge, la
+# serie mesurerait du vide. A neuf minutes elle relevait 15,6 %.
+#
+# Reserve a garder en tete : les quantiles de `derive` sont mesures sur une JOURNEE
+# entiere (cote du matin -> cote finale), alors qu'on compare ici deux passages a 12
+# minutes. Le score est donc une borne inferieure — le signal est SOUS-ESTIME, jamais
+# surestime. C'est le sens conservateur. Accumuler ces paires est justement ce qui
+# permettra de re-estimer les quantiles a la bonne echelle.
 
 on:
   schedule:
-    - cron: '17 8-19 * * *'      # minute 17 : evite la bousculade de la minute 0
+    # 48 tentatives/jour. GitHub en abandonnera la plupart : c'est le but d'en
+    # demander autant. Minutes gratuites (depot public), donc aucune parcimonie.
+    - cron: '*/15 8-19 * * *'
   workflow_dispatch:
     inputs:
       date:
@@ -24,6 +64,12 @@ on:
         required: false
       max_courses:
         description: "limite de courses (diagnostic)"
+        required: false
+      passages:
+        description: "passages dans ce run (defaut 2)"
+        required: false
+      intervalle:
+        description: "minutes entre deux passages (defaut 12)"
         required: false
 
 concurrency:
@@ -36,7 +82,7 @@ permissions:
 jobs:
   passage:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45      # la serie attend entre ses passages : voir --budget-min
     env:
       APEX_TIMEZONE: ${{ vars.APEX_TIMEZONE || 'Africa/Abidjan' }}
       WORM_SMTP_HOST: ${{ secrets.WORM_SMTP_HOST }}
@@ -53,10 +99,6 @@ jobs:
           python-version: '3.11'
           cache: pip
 
-      - name: Navigateur pour le rendu du programme LONACI
-        run: |
-          python3 -m pip install --quiet playwright
-          python3 -m playwright install --with-deps chromium
 
       # Sans les snapshots du passage precedent il n'y a pas de trajectoire, et la
       # trajectoire est LA donnee du pari mutuel : il n'y a qu'une cote.
@@ -70,12 +112,30 @@ jobs:
       - name: Fenetre APEX
         run: python3 tools/apex_turf_worm.py window
 
-      - name: Rendu du programme officiel PMU LONACI
+      # La passerelle JSON repond depuis un runner (eprouve le 07/10) et ne demande
+      # aucun navigateur. On l'essaie SEULE d'abord : installer Chromium a chaque
+      # passage coutait plus de temps que tout le reste du job reuni, pour un chemin
+      # de secours qui ne sert pas. Il reste disponible, il n'est plus paye d'avance.
+      - name: Rendu du programme LONACI — passerelle seule
         id: rendu
+        continue-on-error: true
         run: |
           set -o pipefail
           mkdir -p data/turf_worm/lonaci
-          python3 tools/apex_turf_lonaci_render.py --out /tmp/lonaci.txt | tee /tmp/rendu.out
+          python3 tools/apex_turf_lonaci_render.py --only passerelle --out /tmp/lonaci.txt \
+            | tee /tmp/rendu.out
+          cat /tmp/rendu.out >> "$GITHUB_OUTPUT"
+
+      - name: Rendu de secours par navigateur
+        id: rendu_nav
+        if: steps.rendu.outcome == 'failure'
+        run: |
+          set -o pipefail
+          echo "La passerelle n'a pas abouti : on paie le navigateur."
+          python3 -m pip install --quiet playwright
+          python3 -m playwright install --with-deps chromium
+          python3 tools/apex_turf_lonaci_render.py --only navigateur --out /tmp/lonaci.txt \
+            | tee /tmp/rendu.out
           cat /tmp/rendu.out >> "$GITHUB_OUTPUT"
 
       - name: Perimetre LONACI
@@ -87,12 +147,18 @@ jobs:
 
       # Le scan construit ET envoie le digest : apex_turf_worm.envoyer_smtp() part seule
       # des que les secrets WORM_SMTP_* sont la. Sans eux il le dit et n'envoie rien.
-      - name: Scan restreint au perimetre LONACI
+      - name: Serie de passages, restreinte au perimetre LONACI
         run: |
-          ARGS="--lonaci"
+          P="${{ inputs.passages }}";   [ -z "$P" ] && P=2
+          I="${{ inputs.intervalle }}"; [ -z "$I" ] && I=12
+          # budget = de quoi tenir les intervalles demandes, plus une marge, et
+          # toujours sous timeout-minutes. La serie s'arrete d'elle-meme des qu'il
+          # n'y a plus de course a venir dans le perimetre.
+          B=$(( P * I + 8 ))
+          ARGS="--lonaci --email-si-changement --passages $P --intervalle $I --budget-min $B"
           [ -n "${{ inputs.date }}" ] && ARGS="$ARGS --date ${{ inputs.date }}"
           [ -n "${{ inputs.max_courses }}" ] && ARGS="$ARGS --max-courses ${{ inputs.max_courses }}"
-          python3 tools/apex_turf_worm.py scan $ARGS
+          python3 tools/apex_turf_worm.py serie $ARGS
 
       - name: Pont APEX-TURF-MI (H-30)
         run: python3 tools/apex_turf_mi.py worm-hook --within 30
@@ -101,8 +167,9 @@ jobs:
       - name: Resume du passage
         if: always()
         env:
-          RENDU_SOURCE: ${{ steps.rendu.outputs.SOURCE }}
-          RENDU_COURSES: ${{ steps.rendu.outputs.COURSES }}
+          # le chemin de secours a ses propres sorties : prendre celle qui a servi
+          RENDU_SOURCE: ${{ steps.rendu.outputs.SOURCE || steps.rendu_nav.outputs.SOURCE }}
+          RENDU_COURSES: ${{ steps.rendu.outputs.COURSES || steps.rendu_nav.outputs.COURSES }}
         run: |
           python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           import os, glob, datetime

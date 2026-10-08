@@ -21,7 +21,7 @@ l'argent tardif sur une cote unique.
 
 Stdlib uniquement : se depose dans Apex-TSS sans nouvelle dependance.
 """
-import argparse, json, math, os, sys, time, urllib.request, urllib.error
+import argparse, hashlib, json, math, os, sys, time, urllib.request, urllib.error
 import datetime as dt
 from zoneinfo import ZoneInfo
 
@@ -199,7 +199,13 @@ def engine_derive(cur, prev):
     amp = max(abs(m["variation_pct"]) for m in mv)
     disc = DISCIPLINES_MOTEUR.get(cur["course"]["discipline"])
     sc, prov, ref = percentile_score(disc, "derive", amp) if disc else (None, UNAVAILABLE, "hors perimetre")
+    # Convention maison : un score None s'accompagne TOUJOURS d'un motif. Sans ce
+    # motif, engine_outsider — qui relaie l'indisponibilite de derive — levait un
+    # KeyError. Il fallait deux conditions pour le voir : un passage precedent ET
+    # une course hors discipline calibree. Le scan planifie filtrant sur le
+    # perimetre LONACI, et n'ayant jamais eu deux passages, le bug dormait.
     return dict(score=sc, provenance=prov, reference=ref,
+                motif=(ref if sc is None else None),
                 echelle=("quantiles mesures sur une JOURNEE entiere (cote du matin -> cote finale), "
                          "alors que ce score compare deux passages HORAIRES : borne superieure "
                          "conservatrice, le signal horaire est SOUS-ESTIME. A re-estimer sur les "
@@ -261,7 +267,9 @@ def engine_outsider(cur, prev):
     """
     d = engine_derive(cur, prev)
     if d["score"] is None:
-        return dict(score=None, provenance=UNAVAILABLE, motif=d["motif"])
+        return dict(score=None, provenance=UNAVAILABLE,
+                    motif=(d.get("motif") or d.get("reference")
+                           or "derive indisponible, motif non renseigne"))
     p = _devig(cur["marche"]["partants"])
     cands = []
     for m in d.get("resserrements", []):
@@ -391,6 +399,53 @@ def last_pass(hist, course_id):
     return prev[-1] if prev else None
 
 
+# ------------------------------------------------- signature des signaux du jour
+
+# Le marqueur vit DANS le dossier des snapshots : c'est lui qui part en artefact
+# et revient au passage suivant. Ailleurs il serait perdu entre deux runs, et
+# --email-si-changement enverrait a chaque fois.
+MARQUEUR = os.path.join(SNAP, "dernier_digest.json")
+
+
+def signature_signaux(day):
+    """
+    Empreinte de ce qu'un digest ANNONCE, et de rien d'autre.
+
+    Deux passages dont les cotes bougent sans changer un seul palier produisent la
+    MEME empreinte : c'est voulu. Ce qui declenche un envoi, c'est qu'une course
+    entre, sorte, ou change de palier — pas qu'une cote ait remue de 2 %.
+
+    Entrent dans l'empreinte : course, decision, signal dominant. PAS le score,
+    qui bouge en permanence de quelques points sans rien dire de nouveau.
+    """
+    hist = read_snapshots(day)
+    if not hist:
+        return dict(n_signaux=0, empreinte=hashlib.sha256(b"vide").hexdigest(), lignes=[])
+    npass = max(h["passage"] for h in hist)
+    dernier = {h["course"]["course_id"]: h for h in hist if h["passage"] == npass}
+    lignes = sorted(
+        f"{cid}|{h['decision']}|{h['signal_dominant']}"
+        for cid, h in dernier.items() if h["decision"].startswith("SURVEILLER"))
+    return dict(n_signaux=len(lignes),
+                empreinte=hashlib.sha256("\n".join(lignes).encode("utf-8")).hexdigest(),
+                lignes=lignes)
+
+
+def _lire_signature():
+    try:
+        return json.load(open(MARQUEUR, encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _ecrire_signature(sig):
+    try:
+        os.makedirs(SNAP, exist_ok=True)
+        json.dump(sig, open(MARQUEUR, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    except OSError as e:
+        print(f"marqueur non ecrit ({e}) : le prochain passage reenverra.", file=sys.stderr)
+
+
 # ----------------------------------------------------------------------- scan
 
 def cmd_scan(a):
@@ -499,13 +554,118 @@ def cmd_scan(a):
 
     print(f"STORE : {len(out)} releves ajoutes (append-only) -> {SNAP}/{day}.jsonl")
     write_report(day, out, npass)
-    # Regle maison (CLAUDE.md) : tout passage se termine par un digest.
-    # Le script ne l'envoie pas (pas de SMTP configure) ; il le construit et le dit.
+    # Regle maison (CLAUDE.md) : tout passage se termine par un digest. Deux
+    # amenagements, et ils ne l'affaiblissent pas :
+    #
+    #   --sans-email          en mode serie, seul le DERNIER passage envoie. Quinze
+    #                         digests identiques dans une matinee ne sont pas quinze
+    #                         fois l'information, c'est quatorze fois du bruit.
+    #   --email-si-changement n'envoie que si l'ensemble des signaux a bouge depuis
+    #                         le dernier envoi. Un passage qui ne change rien est un
+    #                         passage valide ; il n'a simplement rien a annoncer.
+    #
+    # Dans les deux cas le passage est COMPLET : le releve est scelle, le rapport
+    # ecrit. C'est l'envoi qui est economise, pas la mesure.
+    if getattr(a, "sans_email", False):
+        print("digest non envoye (--sans-email) : la serie enverra a la fin.")
+        return 0
+    if getattr(a, "email_si_changement", False):
+        sig = signature_signaux(day)
+        ancien = _lire_signature()
+        if ancien == sig:
+            print(f"digest non envoye : signaux inchanges depuis le dernier envoi "
+                  f"({sig['n_signaux']} signal(aux), empreinte {sig['empreinte'][:12]}).")
+            return 0
+        print(f"signaux modifies -> envoi. avant={(ancien or {}).get('empreinte','(aucun)')[:12]} "
+              f"apres={sig['empreinte'][:12]}")
     try:
         cmd_email(argparse.Namespace(date=day, to=None))
+        if getattr(a, "email_si_changement", False):
+            _ecrire_signature(signature_signaux(day))
     except Exception as e:
         print(f"digest non construit : {type(e).__name__}: {e}", file=sys.stderr)
     return 0
+
+
+# ---------------------------------------------------------------------- serie
+
+def _reste_a_venir(ddmmyyyy, codes=None):
+    """
+    Combien de courses sont encore a venir. Sert d'ARRET a la serie : continuer a
+    sonder un programme termine brule du temps de runner pour rien.
+    Renvoie None si le DISCOVER echoue — on ne s'arrete pas sur une panne reseau.
+    """
+    courses, err = discover(ddmmyyyy)
+    if err:
+        return None
+    sel = [c for c in courses if c.get("statut") in STATUTS_A_VENIR]
+    if codes is not None:
+        sel = [c for c in sel if f"R{c['reunion']}C{c['course']}" in codes]
+    return len(sel)
+
+
+def cmd_serie(a):
+    """
+    Plusieurs passages dans UN SEUL run, espaces de --intervalle minutes.
+
+    POURQUOI. Le cron de GitHub Actions n'est pas une horloge : les declenchements
+    planifies sont rendus au mieux, et la mesure du 08/10/2026 est sans appel —
+    douze passages attendus par jour, DEUX executes en deux jours. Or le moteur
+    `derive` exige deux passages pour exister, et en pari mutuel la derive est LE
+    signal : il n'y a qu'une cote, et elle est l'argent. Un seul passage par jour
+    rend la cellule aveugle a ce qui compte le plus.
+
+    Un run qui enchaine ses propres passages ne depend plus que d'UN declenchement
+    recu au lieu de douze.
+
+    CE QUE CA COUTE, parce qu'il faut le dire : attendre dans un job consomme du
+    temps de runner facturable. C'est pourquoi la serie n'est PAS le mode planifie
+    par defaut — le cron redondant l'est, et il ne dort jamais. La serie est l'outil
+    du declenchement manuel, quand on veut couvrir correctement une course precise.
+    """
+    ddmmyyyy = a.date or dt.datetime.now(ZoneInfo(TZ)).strftime("%d%m%Y")
+    debut = dt.datetime.now(dt.timezone.utc)
+    limite = debut + dt.timedelta(minutes=a.budget_min)
+    print(f"SERIE : jusqu'a {a.passages} passage(s), un toutes les {a.intervalle} min, "
+          f"budget {a.budget_min} min (fin au plus tard {limite:%H:%M} UTC)")
+
+    codes = None
+    if a.lonaci and _lonaci_scope is not None:
+        c, _ = _lonaci_scope(dt.datetime.strptime(ddmmyyyy, "%d%m%Y").date().isoformat())
+        codes = c
+
+    faits, derniere_sortie = 0, 0
+    for i in range(1, a.passages + 1):
+        print(f"\n--- passage {i}/{a.passages} de la serie "
+              f"({dt.datetime.now(dt.timezone.utc):%H:%M:%S} UTC)")
+        # Chaque passage est un cmd_scan complet : meme code, meme registre
+        # append-only, meme numerotation. La serie n'est qu'un ordonnanceur.
+        derniere_sortie = cmd_scan(argparse.Namespace(
+            date=a.date, max_courses=a.max_courses, lonaci=a.lonaci,
+            # seul le dernier passage envoie : voir le commentaire de cmd_scan
+            sans_email=(i < a.passages), email_si_changement=a.email_si_changement))
+        faits += 1
+
+        if i == a.passages:
+            break
+        reste = _reste_a_venir(ddmmyyyy, codes)
+        if reste == 0:
+            print(f"ARRET : plus aucune course a venir dans le perimetre apres "
+                  f"{faits} passage(s). Le reste du budget n'est pas brule.")
+            break
+        if reste is not None:
+            print(f"  {reste} course(s) encore a venir")
+        prochain = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=a.intervalle)
+        if prochain >= limite:
+            print(f"ARRET : le passage suivant depasserait le budget "
+                  f"({prochain:%H:%M} > {limite:%H:%M} UTC). {faits} passage(s) faits.")
+            break
+        print(f"  attente de {a.intervalle} min -> {prochain:%H:%M} UTC")
+        time.sleep(a.intervalle * 60)
+
+    print(f"\nSERIE TERMINEE : {faits} passage(s) en "
+          f"{int((dt.datetime.now(dt.timezone.utc) - debut).total_seconds() / 60)} min")
+    return derniere_sortie
 
 
 # --------------------------------------------------------------------- rapport
@@ -884,13 +1044,27 @@ def main(argv=None):
     s.add_argument("--max-courses", type=int)
     s.add_argument("--lonaci", action="store_true",
                    help="restreindre au programme officiel PMU LONACI du jour")
+    s.add_argument("--sans-email", action="store_true",
+                   help="sceller le releve sans envoyer de digest")
+    s.add_argument("--email-si-changement", action="store_true",
+                   help="n'envoyer que si l'ensemble des signaux a bouge")
+
+    se = sp.add_parser("serie", help="plusieurs passages dans un seul run")
+    se.add_argument("--passages", type=int, default=6)
+    se.add_argument("--intervalle", type=int, default=15, help="minutes entre deux passages")
+    se.add_argument("--budget-min", type=int, default=110,
+                    help="duree maximale de la serie, en minutes")
+    se.add_argument("--date", help="DDMMYYYY")
+    se.add_argument("--max-courses", type=int)
+    se.add_argument("--lonaci", action="store_true")
+    se.add_argument("--email-si-changement", action="store_true")
     r = sp.add_parser("report"); r.add_argument("--date", help="YYYY-MM-DD")
     b = sp.add_parser("bilan");  b.add_argument("--date", help="YYYY-MM-DD")
     e = sp.add_parser("email")
     e.add_argument("--date", help="YYYY-MM-DD")
     e.add_argument("--to", help="destinataire (defaut : WORM_EMAIL_TO)")
     a = p.parse_args(argv)
-    return {"window": cmd_window, "scan": cmd_scan,
+    return {"window": cmd_window, "scan": cmd_scan, "serie": cmd_serie,
             "report": cmd_report, "bilan": cmd_bilan,
             "email": cmd_email}[a.cmd](a)
 
