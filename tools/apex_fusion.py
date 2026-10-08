@@ -39,6 +39,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import apex_worm as W          # noqa: E402  (radar + builder d'email réutilisé)
 import orion_consensus as O    # noqa: E402  (cœur d'arbitrage)
 import gel_matrix as GM        # noqa: E402  (matrice du gel : conditions par match + portes globales)
+import apex_bsm as B           # noqa: E402  (dérivation des marchés depuis les λ structurels WORM)
 
 # Ligues réellement couvertes par le backtest BSM (backtests/latest_params.json "divs").
 # Hors de cette liste, FORECAST (BSM) ne peut pas rendre de voix calibrée : écrite ABSENTE.
@@ -248,6 +249,9 @@ def arbitrate_day(day: str):
             "couches": couches,
             "bsm_in_scope": in_scope,
             "relevance": round(W.relevance(r), 3),
+            "lambdas": r.get("lambdas"),
+            "div": div,
+            "home": r.get("home"), "away": r.get("away"),
         })
         # Métadonnées WORM utiles à la matrice du gel (cote horodatée, EV, stabilité, intégrité).
         verdict["worm_meta"] = {
@@ -389,6 +393,92 @@ def _gel_matrix_html(day: str, verdicts: list) -> str:
     return "\n".join(H)
 
 
+_HALF_SHARE_CACHE: dict = {}
+
+
+def _half_share_for_div(div: str):
+    """Part 1re période (dom, ext) calibrée sur l'historique de la ligue, en cache. (None, None) si
+    la ligue n'est pas backtestée ou si l'historique local n'a pas la mi-temps (anti-invention)."""
+    if div in _HALF_SHARE_CACHE:
+        return _HALF_SHARE_CACHE[div]
+    res = (None, None)
+    try:
+        import glob
+        files = glob.glob(str(ROOT / "data" / "history" / f"{div}_*.csv"))
+        hist = []
+        for f in sorted(files)[-3:]:                      # 3 dernières saisons en cache, pas de réseau
+            season = Path(f).stem.split("_")[-1]
+            hist += B.fetch_matches(div, season, refresh=False)
+        f1h, f1a, _ = B.half_shares(hist)
+        res = (f1h, f1a)
+    except Exception:
+        res = (None, None)
+    _HALF_SHARE_CACHE[div] = res
+    return res
+
+
+def _extended_markets_html(day: str, verdicts: list) -> str:
+    """Carte « Marchés étendus » dérivés de la STRUCTURE WORM (λ de classement) via la même mécanique
+    Monte-Carlo. JAMAIS étiquetée BSM (règle CLAUDE.md) : c'est la Poisson-classement WORM, non validée,
+    aucune mise. Mi-temps affichée seulement pour une ligue dont la part 1re période est calibrable sur
+    l'historique réel ; sinon écrite indisponible (anti-invention)."""
+    import numpy as np
+
+    def esc(x):
+        return str(x).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    # candidats prioritaires : WORM JOUER/JOUER_PETIT d'abord, puis pertinence ; λ obligatoires.
+    cands = [v for v in verdicts if v.get("lambdas") and len(v["lambdas"]) == 2]
+    rank = {"JOUER": 0, "JOUER_PETIT": 1}
+    cands.sort(key=lambda v: (rank.get(v.get("tier_worm"), 2), -v.get("relevance", 0)))
+    cands = cands[:8]
+    if not cands:
+        return ""
+
+    try:
+        params = json.loads((ROOT / "backtests" / "latest_params.json").read_text())
+        rho, sigma = params.get("rho", -0.05), params.get("sigma", 0.0)
+    except Exception:
+        rho, sigma = -0.05, 0.0
+    scope = _bsm_scope()
+    rng = np.random.default_rng(20261008)
+
+    H = ["<div class='card' style='border:2px solid #3b3b58'>",
+         "<h1>Marchés étendus par match</h1>",
+         "<div class='muted'>Dérivés de la <b>structure WORM</b> (λ de classement Poisson) — "
+         "<b>PAS le modèle BSM</b>, <b>non validé</b>, aucune mise. Au-delà de 1X2/O-U 2.5/AH : DC, DNB, "
+         "team totals, pair/impair, mi-temps (si ligue calibrée) et Mi-temps/Fin. Lecture descriptive.</div>",
+         "<table><tr><th>Match</th><th>O2.5</th><th>BTTS</th><th>DNB dom</th><th>AH dom −1</th>"
+         "<th>Pair</th><th>Mi-temps 1/X/2</th><th>HT/FT top</th><th>Score</th></tr>"]
+    for v in cands:
+        lh, la = float(v["lambdas"][0]), float(v["lambdas"][1])
+        hg, ag = B.simulate_scores(lh, la, rho, sigma, [(1, 1, 1)], 20000, rng)
+        M = B.markets_from_sims(hg, ag)
+        div = v.get("div")
+        f1h, f1a = _half_share_for_div(div) if (div and div in scope) else (None, None)
+        if f1h is not None:
+            HM = B.half_markets(hg, ag, f1h, f1a, rng)
+            mt = f"{HM['1H_1']:.0%}/{HM['1H_X']:.0%}/{HM['1H_2']:.0%}"
+            htft = sorted(((k.replace('HTFT_', ''), val) for k, val in HM.items() if k.startswith('HTFT_')),
+                          key=lambda kv: -kv[1])[0]
+            htft_s = f"{htft[0]} {htft[1]:.0%}"
+        else:
+            mt = htft_s = "<span class='muted'>ligue non calibrée</span>"
+        top_score = M["scores"][0][0] if M.get("scores") else "—"
+        H.append(
+            f"<tr><td><b>{esc(v['match'])}</b></td>"
+            f"<td>{M['Over2.5']:.0%}</td><td>{M['BTTS_oui']:.0%}</td>"
+            f"<td>{M['DNB_1']['gain']:.0%}</td><td>{M['AH_dom-1.00']['gain']:.0%}</td>"
+            f"<td>{M['total_pair']:.0%}</td><td>{mt}</td><td>{htft_s}</td><td>{esc(top_score)}</td></tr>")
+    H.append("</table>")
+    H.append("<div class='muted'>Mi-temps calibrée sur HTHG/HTAG réels des ligues backtestées "
+             "(E0/E1/E2/E3/EC/SP1/I1/D1/F1) ; ailleurs « ligue non calibrée » — jamais fabriquée. "
+             "Corners / tirs cadrés / fautes et le détail complet restent dans le read BSM par match "
+             "(<code>apex_bsm.py simulate</code>). Passes décisives : aucune source (absent).</div>")
+    H.append("</div>")
+    return "\n".join(H)
+
+
 def build_fusion_digest(day: str):
     """(sujet, html, verdicts). Réutilise le corps WORM et greffe la carte ORION en tête."""
     d = dt.date.fromisoformat(day)
@@ -396,7 +486,8 @@ def build_fusion_digest(day: str):
     verdicts = arbitrate_day(day)
     card = _orion_card_html(day, verdicts)
     matrix = _gel_matrix_html(day, verdicts)       # matrice du gel, juste sous la carte ORION
-    head = card + ("\n" + matrix if matrix else "")
+    extended = _extended_markets_html(day, verdicts)   # marchés étendus (structure WORM, non BSM)
+    head = card + ("\n" + matrix if matrix else "") + ("\n" + extended if extended else "")
     # Greffe : carte ORION + matrice du gel en tête, juste après <body>.
     if "<body>" in worm_html:
         html = worm_html.replace("<body>", "<body>\n" + head, 1)
