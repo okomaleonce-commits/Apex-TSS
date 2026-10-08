@@ -42,3 +42,6 @@ data/fusion/
 
 # APEX-SOURCES (cache CSV football-data, retéléchargeable)
 data/sources/
+
+# APEX NEWSDESK (actualité week-end générée, append-only, non versionnée)
+data/newsdesk/
