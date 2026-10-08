@@ -223,6 +223,11 @@ def main(argv=None):
     ap.add_argument("--out", required=True, help="fichier texte a ecrire")
     ap.add_argument("--only", choices=["passerelle", "navigateur"],
                     help="n'essayer qu'un seul chemin (diagnostic)")
+    ap.add_argument("--dump-json",
+                    help=("deposer la reponse BRUTE de la passerelle dans ce fichier, "
+                          "et sa carte de structure a cote (.carte.txt). Sert a ecrire "
+                          "sur du reel : la passerelle est injoignable depuis un "
+                          "conteneur claude.ai, sa forme ne s'observe que sur un runner."))
     a = ap.parse_args(argv)
 
     motifs = []
@@ -230,6 +235,16 @@ def main(argv=None):
     if a.only != "navigateur":
         log("chemin 1 — passerelle JSON…")
         d, m = via_passerelle()
+        if d is not None and a.dump_json:
+            try:
+                open(a.dump_json, "w", encoding="utf-8").write(
+                    json.dumps(d, ensure_ascii=False, indent=1) + "\n")
+                open(a.dump_json + ".carte.txt", "w", encoding="utf-8").write(
+                    "\n".join(carte_structure(d)) + "\n")
+                log(f"  reponse brute -> {a.dump_json}")
+                log(f"  carte         -> {a.dump_json}.carte.txt")
+            except OSError as e:
+                log(f"  dump impossible : {e}")
         if d is not None:
             txt, n = passerelle_vers_texte(d)
             if txt:

@@ -123,6 +123,7 @@ jobs:
           set -o pipefail
           mkdir -p data/turf_worm/lonaci
           python3 tools/apex_turf_lonaci_render.py --only passerelle --out /tmp/lonaci.txt \
+            --dump-json data/turf_worm/lonaci/passerelle_brut.json \
             | tee /tmp/rendu.out
           cat /tmp/rendu.out >> "$GITHUB_OUTPUT"
 
