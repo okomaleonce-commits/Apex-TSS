@@ -139,6 +139,42 @@ jobs:
             | tee /tmp/rendu.out
           cat /tmp/rendu.out >> "$GITHUB_OUTPUT"
 
+      # Le dump part en artefact, mais les artefacts ne sont pas lisibles depuis une
+      # session claude.ai (servis par un autre hote). On imprime donc la carte DANS
+      # le journal du job, qui l'est.
+      - name: Carte de la passerelle LONACI (lisible dans le journal)
+        if: always()
+        continue-on-error: true
+        run: |
+          F=data/turf_worm/lonaci/passerelle_brut.json
+          [ -f "$F.carte.txt" ] && { echo "--- CARTE DE STRUCTURE ---"; cat "$F.carte.txt"; } || echo "pas de carte"
+          [ -f "$F" ] || exit 0
+          echo "--- CLES CANDIDATES : etiquette Nationale, paris, cotes ---"
+          python3 - "$F" <<'PY'
+          import json, re, sys
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          motifs = re.compile(r"nation|pari|bet|jeu|game|rapport|cote|odds|type|market|"
+                              r"combi|trio|quart|quint|simple|couple|place", re.I)
+          vus = {}
+          def parcours(o, chemin="$"):
+              if isinstance(o, dict):
+                  for k, v in o.items():
+                      if motifs.search(str(k)):
+                          vus.setdefault(f"{chemin}.{k}", repr(v)[:160])
+                      parcours(v, f"{chemin}.{k}")
+              elif isinstance(o, list):
+                  for v in o[:2]:
+                      parcours(v, f"{chemin}[]")
+              elif isinstance(o, str) and motifs.search(o):
+                  vus.setdefault(f"{chemin} (valeur)", o[:160])
+          parcours(d)
+          if not vus:
+              print("AUCUNE cle ni valeur ne correspond : la passerelle ne porte ni")
+              print("etiquette Nationale, ni type de pari, ni cote.")
+          for k, v in sorted(vus.items())[:60]:
+              print(f"  {k} = {v}")
+          PY
+
       - name: Perimetre LONACI
         run: |
           D="${{ inputs.date }}"
