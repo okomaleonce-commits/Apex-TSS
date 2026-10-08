@@ -38,6 +38,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import apex_worm as W          # noqa: E402  (radar + builder d'email réutilisé)
 import orion_consensus as O    # noqa: E402  (cœur d'arbitrage)
+import gel_matrix as GM        # noqa: E402  (matrice du gel : conditions par match + portes globales)
 
 # Ligues réellement couvertes par le backtest BSM (backtests/latest_params.json "divs").
 # Hors de cette liste, FORECAST (BSM) ne peut pas rendre de voix calibrée : écrite ABSENTE.
@@ -221,6 +222,7 @@ def arbitrate_day(day: str):
     mi = _load_mi(day)
     bsm = _load_bsm_cache(day)
     scope = _bsm_scope()
+    g_gel = GM.evaluate_global(day)      # portes globales du gel, évaluées une seule fois
     out = []
     for r in rows:
         if r.get("phase") in ("DONE", "DEAD"):
@@ -232,7 +234,9 @@ def arbitrate_day(day: str):
         in_scope = bool(div and div in scope)
         sharp_rec = _sharp_for(r, div)       # voix marché sharp (Pinnacle dé-viggé) si dispo
         votes, couches = orion_votes(r, mi.get(fid), bsm_rec if in_scope else None, sharp_rec)
-        verdict = O.arbitrate(votes)
+        # On arbitre SANS gel interne : désormais c'est la matrice du gel (conditions par match
+        # + portes globales dures) qui fait autorité sur l'autorisation de mise, pas un booléen.
+        verdict = O.arbitrate(votes, frozen=False)
         verdict.update({
             "fixture_id": fid,
             "match": f"{r.get('home')} – {r.get('away')}",
@@ -245,6 +249,14 @@ def arbitrate_day(day: str):
             "bsm_in_scope": in_scope,
             "relevance": round(W.relevance(r), 3),
         })
+        verdict["gel"] = GM.evaluate_match(verdict, g_gel)   # matrice du gel pour ce match
+        # La matrice fait autorité : un ACCEPTER non PRÊT est rétrogradé en ATTENDRE (gel calculé).
+        if verdict["decision"] == "ACCEPTER" and verdict["gel"]["verrou"] != "PRÊT":
+            manque = ", ".join(verdict["gel"]["manquants"][:2]) or "conditions non réunies"
+            verdict["decision"] = "ATTENDRE"
+            verdict["gel_actif"] = True
+            verdict["raison"] = (verdict.get("raison", "") +
+                                 f" — GEL (matrice) : {manque}").strip(" —")
         out.append(verdict)
     return out
 
@@ -297,17 +309,87 @@ def _orion_card_html(day: str, verdicts: list) -> str:
     return "\n".join(H)
 
 
+def _gel_matrix_html(day: str, verdicts: list) -> str:
+    """Carte HTML « Matrice du gel » : pour chaque match retenu, les cases de conditions et le
+    verrou final GELÉ/PRÊT, précédées des deux portes globales. Rend visible POURQUOI chaque
+    signal est gelé (A), à partir de la même évaluation qui pilote le gel automatique (B)."""
+    def esc(x):
+        return str(x).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    if not verdicts:
+        return ""
+    g = (verdicts[0].get("gel") or {}).get("portes") or GM.evaluate_global(day)
+
+    def gate(state, label, detail=""):
+        color = {"ok": "#137333", "no": "#b3261e", "na": "#8a6d00"}.get(state, "#6b7280")
+        return (f"<span style='font-weight:700;color:{color}'>{GM.glyph(state)} {esc(label)}</span>"
+                f"<span class='muted'>{esc(detail)}</span>")
+
+    clv_detail = ""
+    if g.get("clv_n"):
+        clv_detail = f" (moy {g.get('clv_moyen')} · {g.get('pnl_units')}u · n={g.get('clv_n')})"
+    portes_vertes = g.get("portes_vertes")
+
+    H = ["<div class='card' style='border:2px solid #8a6d00'>",
+         "<h1>Matrice du gel des signaux</h1>",
+         "<div class='muted'>Le gel n'est pas un interrupteur unique : c'est une table de conditions. "
+         "Un signal ne passe à <b>PRÊT</b> (mise possible) que si toutes ses cases sont ✅ "
+         "<b>et</b> les deux portes globales sont vertes. Sinon il reste <b>GELÉ</b> (radar seul).</div>",
+         "<div style='margin:10px 0;padding:8px 10px;background:#fafafe;border-radius:8px'>"
+         "<b>Portes globales</b> (dures, communes à tous les matchs) :<br>"
+         + gate(g.get("modele_sup_marche"), "Modèle supérieur au marché",
+                f" — {esc((g.get('statut_backtest') or 'statut inconnu'))}") + "<br>"
+         + gate(g.get("clv_cumule_ok"), "CLV cumulé non négatif", clv_detail)
+         + "<br><span style='font-weight:700;color:"
+         + ("#137333" if portes_vertes else "#b3261e") + "'>"
+         + ("Portes vertes : le gel peut se lever au cas par cas." if portes_vertes
+            else "Au moins une porte rouge → GEL MAINTENU pour tous les matchs.")
+         + "</span></div>"]
+
+    # En-tête du tableau : les 6 colonnes locales + verrou.
+    heads = "".join(f"<th class='r'>{esc(sh)}</th>" for _, sh, _ in GM.CELLS)
+    H.append("<table><tr><th>Match</th><th>KO</th>" + heads + "<th>Verrou</th></tr>")
+
+    # On montre d'abord les matchs « à dire » puis les candidats WORM, 20 lignes max.
+    order = {"ACCEPTER": 0, "REJETER": 1, "ATTENDRE": 2, "COLLECTER": 3}
+    def worm_rank(v):
+        return 0 if (v.get("tier_worm") in ("JOUER", "JOUER_PETIT")) else 1
+    vv = sorted(verdicts, key=lambda v: (order.get(v["decision"], 9), worm_rank(v),
+                                         -v.get("relevance", 0)))
+    for v in vv[:20]:
+        gm = v.get("gel") or GM.evaluate_match(v, g)
+        cells = gm["cells"]
+        tds = ""
+        for k, _, _ in GM.CELLS:
+            tds += f"<td class='r'>{GM.glyph(cells.get(k))}</td>"
+        vr = gm["verrou"]
+        vrs = ("background:#e7f6ec;color:#137333" if vr == "PRÊT"
+               else "background:#fef7e0;color:#8a6d00")
+        ko = (v.get("kickoff") or "")[11:16]
+        H.append(f"<tr><td><b>{esc(v['match'])}</b></td><td>{esc(ko)}</td>{tds}"
+                 f"<td><span style='font-weight:700;border-radius:6px;padding:1px 7px;{vrs}'>"
+                 f"{esc(vr)}</span></td></tr>")
+    H.append("</table>")
+    legend = " · ".join(f"<b>{esc(sh)}</b>={esc(lng)}" for _, sh, lng in GM.CELLS)
+    H.append(f"<div class='muted'>{legend}. ✅ remplie · ❌ manquante · — inconnue "
+             "(non vérifiable ⇒ jamais comptée comme remplie, anti-invention).</div>")
+    H.append("</div>")
+    return "\n".join(H)
+
+
 def build_fusion_digest(day: str):
     """(sujet, html, verdicts). Réutilise le corps WORM et greffe la carte ORION en tête."""
     d = dt.date.fromisoformat(day)
     worm_subject, worm_html = W.build_email_html(d)
     verdicts = arbitrate_day(day)
     card = _orion_card_html(day, verdicts)
-    # Greffe : la carte ORION devient la première carte, juste après <body>.
+    matrix = _gel_matrix_html(day, verdicts)       # matrice du gel, juste sous la carte ORION
+    head = card + ("\n" + matrix if matrix else "")
+    # Greffe : carte ORION + matrice du gel en tête, juste après <body>.
     if "<body>" in worm_html:
-        html = worm_html.replace("<body>", "<body>\n" + card, 1)
+        html = worm_html.replace("<body>", "<body>\n" + head, 1)
     else:
-        html = card + worm_html
+        html = head + worm_html
     from collections import Counter
     c = Counter(v["decision"] for v in verdicts)
     n_act = sum(1 for v in verdicts if v["decision"] in ("ACCEPTER", "REJETER", "ATTENDRE"))
