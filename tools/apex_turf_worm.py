@@ -1070,7 +1070,24 @@ def build_email_html(day=None, phase=None):
                  f"</td><td style='color:#666'>{v['motif']}</td></tr>")
     h.append("</table><p style='color:#888;font-size:12px'><i>Jamais estimés. Une case "
              "nommée <code>UNAVAILABLE_STRUCTUREL</code> ne se remplit pas un jour par une "
-             "approximation ; une case vide, si.</i></p></div>")
+             "approximation ; une case vide, si.</i></p>")
+
+    # Combines : uniquement sur les digests de PHASE (les passages Nationale).
+    # Le digest horaire general ne les porte pas — il couvre trop de courses pour
+    # que ce soit lisible, et le calcul coute une simulation par course.
+    if phase:
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from apex_turf_combines import fragment_html
+            codes = [x["course"]["course_id"].split("-")[-1] for x in snaps]
+            ddmmyyyy = dt.datetime.strptime(day, "%Y-%m-%d").strftime("%d%m%Y")
+            h.append(fragment_html(ddmmyyyy, codes, coupon=True))
+        except Exception as e:
+            # Un combine qui echoue ne doit jamais faire perdre le digest : il
+            # porte le releve scelle, qui est la partie non reproductible.
+            h.append(f"<p style='color:#a00'>Combinés non calculés : "
+                     f"{type(e).__name__}: {e}</p>")
+    h.append("</div>")
     return sujet, "\n".join(h)
 
 
