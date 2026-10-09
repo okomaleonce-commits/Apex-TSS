@@ -1,0 +1,72 @@
+# APEX-TURF-SOREC — sonde des sources marocaines depuis un runner GitHub.
+#
+# RAISON D'ETRE. Le programme LONACI comporte des reunions marocaines (Nationale 3 :
+# Khemisset, Anfa, Rabat, Casablanca, El Jadida, Marrakech, Meknes) que l'API PMU
+# turfinfo ne diffuse pas du tout. Elles sortent ABSENT_SOURCE du perimetre et
+# aucune lecture de marche n'est possible.
+#
+# Depuis un conteneur claude.ai, www.e-sorec.ma — le site de PARIS marocain, donc le
+# seul a porter des cotes — coupe la connexion (Errno 104, ~13 s, mesure du
+# 07/10/2026, repetee). C'est la signature EXACTE de la passerelle LONACI, qui est
+# injoignable en session et repond depuis un runner, ou il n'y a pas de proxy MITM.
+#
+# Ce workflow repond a une seule question, et il y repond par une mesure :
+# e-sorec.ma repond-il depuis ici ? Si oui, le chemin existe et on ecrit le parseur.
+# Si non, c'est un blocage geographique ou applicatif et il faut une autre source.
+name: apex-turf-sorec-probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Date de la reunion marocaine a telecharger (DDMMYYYY)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  sonde:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sonder les sources marocaines
+        id: probe
+        run: |
+          mkdir -p out
+          python3 tools/apex_turf_sorec.py probe --json out/probe.json | tee -a "$GITHUB_OUTPUT"
+
+      - name: Telecharger le programme officiel de la reunion
+        id: prog
+        env:
+          D: ${{ inputs.date }}
+        run: |
+          mkdir -p out
+          if [ -z "$D" ]; then D=$(date -u +%d%m%Y); fi
+          echo "Date demandee : $D"
+          # Code 2 = la page repond mais le postback ne rend pas le fichier.
+          # Ce n'est pas un echec du workflow : c'est le resultat de la mesure.
+          python3 tools/apex_turf_sorec.py programme \
+            --date "$D" --out "out/programme_$D.pdf" --dump out/postback.html \
+            | tee -a "$GITHUB_OUTPUT" || true
+
+      - name: Resume
+        run: |
+          echo "e-sorec joignable depuis le runner : ${{ steps.probe.outputs.ESOREC_JOIGNABLE }}"
+          echo "cibles joignables : ${{ steps.probe.outputs.JOIGNABLES }}"
+          echo "---"
+          ls -l out/ || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sorec-probe
+          path: out/
+          retention-days: 14

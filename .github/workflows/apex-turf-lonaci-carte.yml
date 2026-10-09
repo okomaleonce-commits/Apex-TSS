@@ -1,0 +1,133 @@
+# Diagnostic : imprimer la FORME REELLE de la passerelle LONACI, et rien d'autre.
+#
+# Pourquoi un workflow a lui seul : la passerelle est injoignable depuis un
+# conteneur claude.ai (reset au ClientHello), donc sa forme ne s'observe que sur
+# un runner ; et les artefacts d'un run sont servis par un hote que le client gh
+# de la session ne contacte pas, donc un dump en artefact est illisible d'ici.
+# Le JOURNAL d'un job, lui, se lit. En faisant de la carte la SEULE sortie du job,
+# elle tient dans la fin du journal.
+#
+# A declencher quand on doit ecrire un parseur sur cette source, ou verifier
+# qu'elle n'a pas change de structure.
+name: apex-turf-lonaci-carte
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  carte:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Carte de structure de la passerelle
+        run: |
+          mkdir -p /tmp/c
+          python3 tools/apex_turf_lonaci_render.py --only passerelle \
+            --out /tmp/c/lonaci.txt --dump-json /tmp/c/brut.json >/dev/null 2>&1 || true
+          if [ ! -f /tmp/c/brut.json ]; then
+            echo "LA PASSERELLE N'A PAS REPONDU — rien a cartographier."
+            exit 1
+          fi
+          echo "=== OCTETS : $(wc -c < /tmp/c/brut.json)"
+          echo "=== CARTE DE STRUCTURE ==="
+          cat /tmp/c/brut.json.carte.txt
+          echo "=== CLES ET VALEURS CANDIDATES (Nationale, paris, cotes) ==="
+          python3 - /tmp/c/brut.json <<'PY'
+          import json, re, sys
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          motifs = re.compile(r"nation|pari|bet|jeu|game|rapport|cote|odds|market|"
+                              r"combi|trio|quart|quint|simple|couple|place|tierce|"
+                              r"multi|flexi|libel|label|categ", re.I)
+          vus = {}
+          def parcours(o, chemin="$"):
+              if isinstance(o, dict):
+                  for k, v in o.items():
+                      if motifs.search(str(k)):
+                          vus.setdefault(f"{chemin}.{k}", repr(v)[:200])
+                      parcours(v, f"{chemin}.{k}")
+              elif isinstance(o, list):
+                  for v in o[:2]:
+                      parcours(v, f"{chemin}[]")
+              elif isinstance(o, str) and motifs.search(o):
+                  vus.setdefault(f"{chemin} (valeur)", o[:200])
+          parcours(d)
+          if not vus:
+              print("AUCUNE correspondance : la passerelle ne porte NI etiquette")
+              print("Nationale, NI type de pari, NI cote. A acter comme tel.")
+          for k, v in sorted(vus.items())[:80]:
+              print(f"  {k} = {v}")
+          PY
+          echo "=== FIN DE LA CARTE ==="
+
+      - name: Nationale, paris proposes et cotes LONACI
+        if: always()
+        run: |
+          echo "=== MARCHES LONACI — NATIONALE DU JOUR ==="
+          python3 tools/apex_turf_lonaci.py marches --depuis /tmp/c/brut.json || true
+          echo
+          echo "=== RECAP DE TOUT LE PROGRAMME (type LONACI + nb de paris) ==="
+          python3 - /tmp/c/brut.json <<'PY'
+          import json, sys, os
+          sys.path.insert(0, "tools")
+          from apex_turf_lonaci import marches_lonaci
+          for c in marches_lonaci(json.load(open(sys.argv[1], encoding="utf-8"))):
+              n = sum(1 for p in c["participants"] if p["cote_lonaci"])
+              print(f"  {c['code']:<7} {str(c['type_lonaci']):<22} "
+                    f"nationale={str(c['nationale']):<5} paris={len(c['paris']):<3} "
+                    f"cotes={n}/{len(c['participants']):<3} {str(c['libelle'])[:34]}")
+          PY
+
+      - name: Verite sur les participants et les cotes LONACI
+        if: always()
+        run: |
+          python3 - /tmp/c/brut.json <<'PY'
+          import json, sys, re
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          def courses(d):
+              for r in (d if isinstance(d, list) else [d]):
+                  cs = r.get("Course") or []
+                  if isinstance(cs, dict): cs = [cs]
+                  for c in cs:
+                      yield f"R{r.get('int_Numero')}C{c.get('int_Numero')}", c
+          print("=== CLES REELLES D'UN PARTICIPANT ===")
+          for code, c in courses(d):
+              ps = c.get("participants") or []
+              if ps and isinstance(ps[0], dict):
+                  print(f"  {code} : {sorted(ps[0])}")
+                  print(f"  exemple : {json.dumps(ps[0], ensure_ascii=False)[:500]}")
+                  break
+          print()
+          print("=== DISPERSION DES COTES PAR NATIONALE ===")
+          for code, c in courses(d):
+              t = (c.get("lg_Type_Course_ID") or "")
+              if not re.search(r"NATIONALE", t, re.I): continue
+              ps = c.get("participants") or []
+              vals = []
+              for x in ps:
+                  v = x.get("str_Dernieres_cotes")
+                  try: vals.append(float(str(v).replace(",", ".")))
+                  except (TypeError, ValueError): pass
+              uniq = sorted(set(vals))
+              print(f"  {code} {t} · {len(ps)} partants · {len(vals)} cotes · "
+                    f"{len(uniq)} valeur(s) distincte(s)")
+              print(f"     valeurs : {uniq[:14]}")
+              print(f"     somme 1/c = {sum(1/v for v in vals if v):.3f}" if vals else "")
+              print(f"     statut={c.get('str_Status')} clos={c.get('dt_Date_Fin_Paris')}")
+          print()
+          print("=== LIBELLES DE PARIS, UNE NATIONALE ===")
+          for code, c in courses(d):
+              if not re.search(r"NATIONALE", c.get("lg_Type_Course_ID") or "", re.I): continue
+              for b in (c.get("BetType") or []):
+                  print(f"  {str(b.get('str_Libelle')):<24} complexe={str(b.get('str_Complexe')):<30} "
+                        f"sms={str(b.get('str_SMS_Code')):<8} mise={b.get('dec_Base_Price')} "
+                        f"ordre={b.get('b_Tout_Ordre')} rapports={len(b.get('rapport') or [])}")
+              break
+          PY
