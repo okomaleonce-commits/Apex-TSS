@@ -128,14 +128,39 @@ def test_build_protocol_command_not_runnable_without_lambdas():
 # ───────── traduction d'un forecast BSM (plan §3.9) ─────────
 
 def test_summarize_forecast_selection():
-    fc = {"forecast_id": "abc", "statut_mise": "PROPOSÉE", "statut_modele": "NON VALIDÉ",
+    # Chemin heureux : modèle VALIDÉ + sélection officielle structurée transmise par BSM → sélection.
+    fc = {"forecast_id": "abc", "statut_mise": "PROPOSÉE", "statut_modele": "VALIDÉ",
           "decision": "SÉLECTION INDICATIVE : Over 2.5 @ 1.95",
-          "ev": [{"marche": "1X2 1", "p": 0.60, "cote": 1.55, "ev": 0.01},
-                 {"marche": "Over 2.5", "p": 0.58, "cote": 1.95, "ev": 0.05}]}
+          "official_selection": {"marche": "Over 2.5", "p": 0.58, "cote": 1.95}}
     out = S.summarize_forecast(fc)
     assert out["status"] == "selection"
     assert out["official"]["marche"] == "Over 2.5"
     assert out["official"]["full_settle"] is True
+    # EV recalculée depuis p·cote (0.58·1.95−1 = 0.131), pas une valeur fournie
+    assert abs(out["official"]["ev"] - 0.131) < 1e-3
+
+
+def test_summarize_forecast_validation_whitelist_strict():
+    # DÉFAUT AUDIT : _model_validated acceptait tout texte non vide sans « NON VALID » (ex. INCONNU).
+    for bad in ("INCONNU", "", "NON VALIDÉ — λ", "modèle non validé", None):
+        fc = {"statut_mise": "PROPOSÉE", "statut_modele": bad,
+              "official_selection": {"marche": "Over 2.5", "p": 0.58, "cote": 1.95}}
+        assert S.summarize_forecast(fc)["status"] == "unvalidated"
+        assert S.traffic_light(True, S.summarize_forecast(fc), {"approved": True}) == S.ORANGE
+
+
+def test_summarize_forecast_keeps_bsm_official_no_reselection():
+    # DÉFAUT AUDIT : SYNC re-choisissait une EV 1X2 écartée par BSM. Désormais il ne retient QUE la
+    # sélection officielle (Under 2.5), sans jamais reconstruire depuis une liste d'EV brute.
+    fc = {"statut_mise": "PROPOSÉE", "statut_modele": "VALIDÉ",
+          "official_selection": {"marche": "Under 2.5", "p": 0.64, "cote": 1.66},
+          "ev": [{"marche": "1X2 1", "p": 0.37, "cote": 2.76, "ev": 0.021}]}  # branche écartée, ignorée
+    out = S.summarize_forecast(fc)
+    assert out["official"]["marche"] == "Under 2.5"   # EV réelle 0.64·1.66−1 = 6.2 %
+    # Sans official_selection → abstention (SYNC ne choisit pas seul)
+    fc2 = {"statut_mise": "PROPOSÉE", "statut_modele": "VALIDÉ",
+           "ev": [{"marche": "1X2 1", "p": 0.37, "cote": 2.76, "ev": 0.021}]}
+    assert S.summarize_forecast(fc2)["status"] == "abstention"
 
 
 def test_summarize_forecast_abstention_and_wait():
@@ -147,11 +172,24 @@ def test_summarize_forecast_abstention_and_wait():
     assert wait["status"] == "wait"
 
 
-def test_summarize_forecast_rejects_suspect_and_low_ev():
-    fc = {"statut_mise": "PROPOSÉE", "decision": "SÉLECTION",
-          "ev": [{"marche": "Over 2.5", "p": 0.7, "cote": 1.6, "ev": 0.12, "suspect": True},
-                 {"marche": "1X2 1", "p": 0.5, "cote": 2.0, "ev": 0.0}]}
-    assert S.summarize_forecast(fc)["status"] == "abstention"
+def test_summarize_forecast_rejects_veto_and_low_ev():
+    veto = {"statut_mise": "PROPOSÉE", "statut_modele": "VALIDÉ",
+            "official_selection": {"marche": "Over 2.5", "p": 0.7, "cote": 1.6, "veto": True}}
+    assert S.summarize_forecast(veto)["status"] == "abstention"
+    low = {"statut_mise": "PROPOSÉE", "statut_modele": "VALIDÉ",
+           "official_selection": {"marche": "1X2 1", "p": 0.50, "cote": 2.0}}  # EV = 0 < 3 %
+    assert S.summarize_forecast(low)["status"] == "abstention"
+
+
+def test_is_full_settle_lines():
+    assert S._is_full_settle("Over 2.5") is True
+    assert S._is_full_settle("Under 2.5") is True
+    assert S._is_full_settle("1X2 1") is True
+    assert S._is_full_settle("BTTS oui") is True
+    assert S._is_full_settle("Over 2.25") is False     # ligne quart → demi-règlement
+    assert S._is_full_settle("Over 2.0") is False      # ligne entière → push possible
+    assert S._is_full_settle("Handicap asiatique -0.5/-1 extérieur") is False
+    assert S._is_full_settle(None) is False            # marché absent → refusé
 
 
 # ───────── Risk Manager (plan §6) ─────────
@@ -208,8 +246,165 @@ def test_traffic_light_rules():
     assert S.traffic_light(True, {"status": "abstention"}, None) == S.RED
     assert S.traffic_light(True, {"status": "error"}, None) == S.RED
     assert S.traffic_light(True, {"status": "wait"}, None) == S.ORANGE
-    assert S.traffic_light(True, {"status": "selection"}, {"approved": False}) == S.ORANGE
+    assert S.traffic_light(True, {"status": "selection"}, {"approved": False}) == S.ORANGE  # refus mou
+    assert S.traffic_light(True, {"status": "unvalidated"}, {"approved": True}) == S.ORANGE  # audit
+    # DÉFAUT AUDIT : un refus Risk FERME doit produire ROUGE, pas ORANGE.
+    assert S.traffic_light(True, {"status": "selection"},
+                           {"approved": False, "hard_block": True}) == S.RED
+    # DÉFAUT AUDIT : sous gel, une sélection approuvée ne doit JAMAIS afficher VERT.
+    assert S.PROMOTION_FROZEN is True
+    assert S.traffic_light(True, {"status": "selection"}, {"approved": True}) == S.ORANGE
+
+
+def test_traffic_light_green_only_when_unfrozen(monkeypatch):
+    # Le VERT reste calculable (gel levé) : garantit que c'est bien le gel, pas une impossibilité de fond.
+    monkeypatch.setattr(S, "PROMOTION_FROZEN", False)
     assert S.traffic_light(True, {"status": "selection"}, {"approved": True}) == S.GREEN
+
+
+def test_risk_light_requires_validation_and_freeze(monkeypatch):
+    approved = {"approved": True, "hard_block": False}
+    hard = {"approved": False, "hard_block": True}
+    soft = {"approved": False, "hard_block": False}
+    # modèle non validé → ROUGE même si Risk approuve
+    assert S.risk_light(False, approved) == S.RED
+    # validé + approuvé mais GELÉ → ORANGE (jamais VERT)
+    assert S.risk_light(True, approved) == S.ORANGE
+    # refus ferme → ROUGE ; refus mou → ORANGE
+    assert S.risk_light(True, hard) == S.RED
+    assert S.risk_light(True, soft) == S.ORANGE
+    # gel levé + validé + approuvé → VERT (le calcul existe)
+    monkeypatch.setattr(S, "PROMOTION_FROZEN", False)
+    assert S.risk_light(True, approved) == S.GREEN
+
+
+# ───────── verrous de décision (audit 2026-10-05) ─────────
+
+def test_basic_filters_veto_integrity_neutralised():
+    # DÉFAUT AUDIT : un match NEUTRALISÉ pour intégrité AH passait encore les filtres de candidature.
+    r = _rec(reco={"primary_market": "Handicap asiatique -0.5/-1 domicile",
+                   "signal_dominant": "BLOWOUT 72/100", "decision": {"tier": "NO BET"},
+                   "integrity_blocked": True},
+             asian_integrity={"suspect": True, "shift": -0.75})
+    ok, reasons = S.basic_filters(r, S.DEFAULT_CONFIG, now=NOW)
+    assert ok is False
+    assert any("intégrité" in x for x in reasons)
+
+
+def test_risk_rejects_ev_below_threshold():
+    # DÉFAUT AUDIT : le Risk autonome acceptait une EV ~2 % (sous le seuil 3 %).
+    cfg = {**S.DEFAULT_CONFIG, "bankroll": 1000.0}
+    # p=0.52, cote=1.96 → EV = 0.52·1.96 − 1 = +1.9 % < 3 %
+    r = S.risk_decision({"match_id": "m1", "league": "L", "market": "Over 2.5", "p": 0.52, "odds": 1.96}, cfg)
+    assert r["approved"] is False
+    assert any("EV" in x for x in r["reasons"])
+
+
+def test_risk_rejects_partial_settle_handicap():
+    # DÉFAUT AUDIT : un handicap à règlement partiel passait le Kelly binaire.
+    cfg = {**S.DEFAULT_CONFIG, "bankroll": 1000.0}
+    # EV largement positive, mais marché à règlement partiel → doit être refusé
+    r = S.risk_decision({"match_id": "m1", "league": "L",
+                         "market": "Handicap asiatique -0.5/-1 extérieur", "p": 0.60, "odds": 2.0}, cfg)
+    assert r["approved"] is False
+    assert any("règlement partiel" in x for x in r["reasons"]) and r["hard_block"] is True
+
+
+def test_risk_recomputes_ev_ignoring_supplied():
+    # DÉFAUT AUDIT : fournir ev=0.10 contournait le seuil. L'EV est TOUJOURS recalculée depuis p·cote.
+    cfg = {**S.DEFAULT_CONFIG, "bankroll": 1000.0}
+    r = S.risk_decision({"match_id": "m", "league": "L", "market": "Over 2.5",
+                         "p": 0.52, "odds": 1.96, "ev": 0.10}, cfg)   # EV réelle = 1.92 %
+    assert r["approved"] is False
+    assert any("EV" in x for x in r["reasons"])
+
+
+def test_risk_rejects_quarter_line_and_missing_market():
+    # DÉFAUT AUDIT : « Over 2.25 » (ligne quart) et un marché absent étaient acceptés.
+    cfg = {**S.DEFAULT_CONFIG, "bankroll": 1000.0}
+    q = S.risk_decision({"match_id": "m", "league": "L", "market": "Over 2.25", "p": 0.60, "odds": 2.0}, cfg)
+    assert q["approved"] is False and q["hard_block"] is True
+    absent = S.risk_decision({"match_id": "m", "league": "L", "market": None, "p": 0.60, "odds": 2.0}, cfg)
+    assert absent["approved"] is False and absent["hard_block"] is True
+
+
+def test_risk_ignores_supplied_full_settle_flag():
+    # DÉFAUT AUDIT : full_settle=True fourni contournait l'identification du contrat. Il est ignoré :
+    # le type de règlement est TOUJOURS recalculé depuis le marché.
+    cfg = {**S.DEFAULT_CONFIG, "bankroll": 1000.0}
+    r = S.risk_decision({"match_id": "m", "league": "L", "market": "Over 2.25",
+                         "p": 0.60, "odds": 2.0, "full_settle": True}, cfg)
+    assert r["approved"] is False and r["hard_block"] is True
+    assert any("règlement partiel" in x for x in r["reasons"])
+
+
+def test_bsm_official_selection_consumed_and_prefix_validation():
+    # Round-trip du contrat BSM durci : official_selection structurée + statut « VALIDÉ (walk-forward) ».
+    fc = {"statut_mise": "PROPOSÉE", "statut_modele": "VALIDÉ (walk-forward 2026)",
+          "official_selection": {"marche": "Under 2.5", "p": 0.64, "cote": 1.66, "veto": False}}
+    out = S.summarize_forecast(fc)
+    assert out["status"] == "selection" and out["official"]["marche"] == "Under 2.5"
+    # « NON CONCLUANT » n'est pas une validation
+    fc2 = {**fc, "statut_modele": "NON CONCLUANT (échantillon court)"}
+    assert S.summarize_forecast(fc2)["status"] == "unvalidated"
+
+
+# ───────── régressions audit 2026-10-05 (défauts résiduels D1–D5) ─────────
+
+def test_d1_prefix_validation_rejects_okay():
+    # « OKAY » commençait par « OK » (liste blanche) et passait → doit être REFUSÉ.
+    assert S._model_validated({"statut_modele": "OKAY"}) is False
+    assert S._model_validated({"statut_modele": "OK"}) is False
+    assert S._model_validated({"statut_modele": "VALIDÉ (walk-forward run=bsm-x)"}) is True
+    # repli texte strict : une frontière de mot est exigée après le préfixe
+    assert S._model_validated({"statut_modele": "VALIDEMENT FAUX"}) is False
+
+
+def test_d1_structured_validation_proof():
+    # preuve structurée : bloc validation {validated, run_id} rattaché à un backtest
+    assert S._validation_proof({"validation": {"validated": True, "run_id": "bsm-2026"}}) is True
+    assert S._validation_proof({"validation": {"validated": True, "run_id": ""}}) is False
+    assert S._validation_proof({"validation": {"validated": False, "run_id": "bsm-2026"}}) is False
+    assert S._validation_proof({"statut_modele": "VALIDÉ"}) is False  # texte seul ≠ preuve
+    # un forecast à preuve structurée est validé même si le texte est muet
+    assert S._model_validated({"validation": {"validated": True, "run_id": "bsm-2026"}}) is True
+
+
+def test_d2_split_line_not_full_settle():
+    # « Over 2.5/3.0 » = ligne 2,75 (split) → règlement en demi, PAS un full settle binaire
+    assert S._is_full_settle("Over 2.5/3.0") is False
+    assert S._is_full_settle("Over 2.5/3") is False
+    assert S._is_full_settle("Under 2.75") is False
+    assert S._is_full_settle("Over 2,5/3,0") is False
+    # une vraie ligne .5 seule reste pleine
+    assert S._is_full_settle("Under 2.5") is True
+    assert S._is_full_settle("Over 2.5") is True
+
+
+def test_d3_non_finite_odds_refused():
+    cfg = dict(S.DEFAULT_CONFIG)
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        r = S.risk_decision({"match_id": "m", "league": "L", "market": "Under 2.5",
+                             "p": 0.6, "odds": bad}, cfg)
+        assert r["approved"] is False and r["stake_pct"] == 0.0 and r["hard_block"] is True
+    # p non finie ou hors ]0,1[ également refusée
+    r = S.risk_decision({"match_id": "m", "league": "L", "market": "Under 2.5",
+                         "p": float("nan"), "odds": 1.8}, cfg)
+    assert r["approved"] is False
+    # summarize_forecast refuse aussi une cote non finie
+    fc = {"statut_mise": "PROPOSÉE", "statut_modele": "VALIDÉ (wf)", "decision": "PARI",
+          "official_selection": {"marche": "Under 2.5", "p": 0.64, "cote": float("inf"),
+                                 "sensibilite_min": 0.02, "veto": False}}
+    assert S.summarize_forecast(fc)["status"] == "abstention"
+
+
+def test_d4_sensibilite_min_preserved():
+    fc = {"statut_mise": "PROPOSÉE", "statut_modele": "VALIDÉ (wf)", "decision": "PARI",
+          "official_selection": {"marche": "Under 2.5", "p": 0.64, "cote": 1.66,
+                                 "ev": 0.06, "sensibilite_min": 0.02384, "veto": False}}
+    out = S.summarize_forecast(fc)
+    assert out["status"] == "selection"
+    assert abs(out["official"]["sensibilite_min"] - 0.02384) < 1e-9
 
 
 def _run_all():

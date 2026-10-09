@@ -1,0 +1,86 @@
+[
+ {
+  "fixture_id": 1640078,
+  "forecast_id": "b1f990fd85c2",
+  "league": "Friendlies",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1638602,
+  "forecast_id": "f0616d62d077",
+  "league": "Friendlies",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1545611,
+  "forecast_id": "4511c8496345",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528944,
+  "forecast_id": "cc16438eca2b",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528945,
+  "forecast_id": "d27f80208d82",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528946,
+  "forecast_id": "7023639c7865",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528947,
+  "forecast_id": "632c9b81f8c2",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528948,
+  "forecast_id": "4de2e25f7609",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528949,
+  "forecast_id": "cb99d11e3664",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528950,
+  "forecast_id": "65de2430d6d0",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1610880,
+  "forecast_id": "54197cd28f1e",
+  "league": "Friendlies",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1639992,
+  "forecast_id": "8a1313985995",
+  "league": "CONCACAF Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1639993,
+  "forecast_id": "cf580a6a4321",
+  "league": "CONCACAF Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1639994,
+  "forecast_id": "396549615b09",
+  "league": "CONCACAF Nations League",
+  "kind": "intl"
+ }
+]

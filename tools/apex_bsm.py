@@ -115,12 +115,25 @@ def fetch_matches(div: str, season: str, refresh: bool = False) -> list[dict]:
                 src = name
                 break
         ou = _odds(r, "P>2.5", "P<2.5") or _odds(r, "Avg>2.5", "Avg<2.5") or _odds(r, "B365>2.5", "B365<2.5")
+
+        def _int(col):
+            v = r.get(col, "")
+            try:
+                return int(float(v)) if v not in (None, "") else None
+            except ValueError:
+                return None
+
         out.append({
             "id": f"{div}|{d.isoformat()}|{r['HomeTeam']}|{r['AwayTeam']}",
             "div": div, "season": season, "date": d, "home": r["HomeTeam"].strip(),
             "away": r["AwayTeam"].strip(), "hg": hg, "ag": ag,
             "o1x2": o1x2, "o1x2_src": src, "ou25": ou,
             "close1x2": _odds(r, "PSCH", "PSCD", "PSCA") or _odds(r, "AvgCH", "AvgCD", "AvgCA"),
+            # Mi-temps (réels) et stats périphériques (réelles) quand la source les fournit.
+            "ht_hg": _int("HTHG"), "ht_ag": _int("HTAG"),
+            "hst": _int("HST"), "ast": _int("AST"),      # tirs cadrés dom / ext
+            "hc": _int("HC"), "ac": _int("AC"),          # corners dom / ext
+            "hf": _int("HF"), "af": _int("AF"),          # fautes dom / ext
         })
     return out
 
@@ -606,6 +619,8 @@ def markets_from_sims(hg: np.ndarray, ag: np.ndarray) -> dict:
         L = q / 4
         M[f"AH_dom{L:+.2f}"] = settle_states(mg.astype(float), L)
         M[f"AH_ext{L:+.2f}"] = settle_states(-mg.astype(float), L)
+    # Pair/Impair du total (dérivable directement de la simulation)
+    M["total_pair"] = float((tot % 2 == 0).mean()); M["total_impair"] = 1 - M["total_pair"]
     sc = {}
     for i, j in zip(hg, ag):
         sc[(int(i), int(j))] = sc.get((int(i), int(j)), 0) + 1
@@ -617,6 +632,84 @@ def markets_from_sims(hg: np.ndarray, ag: np.ndarray) -> dict:
     return M
 
 
+def half_shares(hist: list[dict]):
+    """Part RÉELLE des buts marqués en 1re période (dom et ext), calibrée sur HTHG/HTAG de
+    l'historique fourni. Renvoie (f1_dom, f1_ext, n) ou (None, None, 0) si la source ne porte pas
+    la mi-temps (anti-invention : pas de ratio par défaut). Bornée à [0.30, 0.60] par prudence."""
+    ft_h = ht_h = ft_a = ht_a = n = 0
+    for m in hist:
+        if m.get("ht_hg") is None or m.get("ht_ag") is None:
+            continue
+        ft_h += m["hg"]; ht_h += m["ht_hg"]; ft_a += m["ag"]; ht_a += m["ht_ag"]; n += 1
+    if n < 50 or ft_h == 0 or ft_a == 0:
+        return None, None, n
+    f1h = min(0.60, max(0.30, ht_h / ft_h)); f1a = min(0.60, max(0.30, ht_a / ft_a))
+    return f1h, f1a, n
+
+
+def half_markets(hg: np.ndarray, ag: np.ndarray, f1h: float, f1a: float, rng) -> dict:
+    """Marchés mi-temps + Mi-temps/Fin, obtenus par AMINCISSEMENT binomial des buts simulés :
+    chaque but tombe en 1re période avec la probabilité calibrée f1 (indépendante). Le thinning d'un
+    Poisson reste Poisson et garantit MT ≤ FT à chaque simulation (cohérence stricte). Hypothèse
+    assumée : le minutage d'un but est indépendant du score — approximation, signalée comme telle."""
+    h1 = rng.binomial(hg.astype(int), f1h); a1 = rng.binomial(ag.astype(int), f1a)
+    m1 = h1 - a1; t1 = h1 + a1
+    H = {"1H_1": float((m1 > 0).mean()), "1H_X": float((m1 == 0).mean()), "1H_2": float((m1 < 0).mean()),
+         "1H_BTTS_oui": float(((h1 > 0) & (a1 > 0)).mean())}
+    for L in (0.5, 1.5, 2.5):
+        H[f"1H_Over{L}"] = float((t1 > L).mean()); H[f"1H_Under{L}"] = 1 - H[f"1H_Over{L}"]
+    # Mi-temps / Fin : résultat à la pause (lignes) × résultat final (colonnes)
+    mg = hg - ag
+    def res(m):
+        return np.where(m > 0, 0, np.where(m == 0, 1, 2))
+    r1, rf = res(m1), res(mg)
+    lab = ("1", "X", "2")
+    for i in range(3):
+        for j in range(3):
+            H[f"HTFT_{lab[i]}{lab[j]}"] = float(((r1 == i) & (rf == j)).mean())
+    return H
+
+
+def _team_rate(hist: list[dict], team: str, key_home: str, key_away: str, asof):
+    """Moyenne RÉELLE par match d'une stat périphérique pour une équipe, selon le contexte
+    (domicile → key_home quand elle reçoit ; extérieur → key_away quand elle se déplace).
+    None si la stat est absente de la source ou l'échantillon trop faible (anti-invention)."""
+    vals = []
+    for m in hist:
+        if asof and m["date"] >= asof:
+            continue
+        if m["home"] == team and m.get(key_home) is not None:
+            vals.append(m[key_home])
+        elif m["away"] == team and m.get(key_away) is not None:
+            vals.append(m[key_away])
+    return (sum(vals) / len(vals), len(vals)) if len(vals) >= 5 else (None, len(vals))
+
+
+def peripheral_markets(hist: list[dict], home: str, away: str, asof, rng) -> dict:
+    """Marchés périphériques INDICATIFS (jamais validés, jamais backtestés) : corners, tirs cadrés,
+    fautes. Chaque total = somme de deux Poisson calibrés sur les moyennes RÉELLES par équipe
+    (domicile reçoit / extérieur se déplace). Pas d'interaction attaque↔défense adverse (simplification
+    assumée). Stat absente de la source ⇒ marché écrit ABSENT, jamais fabriqué. Passes décisives :
+    aucune colonne dans la source ⇒ toujours ABSENT."""
+    specs = [("corners", "hc", "ac", (8.5, 9.5, 10.5, 11.5)),
+             ("tirs_cadres", "hst", "ast", (6.5, 7.5, 8.5, 9.5)),
+             ("fautes", "hf", "af", (20.5, 22.5, 24.5))]
+    out = {"passes_decisives": {"statut": "ABSENT — aucune donnée source (football-data ne fournit pas les passes décisives)"}}
+    n = 50000
+    for name, kh, ka, lines in specs:
+        mh, nh = _team_rate(hist, home, kh, ka, asof)
+        ma, na = _team_rate(hist, away, kh, ka, asof)
+        if mh is None or ma is None:
+            out[name] = {"statut": f"ABSENT — stat non disponible pour {home if mh is None else away}"}
+            continue
+        tot = rng.poisson(mh, n) + rng.poisson(ma, n)
+        out[name] = {"statut": "INDICATIF (non validé, non backtesté)",
+                     "moy_dom": round(mh, 2), "moy_ext": round(ma, 2), "total_moyen": round(mh + ma, 2),
+                     "over": {f"{L}": round(float((tot > L).mean()), 4) for L in lines},
+                     "n_matchs": {"dom": nh, "ext": na}}
+    return out
+
+
 def parse_odds_arg(s: str | None):
     return [float(x) for x in s.split(",")] if s else None
 
@@ -626,6 +719,7 @@ def cmd_simulate(a):
     params_path = BT_DIR / "latest_params.json"
     params = json.loads(params_path.read_text()) if params_path.exists() else None
     notes = []
+    hist, asof = [], None     # partagés par les deux branches (mi-temps / périphériques)
     if a.lh and a.la:
         lh, la = a.lh, a.la
         rho = a.rho if a.rho is not None else (params["rho"] if params else -0.05)
@@ -686,6 +780,22 @@ def cmd_simulate(a):
             h2, a2 = simulate_scores(lh * fh, la * fa, rho, sigma, scen, n, rng)
         m2 = markets_from_sims(h2, a2)
         sens[lab] = {k: round(m2[k], 3) for k in ("1", "X", "2", "Over2.5", "BTTS_oui")}
+
+    # marchés mi-temps (calibrés sur HTHG/HTAG réels) + périphériques (indicatifs), si historique dispo
+    HM, periph, half_note, f1h, f1a = None, None, None, None, None
+    if hist:
+        f1h, f1a, nhalf = half_shares(hist)
+        if f1h is not None:
+            HM = half_markets(hg, ag, f1h, f1a, rng)
+            notes.append(f"Mi-temps calibrée sur {nhalf} matchs réels (part 1re période : dom {f1h:.0%}, ext {f1a:.0%}) ; "
+                         "minutage du but supposé indépendant du score (approximation).")
+        else:
+            half_note = "Marchés mi-temps ABSENTS : HTHG/HTAG non fournis par la source (non fabriqués)."
+            notes.append(half_note)
+        periph = peripheral_markets(hist, a.home, a.away, asof, rng)
+    else:
+        half_note = "Marchés mi-temps & périphériques indisponibles : pas d'historique de ligue (λ externes)."
+        notes.append(half_note)
 
     offers = {}
     for lab, vals in (("1X2", parse_odds_arg(a.odds_1x2)), ("OU2.5", parse_odds_arg(a.odds_ou25)),
@@ -766,13 +876,35 @@ def cmd_simulate(a):
         official = None
         decision = "ABSTENTION — aucune EV ≥ 3 % stable" + (" (EV qui disparaît en sensibilité : surveillance)" if fragile else "")
 
+    # Sélection officielle STRUCTURÉE (audit 2026-10-05) : SYNC ne doit pas reconstruire une
+    # sélection depuis la liste d'EV brute ; il consomme ce champ exact (marché, p, cote, EV, borne
+    # basse de sensibilité). None si abstention/veto. Le gel de promotion reste géré par SYNC.
+    official_selection = None
+    if official:
+        official_selection = {"marche": official["marche"], "p": official.get("p"),
+                              "cote": official.get("cote"), "ev": official.get("ev"),
+                              "sensibilite_min": (min(official["sens"]) if official.get("sens") else None),
+                              "veto": False}
+
+    # Preuve de validation STRUCTURÉE (audit 2026-10-05, défaut D1) : la validation ne repose plus sur
+    # le texte libre `statut_modele`, mais sur ce bloc rattaché à un backtest. `validated` n'est vrai
+    # que si le pricing vient d'un backtest validé (run_id présent) — jamais pour des λ externes.
+    bt_run_id = (params.get("run_id") if (params and not (a.lh and a.la)) else None)
+    validation = {"validated": bool(status.startswith("VALIDÉ") and bt_run_id),
+                  "run_id": bt_run_id, "statut": status}
+
     fid = hashlib.sha1(f"{a.home}|{a.away}|{a.kickoff}|{dt.datetime.now(dt.timezone.utc).isoformat()}".encode()).hexdigest()[:12]
     rec = {"forecast_id": fid, "cree_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+           "official_selection": official_selection, "validation": validation,
            "coup_envoi": a.kickoff, "fixture_id": a.fixture_id, "div": a.div, "home": a.home, "away": a.away, "model_version": MODEL_VERSION,
            "source_lambdas": source, "statut_modele": status, "lh": round(lh, 3), "la": round(la, 3), "rho": rho, "sigma": sigma,
            "scenarios": scen, "n_simulations": n, "demi_largeur_IC95_MC": round(half, 4),
            "marches": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in M.items()
-                       if k in ("1", "X", "2", "1X", "X2", "12", "BTTS_oui", "Over1.5", "Over2.5", "Over3.5", "scores")},
+                       if k in ("1", "X", "2", "1X", "X2", "12", "BTTS_oui", "Over1.5", "Over2.5", "Over3.5",
+                                "total_pair", "total_impair", "scores")},
+           "marches_mi_temps": ({k: round(v, 4) for k, v in HM.items()} if HM else None),
+           "part_1re_periode": ({"dom": round(f1h, 4), "ext": round(f1a, 4)} if f1h is not None else None),
+           "marches_peripheriques": periph,
            "cotes": offers, "cotes_source": a.odds_source, "cotes_relevees_utc": a.odds_time,
            "ev": [{k: (round(v, 4) if isinstance(v, float) else v) for k, v in e.items() if k != "sens"} for e in evs],
            "sensibilite": sens, "decision": decision, "statut_mise": "PROPOSÉE" if official else "AUCUNE", "notes": notes}
@@ -790,7 +922,26 @@ def cmd_simulate(a):
     print(f"DC 1X {M['1X']:.1%} · X2 {M['X2']:.1%} · 12 {M['12']:.1%} · DNB dom gain {M['DNB_1']['gain']:.1%} remb. {M['DNB_1']['rembourse']:.1%}")
     print(f"Over 1.5 {M['Over1.5']:.1%} · Over 2.5 {M['Over2.5']:.1%} · Over 3.5 {M['Over3.5']:.1%} · BTTS {M['BTTS_oui']:.1%}")
     print(f"Buts équipe : dom O0.5 {M['dom_Over0.5']:.1%} O1.5 {M['dom_Over1.5']:.1%} · ext O0.5 {M['ext_Over0.5']:.1%} O1.5 {M['ext_Over1.5']:.1%}")
+    print(f"Total pair {M['total_pair']:.1%} · impair {M['total_impair']:.1%}")
+    print(f"AH dom -0.5 gain {M['AH_dom-0.50']['gain']:.1%} · -1.0 gain {M['AH_dom-1.00']['gain']:.1%} (remb {M['AH_dom-1.00']['rembourse']:.1%}) · ext +0.5 gain {M['AH_ext+0.50']['gain']:.1%}")
     print("Scores les plus probables : " + ", ".join(f"{s} ({p:.1%})" for s, p in M["scores"][:3]))
+    if HM:
+        print(f"MI-TEMPS : 1 {HM['1H_1']:.1%} / X {HM['1H_X']:.1%} / 2 {HM['1H_2']:.1%}  ·  "
+              f"Over0.5 {HM['1H_Over0.5']:.1%} Over1.5 {HM['1H_Over1.5']:.1%} · BTTS 1H {HM['1H_BTTS_oui']:.1%}")
+        htft = sorted(((k.replace("HTFT_", ""), v) for k, v in HM.items() if k.startswith("HTFT_")),
+                      key=lambda kv: -kv[1])[:3]
+        print("  Mi-temps/Fin (top 3) : " + ", ".join(f"{k} {v:.1%}" for k, v in htft))
+    elif half_note:
+        print(f"MI-TEMPS : {half_note}")
+    if periph:
+        for name in ("corners", "tirs_cadres", "fautes"):
+            p = periph.get(name, {})
+            if p.get("statut", "").startswith("INDICATIF"):
+                ov = " ".join(f"O{L} {v:.0%}" for L, v in p["over"].items())
+                print(f"{name.upper()} [indicatif] total≈{p['total_moyen']} ({p['moy_dom']}+{p['moy_ext']}) · {ov}")
+            else:
+                print(f"{name.upper()} : {p.get('statut', 'ABSENT')}")
+        print(f"PASSES DÉCISIVES : {periph['passes_decisives']['statut']}")
     print("Sensibilité (scénarios, pas un intervalle de confiance) :")
     for k, v in sens.items():
         print(f"  {k:28s} {v}")

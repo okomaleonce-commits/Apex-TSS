@@ -179,10 +179,17 @@ def poisson_over(lh, la, line=2.5, max_goals=12):
     return round(1 - under, 4)
 
 
+def _has_standings(s, *keys):
+    """Vrai si le classement existe, a des matchs joués, et porte toutes les
+    valeurs numériques demandées (points/gf/ga peuvent être None en début de
+    saison ou sur un flux incomplet — on marque alors NON VALIDÉ, jamais de crash)."""
+    return bool(s) and s.get("played") and all(s.get(k) is not None for k in keys)
+
+
 def team_rates(strength, tid, avg_gf):
     """(buts marqués/match, buts encaissés/match) d'une équipe depuis le classement, ou None."""
     s = strength.get(tid)
-    if not s or not s.get("played"):
+    if not _has_standings(s, "gf", "ga"):
         return None
     return s["gf"] / s["played"], s["ga"] / s["played"]
 
@@ -218,9 +225,38 @@ def fmt_score(sc):
     return "—" if sc is None else str(sc)
 
 
-def sharp_signal(fair_now, fair_prev, hours_between, dispersion, pinnacle_vs_median, exchange=None):
+def live_emerging_market(score, status):
+    """Lecture descriptive du « marché qui se dessine » pour un match en cours,
+    déduite MÉCANIQUEMENT du score live et de la phase (première période 1H/HT vs
+    seconde 2H/ET/BT/P). Aucune donnée inventée, aucun conseil de mise : c'est une
+    lecture de tendance en direct, pas un pari. Score absent → '—'."""
+    if not isinstance(score, dict):
+        return "—"
+    h, a = score.get("home"), score.get("away")
+    if h is None or a is None:
+        return "—"
+    tot = h + a
+    ecart = abs(h - a)
+    first = status in ("1H", "HT")  # première période ou mi-temps
+    if tot >= 4:
+        base = "Over 3.5 ✓ atteint"
+    elif tot == 3:
+        base = "Over 2.5 ✓ · Over 3.5 se dessine"
+    elif tot == 2:
+        base = "Over 2.5 à 1 but" + (" (avant la pause)" if first else "")
+    elif tot == 1:
+        base = "équilibré (1 but)" if first else "Under 2.5 se dessine"
+    else:  # 0–0
+        base = "Under 2.5 se renforce" + (" (0–0 à la pause)" if status == "HT" else "")
+    if ecart >= 2:
+        base += f" · handicap favori se confirme (écart {ecart})"
+    return base
+
+
+def sharp_signal(fair_now, fair_prev, hours_between, dispersion, sharp_vs_median, exchange=None):
     """SHARP (spec §13). Composantes calculables sans argent public : trajectoire de ligne entre nos
-    relevés, consensus (dispersion), divergence Pinnacle↔médiane. Quand l'argent public est fourni
+    relevés, consensus (dispersion), divergence books sharp↔médiane (Pinnacle + book asiatique SBO
+    quand présent). Quand l'argent public est fourni
     (`exchange` = {total_matched, money:[h,d,a]|None, fair:[h,d,a]|None}, ex. volume excapper), on ajoute
     le VOLUME réel matché, et — si la répartition d'argent est connue — la confirmation et un vrai Reverse
     Line Movement. Sans ces données, volume/public/exchange restent UNAVAILABLE (spec §34)."""
@@ -238,9 +274,9 @@ def sharp_signal(fair_now, fair_prev, hours_between, dispersion, pinnacle_vs_med
     if dispersion is not None:
         comp["consensus"] = {"dispersion": dispersion, "provenance": CALCULATED}
         score += max(0, 20 - dispersion * 400)  # faible dispersion = consensus serré
-    if pinnacle_vs_median is not None:
-        comp["pinnacle_vs_median"] = {"valeur": round(pinnacle_vs_median, 4), "provenance": CALCULATED}
-        score += min(20, abs(pinnacle_vs_median) * 200)
+    if sharp_vs_median is not None:
+        comp["sharp_vs_median"] = {"valeur": round(sharp_vs_median, 4), "provenance": CALCULATED}
+        score += min(20, abs(sharp_vs_median) * 200)
 
     if exchange:
         tm = exchange.get("total_matched")
@@ -273,7 +309,7 @@ def blowout_engine(fair_1x2, strength, home_id, away_id):
     if not fair_1x2:
         return None, {"raison": "cotes 1X2 absentes"}
     sh, sa = strength.get(home_id), strength.get(away_id)
-    if not sh or not sa or not sh.get("played") or not sa.get("played"):
+    if not _has_standings(sh, "points", "gf", "ga") or not _has_standings(sa, "points", "gf", "ga"):
         return None, {"raison": "classement/forme absents pour une des équipes", "provenance": UNCONFIRMED}
     fav_home = fair_1x2[0] >= fair_1x2[2]
     fav_prob = max(fair_1x2[0], fair_1x2[2])
@@ -299,7 +335,7 @@ def upset_engine(fair_1x2, strength, home_id, away_id):
     if not fair_1x2:
         return None, {"raison": "cotes 1X2 absentes"}
     sh, sa = strength.get(home_id), strength.get(away_id)
-    if not sh or not sa or not sh.get("played") or not sa.get("played"):
+    if not _has_standings(sh, "points") or not _has_standings(sa, "points"):
         return None, {"raison": "classement absent", "provenance": UNCONFIRMED}
     dog_home = fair_1x2[0] < fair_1x2[2]
     dog_prob = min(fair_1x2[0], fair_1x2[2])
@@ -319,7 +355,7 @@ def upset_engine(fair_1x2, strength, home_id, away_id):
 def convergence_engine(strength, home_id, away_id, market_over, avg_gf):
     """STATSCONVERGENCE (spec §17) : combien de familles indépendantes pointent vers Over/Under 2.5."""
     sh, sa = strength.get(home_id), strength.get(away_id)
-    if not sh or not sa or not sh.get("played") or not sa.get("played"):
+    if not _has_standings(sh, "gf", "ga") or not _has_standings(sa, "gf", "ga"):
         return None, None, {"raison": "classement absent", "provenance": UNCONFIRMED}
     gf_h, ga_h = sh["gf"] / sh["played"], sh["ga"] / sh["played"]
     gf_a, ga_a = sa["gf"] / sa["played"], sa["ga"] / sa["played"]
@@ -379,6 +415,13 @@ def data_quality(rec) -> int:
     return clamp(q)
 
 
+# Fiabilité empirique par signal, mesurée sur les bilans cumulés 2026-09-30→10-02
+# (BLOWOUT ~83 %, UPSET ~83 % mais N très faible, STATSCONVERGENCE ~66 %, SHARP non encore
+# jugé en avant). 1.0 = neutre. Sert à recalibrer la confiance : l'audit a montré que la tranche
+# conf≥70 ne surperformait pas, car la confiance ignorait la fiabilité du signal dominant.
+SIGNAL_RELIABILITY = {"BLOWOUT": 1.12, "UPSET": 1.0, "STATSCONVERGENCE": 0.85, "SHARP": 0.95}
+
+
 def confidence(rec, dispersion) -> int:
     c = 0.4 * rec["data_quality"]
     if dispersion is not None:
@@ -391,10 +434,117 @@ def confidence(rec, dispersion) -> int:
         c += 15                                # certitude compositions
     if rec.get("signal_stable"):
         c += 10
+    # Recalibration empirique : pondère par la fiabilité historique du signal dominant, et pénalise
+    # explicitement la branche Under 2.5 (marché le plus faible et en baisse dans les bilans). Ainsi
+    # la confiance discrimine enfin les signaux solides (BLOWOUT) des signaux fragiles.
+    sig_scores = {"BLOWOUT": rec.get("blowout"), "UPSET": rec.get("upset"),
+                  "STATSCONVERGENCE": rec.get("convergence"), "SHARP": rec.get("sharp")}
+    present = [(k, v) for k, v in sig_scores.items() if v is not None]
+    if present:
+        top_tag = max(present, key=lambda kv: kv[1])[0]
+        c *= SIGNAL_RELIABILITY.get(top_tag, 1.0)
+        if top_tag == "STATSCONVERGENCE" and rec.get("convergence_dir") == "Under 2.5":
+            c -= 8
     return clamp(c)
 
 
+# ───────────────────────── marchés asiatiques : sharp & intégrité ─────────────────────────
+
+# Books réputés « sharp » (prix informatifs) présents dans le flux : Pinnacle + le book asiatique
+# SBO (SBOBet). Leur consensus sert de référence face à la médiane du marché (signal Sharp).
+SHARP_BOOKS = ("Pinnacle", "SBO")
+# Seuil d'intégrité : un déplacement du handicap asiatique PRINCIPAL d'au moins 0,5 but entre deux
+# relevés est anormal (les lignes bougent normalement par pas de 0,25, lentement). Au-delà, on lève un
+# drapeau « suspect » — jamais un pari, c'est un signal d'intégrité (possible match arrangé).
+AH_INTEGRITY_SHIFT = 0.5
+
+
+def _ah_main_line(ah):
+    """Handicap asiatique PRINCIPAL côté domicile : la ligne dont le prix est le plus proche de 2.0
+    (quasi pick-em = marge attendue du marché). Retourne un float (ex. -0.75) ou None."""
+    if not isinstance(ah, dict):
+        return None
+    dom = ah.get("dom") or {}
+    best, best_d = None, 1e9
+    for k, v in dom.items():
+        try:
+            h, p = float(k), float(v)
+        except (TypeError, ValueError):
+            continue
+        d = abs(p - 2.0)
+        if d < best_d:
+            best, best_d = h, d
+    return best
+
+
+def asian_integrity(rec, prev):
+    """Détecte un mouvement SUSPECT du handicap asiatique principal entre le relevé précédent et
+    l'actuel (même book de référence). Ne price rien, n'invente rien : si l'AH manque à l'un des deux
+    relevés, renvoie None. Un décalage ≥ AH_INTEGRITY_SHIFT buts lève le drapeau d'intégrité."""
+    if not prev:
+        return None
+    bk_now, ah_now = AF.pick_book(rec.get("odds", {}), "AH")
+    bk_prev, ah_prev = AF.pick_book(prev.get("odds", {}), "AH")
+    if not ah_now or not ah_prev:
+        return None
+    ln_now, ln_prev = _ah_main_line(ah_now), _ah_main_line(ah_prev)
+    if ln_now is None or ln_prev is None:
+        return None
+    shift = round(ln_now - ln_prev, 2)
+    if abs(shift) < AH_INTEGRITY_SHIFT:
+        return None
+    sens = "vers le favori (ligne qui se creuse)" if shift < 0 else "vers l'outsider (ligne qui se réduit)"
+    return {"suspect": True, "ligne_prec": ln_prev, "ligne_now": ln_now, "shift": shift,
+            "book": bk_now, "sens": sens, "provenance": OBSERVED,
+            "note": "mouvement AH anormal entre deux relevés — drapeau d'intégrité, JAMAIS un pari"}
+
+
 # ───────────────────────── recommandation de marché (spec §22) ─────────────────────────
+
+# Seuils d'activation PAR SIGNAL (recalibrés sur les bilans cumulés 2026-09-30→10-02).
+# BLOWOUT ~83 % stable sur 3 jours → barre basse inchangée (45). STATSCONVERGENCE ~66 % et en
+# baisse (76→65→57 %) → barre relevée à 60. Sa branche Under 2.5 est la plus faible (80→63→33 %)
+# → barre encore plus haute (67). L'objectif est de couper le bas de gamme de STATSCONVERGENCE,
+# pas de toucher BLOWOUT/handicap qui porte la valeur du système.
+SIGNAL_MIN = {"BLOWOUT": 45, "UPSET": 45, "SHARP": 45, "STATSCONVERGENCE": 60}
+STATSCONV_UNDER_MIN = 67
+
+# Garde-fou échantillon (audit 2026-10-05) : les moteurs structurels (BLOWOUT/UPSET/STATSCONVERGENCE)
+# lisent le classement (points, buts/match). Sous MIN_PLAYED matchs joués (p.ex. U21/qualifs en début
+# de campagne), ppg et buts/match sont trop bruités pour fonder un palier — un « BLOWOUT 100 » sur
+# 1-2 matchs n'est PAS fiable. Ces signaux restent affichés mais ne peuvent plus être promus JOUER/
+# JOUER_PETIT : ils redescendent à SURVEILLER avec la mention « échantillon court ».
+MIN_PLAYED = 4
+_STRUCTURAL_SIGNALS = {"BLOWOUT", "UPSET", "STATSCONVERGENCE"}
+
+# ───────────────────────── gel de promotion (audit 2026-10-05) ─────────────────────────
+# Le digest WORM est un RADAR DE RECHERCHE, pas une autorité de mise : le modèle structurel ne bat
+# pas le marché (ROI backtest négatif, log-loss > marché). Tant que les verrous de décision et la
+# validation de stratégie ne sont pas en place, les paliers JOUER/JOUER_PETIT sont affichés comme
+# CANDIDAT (gelé), SANS surbrillance « jouer », et aucune mise n'est autorisée par ce canal.
+PROMOTION_FROZEN = True
+_TIER_DISPLAY_FROZEN = {"JOUER": "CANDIDAT (gelé)", "JOUER_PETIT": "candidat− (gelé)"}
+
+
+def tier_badge_html(tier):
+    """Badge HTML du palier pour le digest. Sous gel, JOUER/JOUER_PETIT deviennent des libellés
+    CANDIDAT neutres (classe 'petit', jamais la surbrillance verte 'jouer'). Les libellés sont des
+    constantes contrôlées (aucune donnée externe) — pas d'échappement nécessaire."""
+    if PROMOTION_FROZEN and tier in _TIER_DISPLAY_FROZEN:
+        return f"<span class='petit'>{_TIER_DISPLAY_FROZEN[tier]}</span>"
+    cls = "jouer" if tier == "JOUER" else ("petit" if tier == "JOUER_PETIT" else "")
+    return f"<span class='{cls}'>{tier}</span>" if cls else str(tier)
+
+
+def _signal_eligible(tag, score, rec):
+    """Un signal est actionnable si son score dépasse le seuil propre à sa famille (et, pour
+    STATSCONVERGENCE→Under 2.5, un seuil renforcé). Sous le seuil, il n'est pas retenu comme
+    marché officiel : on ne joue pas un signal que le bilan montre peu fiable."""
+    mn = SIGNAL_MIN.get(tag, 45)
+    if tag == "STATSCONVERGENCE" and rec.get("convergence_dir") == "Under 2.5":
+        mn = max(mn, STATSCONV_UNDER_MIN)
+    return score >= mn
+
 
 def recommend(rec):
     """Traduit l'anomalie la plus forte en PRIMARY MARKET, ou NO BET. Marque VALUE: NON CONFIRMÉE
@@ -403,11 +553,14 @@ def recommend(rec):
     scores = {"BLOWOUT": rec.get("blowout"), "UPSET": rec.get("upset"), "STATSCONVERGENCE": rec.get("convergence"),
               "SHARP": rec.get("sharp")}
     ranked = sorted(((k, v) for k, v in scores.items() if v is not None), key=lambda kv: kv[1], reverse=True)
-    if not ranked or ranked[0][1] < 45 or rec["data_quality"] < 40:
+    # Filtre par seuil propre à chaque signal : un score élevé sur un signal peu fiable (p.ex.
+    # STATSCONVERGENCE Under 2.5 à 60) ne suffit plus à déclencher un marché officiel.
+    eligible = [(k, v) for k, v in ranked if _signal_eligible(k, v, rec)]
+    if not eligible or rec["data_quality"] < 40:
         return {"primary_market": "NO BET", "raison": "aucune anomalie assez nette ou données insuffisantes",
                 "value": "NON CONFIRMÉE",
                 "decision": {"tier": "NO BET", "unites_indicatives": 0.0, "marche": "NO BET"}}
-    tag, sc = ranked[0]
+    tag, sc = eligible[0]
     _, o1 = AF.pick_book(rec.get("odds", {}), "1X2")
     fair = demargin(o1) if o1 else None
     fav_home = fair[0] >= fair[2] if fair else None
@@ -441,7 +594,14 @@ def recommend(rec):
     dq = rec["data_quality"]
     exch_conf = bool(rec.get("exchange_confirmation")) or bool(rec.get("rlm"))
     strong_extra = exch_conf or bool(out.get("value_1x2_directe"))
-    if sc >= 70 and dq >= 65 and strong_extra:
+    # Échantillon court sur un signal structurel : jamais de promotion (audit 2026-10-05).
+    mp = rec.get("min_played")
+    small_sample = (tag in _STRUCTURAL_SIGNALS and mp is not None and mp < MIN_PLAYED)
+    if small_sample:
+        out["small_sample"] = {"min_played": mp, "seuil": MIN_PLAYED, "provenance": OBSERVED,
+                               "note": f"{mp} match(s) joués < {MIN_PLAYED} — signal structurel NON FIABLE, non promu"}
+        tier, units = "SURVEILLER", 0.25
+    elif sc >= 70 and dq >= 65 and strong_extra:
         tier, units = "JOUER", 1.0
     elif sc >= 55 and dq >= 50:
         tier, units = "JOUER_PETIT", 0.5
@@ -646,12 +806,20 @@ def cmd_scan(a):
             hours_between = max(0.0, (t1 - t0).total_seconds() / 3600)
         rec["signal_stable"] = bool(fair_prev and fair and max(abs(x - y) for x, y in zip(fair, fair_prev)) < 0.01)
 
-        # pinnacle vs médiane
-        pin_vs_med = None
-        if "Pinnacle" in rec["odds"] and "1X2" in rec["odds"]["Pinnacle"]:
-            dpin = demargin(rec["odds"]["Pinnacle"]["1X2"])
-            if dpin and disp is not None and fair:
-                pin_vs_med = dpin[0] - fair[0]
+        # consensus des books sharp (Pinnacle + asiatique SBO) vs médiane du marché
+        sharp_vs_med, sharp_books_used = None, []
+        sharp_fairs = []
+        for bname in SHARP_BOOKS:
+            bk = rec["odds"].get(bname)
+            if isinstance(bk, dict) and bk.get("1X2"):
+                df = demargin(bk["1X2"])
+                if df:
+                    sharp_fairs.append(df)
+                    sharp_books_used.append(bname)
+        if sharp_fairs and disp is not None and fair:
+            avg_home = sum(f[0] for f in sharp_fairs) / len(sharp_fairs)
+            sharp_vs_med = avg_home - fair[0]
+        rec["sharp_books_used"] = sharp_books_used
 
         # Argent public excapper apparié à ce match (volume matché réel). Appariement noms + tolérance.
         exch = None
@@ -672,7 +840,7 @@ def cmd_scan(a):
         rec["exchange"] = exch
 
         # ANALYZE — moteurs d'anomalies
-        rec["sharp"], rec["sharp_components"] = sharp_signal(fair, fair_prev, hours_between, disp, pin_vs_med, exch)
+        rec["sharp"], rec["sharp_components"] = sharp_signal(fair, fair_prev, hours_between, disp, sharp_vs_med, exch)
         rec["exchange_confirmation"] = "exchange_confirmation" in rec["sharp_components"]
         rec["rlm"] = rec["sharp_components"].get("rlm")
         rec["blowout"], rec["blowout_components"] = blowout_engine(fair, strength, rec["home_id"], rec["away_id"])
@@ -700,6 +868,17 @@ def cmd_scan(a):
         rec["data_quality"] = data_quality(rec)
         rec["confidence"] = confidence(rec, disp)
         rec["reco"] = recommend(rec)
+
+        # Intégrité des marchés asiatiques : un handicap qui bouge anormalement entre deux relevés
+        # est un drapeau d'intégrité (possible match arrangé) → on NEUTRALISE la décision (jamais parier).
+        integ = asian_integrity(rec, p)
+        if integ:
+            rec["asian_integrity"] = integ
+            if (rec["reco"].get("decision", {}) or {}).get("tier") in ("JOUER", "JOUER_PETIT"):
+                rec["reco"]["decision"] = {"tier": "NO BET", "unites_indicatives": 0.0,
+                                           "marche": "NO BET",
+                                           "note": "neutralisé — intégrité AH suspecte (mouvement de ligne anormal)"}
+                rec["reco"]["integrity_blocked"] = True
 
         # détection de changements (spec §27)
         for ch in detect_changes(p, rec):
@@ -770,6 +949,36 @@ def detect_changes(prev, rec):
         if a0 >= 45 and a1 < 45:
             out.append({"type": "SIGNAL INVALIDATED", "match": m, "detail": f"{tag} sous le seuil ({a1})"})
     return out
+
+
+def movement_history(day, fixture_ids=None, max_events=6):
+    """Historique des mouvements notables d'un match au fil des passages de la journée.
+    Rejoue detect_changes sur les relevés consécutifs du snapshot (append-only) et horodate chaque
+    événement par l'heure du passage. Retourne {fixture_id: [(heure, type, détail), …]} (au plus
+    `max_events` par match, du plus ancien au plus récent). N'invente rien : uniquement les relevés
+    réellement enregistrés."""
+    path = SNAP / f"{day.isoformat()}.jsonl"
+    if not path.exists():
+        return {}
+    series = {}
+    for line in open(path, encoding="utf-8"):
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        series.setdefault(r["fixture_id"], []).append(r)
+    hist = {}
+    for fid, recs in series.items():
+        if fixture_ids is not None and fid not in fixture_ids:
+            continue
+        events = []
+        for prev, cur in zip(recs, recs[1:]):
+            t = (cur.get("scan_time_utc") or "")[11:16]
+            for c in detect_changes(prev, cur):
+                events.append((t, c["type"], c["detail"]))
+        if events:
+            hist[fid] = events[-max_events:]
+    return hist
 
 
 # ───────────────────────── REPORT (spec §36-38) ─────────────────────────
@@ -914,7 +1123,7 @@ def write_report(day):
               f"- Scores — Sharp {r.get('sharp')} · Blowout {r.get('blowout')} · Upset {r.get('upset')} · Convergence {r.get('convergence')} ({r.get('convergence_dir')})",
               f"- Confiance {r.get('confidence')}/100 · Qualité données {r.get('data_quality')}/100"]
         if r.get("expected_score"):
-            L.append(f"- Score attendu (xG structurel) : {r['expected_score']['xg_dom']} – {r['expected_score']['xg_ext']}")
+            L.append(f"- Buts attendus (λ Poisson sur moyennes du CLASSEMENT, PAS du xG) : {r['expected_score']['xg_dom']} – {r['expected_score']['xg_ext']}")
         if r.get("divergence_alert"):
             L.append(f"- ⚠ DIVERGENCE : {r['divergence_alert']['note']}")
         if r.get("compositions"):
@@ -1242,8 +1451,7 @@ def build_email_html(day) -> tuple:
         for mk, r in imminent:
             d = (r.get("reco", {}).get("decision", {}) or {})
             tier = d.get("tier", "—")
-            cls = "jouer" if tier == "JOUER" else ("petit" if tier == "JOUER_PETIT" else "")
-            badge = f"<span class='{cls}'>{tier}</span>" if cls else esc(tier)
+            badge = tier_badge_html(tier)
             H.append(f"<tr><td><b>{int(mk)} min</b></td><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
                      f"<td>{esc((r.get('country') or '')[:3])} {esc(r['league'][:16])}</td><td>{r['kickoff'][11:16]}</td>"
                      f"<td>{badge}</td><td>{esc((d.get('marche') or r.get('reco',{}).get('primary_market','?'))[:30])}</td>"
@@ -1252,37 +1460,81 @@ def build_email_html(day) -> tuple:
     else:
         H += ["<div class='muted'>Aucun match ne débute dans les 60 prochaines minutes.</div>"]
 
-    # Caractère attendu (APEX-CHARACTER) depuis les λ structurels — odds-free, jamais inventé
+    # Caractère attendu (APEX-CHARACTER) depuis les λ structurels — odds-free, jamais inventé.
+    # Marché « cohérent » avec chaque profil : simple aide de lecture (PAS un pari, PAS une value) —
+    # le caractère est descriptif, il indique vers quel type de marché le schéma de match penche.
+    _CARAC_MARCHE = {
+        "VERROU": "Under 2.5 / Under 1.5",
+        "MATCH_FERME": "Under 2.5",
+        "EQUILIBRE": "pas de marché net",
+        "BATAILLE_OUVERTE": "Over 2.5 / BTTS",
+        "VICTOIRE_NETTE": "Handicap favori -1",
+        "DEMONSTRATION": "Over 2.5 + Handicap favori",
+    }
+
     def _carac(r):
+        """(libellé affiché, clé de profil) ou ('—', None)."""
         lam = r.get("lambdas")
         if not lam or len(lam) != 2:
-            return "—"
+            return "—", None
         try:
             import apex_character as _CH
             ep = _CH.expected_profile(lam[0], lam[1])
-            return f"{_CH.PROFIL_LABEL[ep['profil_attendu']].split(' ', 1)[0]} {ep['profil_attendu']} {int(ep['p_top']*100)}%"
+            pk = ep["profil_attendu"]
+            return f"{_CH.PROFIL_LABEL[pk].split(' ', 1)[0]} {pk} {int(ep['p_top']*100)}%", pk
         except Exception:  # noqa: BLE001
-            return "—"
+            return "—", None
 
     if deci:
-        H += ["<h2>Décisions du jour</h2>",
-              "<table><tr><th>Palier</th><th>Match</th><th>Compét.</th><th>KO</th><th>Marché retenu</th>"
-              "<th>Signal</th><th>Caractère attendu</th><th>Éch.</th><th class='r'>Unités</th><th class='r'>Conf</th></tr>"]
+        H += ["<h2>Décisions du jour</h2>"]
+        if PROMOTION_FROZEN:
+            H += ["<div class='muted warn'><b>⚠ Promotion JOUER/VERT GELÉE</b> (audit 2026-10-05) : "
+                  "radar de recherche uniquement. Les paliers sont affichés « CANDIDAT (gelé) » ; aucune "
+                  "mise n'est autorisée par ce canal tant que les verrous de décision (veto, intégrité, "
+                  "modèle non validé) et la validation de stratégie ne sont pas en place.</div>"]
+        H += ["<table><tr><th>Palier</th><th>Match</th><th>Compét.</th><th>KO</th><th>Marché retenu</th>"
+              "<th>Signal</th><th>Caractère attendu</th><th>Marché (caractère)</th><th>Éch.</th>"
+              "<th class='r'>Unités</th><th class='r'>Conf</th></tr>"]
         for r in deci:
             d = r["reco"]["decision"]
-            cls = "jouer" if d["tier"] == "JOUER" else "petit"
-            H.append(f"<tr><td><span class='{cls}'>{d['tier']}</span></td><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
+            carac_str, carac_pk = _carac(r)
+            carac_mkt = _CARAC_MARCHE.get(carac_pk, "—")
+            H.append(f"<tr><td>{tier_badge_html(d['tier'])}</td><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
                      f"<td>{esc((r.get('country') or '')[:3])} {esc(r['league'][:16])}</td><td>{r['kickoff'][11:16]}</td>"
                      f"<td>{esc(d['marche'][:34])}</td><td class='tag'>{esc(d['signal'])}</td>"
-                     f"<td class='muted'>{esc(_carac(r))}</td>"
+                     f"<td class='muted'>{esc(carac_str)}</td><td class='muted'>{esc(carac_mkt)}</td>"
                      f"<td>{'✓' if d.get('confirmation_echange') else '—'}</td>"
                      f"<td class='r'>{d['unites_indicatives']}</td><td class='r'>{r.get('confidence','?')}</td></tr>")
         H += ["</table>",
               "<div class='muted warn'>Unités indicatives de suivi, pas un conseil de mise : cote à vérifier et "
               "horodater avant tout pari ; le modèle structurel ne bat pas le marché. « Caractère attendu » = "
-              "schéma de match prédit par les λ structurels (APEX-CHARACTER, sans cote).</div>"]
+              "schéma de match prédit par les λ structurels (APEX-CHARACTER, sans cote). « Marché (caractère) » = "
+              "type de marché cohérent avec ce schéma (aide de lecture, pas un pari) : Verrou/Match fermé → Under · "
+              "Bataille ouverte → Over/BTTS · Victoire nette/Démonstration → Over et/ou Handicap favori · "
+              "Équilibré → pas de marché net. La « Convergence » (signal WORM) pointe déjà, elle, vers Over 2.5 ou "
+              "Under 2.5 dans la colonne « Marché retenu ».</div>"]
     else:
         H += ["<h2>Décisions du jour</h2><div class='muted'>Aucune décision JOUER/JOUER_PETIT ce passage.</div>"]
+
+    # ─── Historique des mouvements sur les matchs suivis (passages précédents) ───
+    tracked = list(deci) + [r for r in live if r not in deci]
+    hist = movement_history(day, {r["fixture_id"] for r in tracked if r.get("fixture_id")})
+    H += ["<h2>Historique des mouvements (passages précédents)</h2>"]
+    if any(hist.get(r.get("fixture_id")) for r in tracked):
+        H += ["<div class='muted'>Trajectoire des signaux/cotes/phases relevée aux passages antérieurs de la "
+              "journée, du plus ancien au plus récent (horaires UTC).</div>",
+              "<table><tr><th>Match</th><th>KO</th><th>Mouvements</th></tr>"]
+        for r in tracked:
+            ev = hist.get(r.get("fixture_id"))
+            if not ev:
+                continue
+            trail = " · ".join(f"{t} {typ.replace('SIGNAL ', '').title()} {det}" for t, typ, det in ev)
+            H.append(f"<tr><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
+                     f"<td>{esc((r.get('kickoff') or '')[11:16])}</td><td class='muted'>{esc(trail)}</td></tr>")
+        H += ["</table>"]
+    else:
+        H += ["<div class='muted'>Aucun mouvement notable enregistré sur les matchs suivis "
+              "(premier passage de la journée, ou signaux stables).</div>"]
 
     # Recoupement avec APEX-PROTOCOL (ledger apex_bsm)
     lidx = ledger_index()
@@ -1309,23 +1561,54 @@ def build_email_html(day) -> tuple:
               "au journal (ledger/forecasts.jsonl). Lance le protocole APEX sur ces matchs pour recouper.</div>"]
 
     if live:
-        H += ["<h2>En direct</h2><table><tr><th>Match</th><th>Score</th><th>Statut</th></tr>"]
+        H += ["<h2>En direct</h2><table><tr><th>Match</th><th>KO</th><th>Score</th><th>Statut</th>"
+              "<th>Marché qui se dessine</th></tr>"]
         for r in live[:10]:
-            H.append(f"<tr><td>{esc(r['home'])}–{esc(r['away'])}</td><td>{esc(fmt_score(r.get('score')))}</td><td>{esc(r['status'])}</td></tr>")
+            H.append(f"<tr><td>{esc(r['home'])}–{esc(r['away'])}</td><td>{esc((r.get('kickoff') or '')[11:16])}</td>"
+                     f"<td>{esc(fmt_score(r.get('score')))}</td><td>{esc(r['status'])}</td>"
+                     f"<td class='muted'>{esc(live_emerging_market(r.get('score'), r.get('status')))}</td></tr>")
         H += ["</table>"]
+        H += ["<div class='muted'>« Marché qui se dessine » = lecture descriptive de la tendance "
+              "déduite du score et de la phase en direct (mécanique, aucune donnée inventée). "
+              "Ce n'est pas un conseil de pari : le live n'est pas backtesté par le module BSM.</div>"]
 
-    H += ["<h2>Meilleures anomalies</h2><table><tr><th>Match</th><th>Sharp</th><th>Blow</th><th>Upset</th>"
+    H += ["<h2>Meilleures anomalies</h2><table><tr><th>Match</th><th>KO</th><th>Sharp</th><th>Blow</th><th>Upset</th>"
           "<th>Conv</th><th>Marché</th><th>Value</th></tr>"]
     for r in active[:15]:
         reco = r.get("reco", {})
         vd = reco.get("value_1x2_directe")
         val = f"1X2 {vd['issue'][0]} EV{vd['ev']:+.2f}" if vd else reco.get("value", "")
-        H.append(f"<tr><td>{esc(r['home'])}–{esc(r['away'])}</td><td>{r.get('sharp','–')}</td><td>{r.get('blowout','–')}</td>"
+        H.append(f"<tr><td>{esc(r['home'])}–{esc(r['away'])}</td><td>{esc((r.get('kickoff') or '')[11:16])}</td>"
+                 f"<td>{r.get('sharp','–')}</td><td>{r.get('blowout','–')}</td>"
                  f"<td>{r.get('upset','–')}</td><td>{r.get('convergence','–')}</td>"
                  f"<td>{esc(reco.get('primary_market','?')[:30])}</td><td>{esc(val)}</td></tr>")
     H += ["</table>",
           "<div class='muted'>Volume d'argent : réel via excapper (Betfair MoneyWay, données publiques) quand "
           "--money est actif, sinon UNAVAILABLE (jamais estimé). Détail complet dans reports/worm/.</div>"]
+
+    # ─── Marchés asiatiques suspects (intégrité) : mouvements AH anormaux ───
+    suspects = [r for r in rows if (r.get("asian_integrity") or {}).get("suspect")]
+    H += ["<h2>Marchés asiatiques suspects (intégrité)</h2>"]
+    if suspects:
+        H += ["<div class='muted'>Handicap asiatique principal qui a bougé anormalement entre deux relevés "
+              "(≥ 0,5 but). <b>Drapeau d'intégrité — ces matchs sont NEUTRALISÉS (jamais pariés)</b>, pas une "
+              "opportunité.</div>",
+              "<table><tr><th>Match</th><th>KO</th><th>Compét.</th><th>Ligne AH (avant → après)</th>"
+              "<th>Δ</th><th>Sens</th><th>Book</th></tr>"]
+        for r in sorted(suspects, key=lambda r: abs((r.get("asian_integrity") or {}).get("shift") or 0), reverse=True)[:15]:
+            ig = r["asian_integrity"]
+            H.append(f"<tr><td><b>{esc(r['home'])}–{esc(r['away'])}</b></td>"
+                     f"<td>{esc((r.get('kickoff') or '')[11:16])}</td>"
+                     f"<td>{esc((r.get('country') or '')[:3])} {esc((r.get('league') or '')[:16])}</td>"
+                     f"<td>{ig['ligne_prec']:+.2f} → {ig['ligne_now']:+.2f}</td>"
+                     f"<td class='warn'><b>{ig['shift']:+.2f}</b></td><td class='muted'>{esc(ig['sens'])}</td>"
+                     f"<td>{esc(ig.get('book') or '—')}</td></tr>")
+        H += ["</table>",
+              "<div class='muted'>« Suspect » = mouvement de ligne qui ne reflète pas un simple ajustement de "
+              "marché. On le SIGNALE et on l'ÉCARTE des décisions ; on ne parie jamais dessus.</div>"]
+    else:
+        H += ["<div class='muted'>Aucun mouvement de handicap asiatique anormal relevé ce passage "
+              "(ou pas de second relevé pour comparer).</div>"]
 
     # ─── APEX-MI — bruit de marché H-60 (focus UPSET + BLOWOUT) ───
     H += ["<h2>APEX-MI — bruit de marché H-60 (focus UPSET + BLOWOUT)</h2>",
@@ -1438,13 +1721,14 @@ def build_email_html(day) -> tuple:
               else "--money inactif ou aucun appariement"),
           _ok("arbworld (arbitrage)", "OK" if arbworld_ok else "UNAVAILABLE",
               "API autorisée configurée" if arbworld_ok else "pas d'API autorisée → aucun scraping (robots.txt)"),
-          _ok("FootyStats (xG historique)", "OK" if footystats_ok else "UNAVAILABLE",
-              "clé présente" if footystats_ok else "FOOTYSTATS_KEY absente"),
+          _ok("FootyStats (xG historique)", "NON UTILISÉ",
+              "clé présente, mais WORM price sur le CLASSEMENT (buts réels), pas le xG" if footystats_ok
+              else "FOOTYSTATS_KEY absente ; WORM n'utilise de toute façon pas le xG"),
           _ok("Notification e-mail", "OK",
               "connecteur Gmail (session)" if gmail_mode else "SMTP (secrets CI)"),
           "</table>",
           "<table><tr><th>Moteur</th><th>Rôle</th></tr>"
-          "<tr><td>Sharp</td><td class='muted'>trajectoire de ligne + dispersion + Pinnacle↔médiane + volume réel</td></tr>"
+          "<tr><td>Sharp</td><td class='muted'>trajectoire de ligne + dispersion + consensus books sharp (Pinnacle + SBO asiatique)↔médiane + volume réel</td></tr>"
           "<tr><td>Blowout</td><td class='muted'>supériorité multidimensionnelle du favori</td></tr>"
           "<tr><td>Upset</td><td class='muted'>outsider sous-évalué</td></tr>"
           "<tr><td>StatsConvergence</td><td class='muted'>familles indépendantes Over/Under 2.5</td></tr>"

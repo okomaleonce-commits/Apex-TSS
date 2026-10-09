@@ -30,6 +30,22 @@ data/sync/
 data/character/
 backtests/character-*/
 
+# État durable généré (APEX-LEDGER, étape 2) — non versionné
+state/
+
+# Règlements MI générés à l'exécution (append-only, non versionné ; audit point 4)
+journal/apex_mi_settlements.csv
+
+# APEX-FUSION (digest généré, éphémère)
+reports/fusion/
+data/fusion/
+
+# APEX-SOURCES (cache CSV football-data, retéléchargeable)
+data/sources/
+
+# APEX NEWSDESK (actualité week-end générée, append-only, non versionnée)
+data/newsdesk/
+
 # APEX-TURF-WORM / APEX-TURF-MI (meme convention que le WORM football :
 # snapshots et rapports partent en artefacts CI, pas en commits)
 data/turf_worm/

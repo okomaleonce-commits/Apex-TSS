@@ -297,11 +297,99 @@ def test_decision_jouer_needs_confirmation():
     assert with_conf["decision"]["tier"] == "JOUER"          # fort + confirmation d'échange
 
 
+def test_ah_main_line_picks_near_even():
+    ah = {"dom": {"-0.25": 1.55, "-0.75": 2.02, "-1.00": 2.45},
+          "ext": {"+0.25": 2.45, "+0.75": 1.85, "+1.00": 1.55}}
+    assert W._ah_main_line(ah) == -0.75   # prix le plus proche de 2.0
+    assert W._ah_main_line({}) is None
+    assert W._ah_main_line(None) is None
+
+
+def test_asian_integrity_flags_abnormal_shift():
+    prev = {"odds": {"Pinnacle": {"AH": {"dom": {"-0.25": 2.0}, "ext": {"+0.25": 1.8}}}}}
+    rec = {"odds": {"Pinnacle": {"AH": {"dom": {"-1.00": 2.0}, "ext": {"+1.00": 1.8}}}}}
+    ig = W.asian_integrity(rec, prev)
+    assert ig and ig["suspect"] is True
+    assert ig["shift"] == -0.75          # -1.00 - (-0.25), creuse vers le favori
+    assert ig["book"] == "Pinnacle"
+
+
+def test_asian_integrity_ignores_normal_shift():
+    prev = {"odds": {"Pinnacle": {"AH": {"dom": {"-0.25": 2.0}}}}}
+    rec = {"odds": {"Pinnacle": {"AH": {"dom": {"-0.50": 2.0}}}}}
+    assert W.asian_integrity(rec, prev) is None   # 0.25 < seuil 0.5
+
+
+def test_asian_integrity_none_without_ah_or_prev():
+    assert W.asian_integrity({"odds": {}}, {"odds": {}}) is None
+    assert W.asian_integrity({"odds": {"Pinnacle": {"AH": {"dom": {"-0.5": 2.0}}}}}, None) is None
+
+
+def test_sharp_vs_median_component_key():
+    # la composante sharp s'appelle désormais sharp_vs_median (consensus books sharp)
+    sc, comp = W.sharp_signal([0.5, 0.3, 0.2], [0.5, 0.3, 0.2], 2.0, 0.01, 0.05)
+    assert "sharp_vs_median" in comp
+    assert 0 <= sc <= 100
+
+
 def test_decision_no_bet_units_zero():
     out = W.recommend({"data_quality": 20, "sharp": 0, "blowout": None, "upset": None,
                        "convergence": None, "odds": {}})
     assert out["decision"]["tier"] == "NO BET"
     assert out["decision"]["unites_indicatives"] == 0.0
+
+
+# ───────── recalibration : seuils par signal (reco audit) ─────────
+
+def test_statsconvergence_below_min_is_no_bet():
+    # convergence 50 : au-dessus de l'ancien seuil global (45) mais sous le nouveau seuil
+    # STATSCONVERGENCE (60) → plus de pari officiel.
+    rec = {"data_quality": 80, "blowout": None, "upset": None, "convergence": 50, "sharp": None,
+           "convergence_dir": "Over 2.5", "odds": {"Pinnacle": {"1X2": [2.0, 3.3, 3.6]}}, "ev_best": None}
+    assert W.recommend(rec)["primary_market"] == "NO BET"
+
+
+def test_statsconvergence_over_at_60_is_actionable():
+    rec = {"data_quality": 80, "blowout": None, "upset": None, "convergence": 60, "sharp": None,
+           "convergence_dir": "Over 2.5", "odds": {"Pinnacle": {"1X2": [2.0, 3.3, 3.6]}}, "ev_best": None}
+    assert W.recommend(rec)["primary_market"] == "Over 2.5"
+
+
+def test_statsconvergence_under_needs_higher_bar():
+    # Under 2.5 à 60 : sous le seuil renforcé (67) → NO BET ; à 67 → actionnable.
+    base = {"data_quality": 80, "blowout": None, "upset": None, "sharp": None,
+            "convergence_dir": "Under 2.5", "odds": {"Pinnacle": {"1X2": [2.0, 3.3, 3.6]}}, "ev_best": None}
+    assert W.recommend({**base, "convergence": 60})["primary_market"] == "NO BET"
+    assert W.recommend({**base, "convergence": 67})["primary_market"] == "Under 2.5"
+
+
+def test_blowout_threshold_unchanged():
+    # BLOWOUT reste actionnable dès 45 (barre basse inchangée).
+    rec = {"data_quality": 80, "blowout": 45, "upset": None, "convergence": None, "sharp": None,
+           "odds": {"Pinnacle": {"1X2": [1.4, 4.5, 7.0]}}, "ev_best": None}
+    assert "Handicap" in W.recommend(rec)["primary_market"]
+
+
+# ───────── recalibration : confiance pondérée par fiabilité du signal ─────────
+
+def test_confidence_blowout_outranks_statsconvergence():
+    base = {"data_quality": 80, "min_played": 8, "compositions": None, "signal_stable": True}
+    blow = W.confidence({**base, "blowout": 80, "convergence": None}, 0.01)
+    conv = W.confidence({**base, "blowout": None, "convergence": 80, "convergence_dir": "Over 2.5"}, 0.01)
+    assert blow > conv   # même contexte, BLOWOUT plus fiable → confiance plus haute
+
+
+def test_confidence_under_malus():
+    base = {"data_quality": 80, "min_played": 8, "compositions": None, "signal_stable": True,
+            "blowout": None, "convergence": 80}
+    over = W.confidence({**base, "convergence_dir": "Over 2.5"}, 0.01)
+    under = W.confidence({**base, "convergence_dir": "Under 2.5"}, 0.01)
+    assert under < over   # Under 2.5 pénalisé (marché le plus faible en bilan)
+
+
+def test_confidence_bounds_still_0_100():
+    assert 0 <= W.confidence({"data_quality": 100, "min_played": 20, "compositions": [{"x": 1}],
+                              "signal_stable": True, "blowout": 100}, 0.0) <= 100
 
 
 # ───────── email digest ─────────
@@ -323,8 +411,76 @@ def test_build_email_html(tmp_path):
             fh.write(json.dumps(rec) + "\n")
         subject, html = W.build_email_html(day)
         assert "APEX-WORM" in subject
-        assert "<html" in html and "JOUER_PETIT" in html
+        # Gel de promotion (audit 2026-10-05) : le palier JOUER_PETIT est affiché « candidat− (gelé) »,
+        # jamais en surbrillance verte, et une bannière de gel est présente.
+        assert "<html" in html
+        assert "candidat− (gelé)" in html
+        assert "JOUER_PETIT" not in html
+        assert "Promotion JOUER/VERT GELÉE" in html
         assert "A–B" in html
+    finally:
+        W.SNAP = old
+
+
+def test_movement_history_tracks_trajectory(tmp_path):
+    import json
+    day = dt.date(2026, 9, 30)
+    old = W.SNAP
+    try:
+        W.SNAP = tmp_path
+        p = tmp_path / f"{day.isoformat()}.jsonl"
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"fixture_id": 7, "home": "A", "away": "B", "phase": "PREMATCH",
+                                 "scan_time_utc": "2026-09-30T08:00:00+00:00",
+                                 "sharp": 10, "blowout": 10, "upset": 10, "convergence": 60}) + "\n")
+            fh.write(json.dumps({"fixture_id": 7, "home": "A", "away": "B", "phase": "PREMATCH",
+                                 "scan_time_utc": "2026-09-30T09:00:00+00:00",
+                                 "sharp": 10, "blowout": 10, "upset": 10, "convergence": 40}) + "\n")
+            fh.write(json.dumps({"fixture_id": 7, "home": "A", "away": "B", "phase": "LIVE",
+                                 "scan_time_utc": "2026-09-30T10:00:00+00:00",
+                                 "sharp": 10, "blowout": 10, "upset": 10, "convergence": 40}) + "\n")
+        hist = W.movement_history(day)
+        assert 7 in hist
+        kinds = [t for _, t, _ in hist[7]]
+        assert "SIGNAL WEAKENED" in kinds and "SIGNAL INVALIDATED" in kinds  # convergence 60→40
+        assert "PHASE" in kinds                                              # PREMATCH→LIVE
+        # filtre par fixture
+        assert W.movement_history(day, {999}) == {}
+    finally:
+        W.SNAP = old
+
+
+def test_email_has_character_market_live_ko_and_history(tmp_path):
+    import json
+    day = dt.date(2026, 9, 30)
+    old = W.SNAP
+    try:
+        W.SNAP = tmp_path
+        base = {"fixture_id": 3, "home": "Big", "away": "Small", "league": "L", "country": "Eng",
+                "kickoff": "2026-09-30T18:00:00+00:00", "sharp": 20, "blowout": 80, "upset": 10,
+                "convergence": 30, "confidence": 70, "data_quality": 80, "lambdas": [2.6, 0.5],
+                "reco": {"primary_market": "Handicap asiatique -0.5/-1 domicile", "value": "NON CONFIRMÉE",
+                         "decision": {"tier": "JOUER", "unites_indicatives": 1.0,
+                                      "marche": "Handicap asiatique -0.5/-1 domicile",
+                                      "signal": "BLOWOUT 80/100", "confirmation_echange": True}}}
+        live = {"fixture_id": 4, "home": "C", "away": "D", "league": "L", "country": "Fra",
+                "kickoff": "2026-09-30T17:00:00+00:00", "phase": "LIVE", "status": "2H",
+                "score": {"home": 1, "away": 0}, "sharp": 10, "blowout": 10, "upset": 10, "convergence": 10,
+                "reco": {"primary_market": "NO BET", "decision": {"tier": "NO BET"}}}
+        with open(tmp_path / f"{day.isoformat()}.jsonl", "w", encoding="utf-8") as fh:
+            # deux relevés du match à décision → historique (blowout 60→80)
+            fh.write(json.dumps({**base, "phase": "PREMATCH", "blowout": 60,
+                                 "scan_time_utc": "2026-09-30T08:00:00+00:00"}) + "\n")
+            fh.write(json.dumps({**base, "phase": "PREMATCH",
+                                 "scan_time_utc": "2026-09-30T09:00:00+00:00"}) + "\n")
+            fh.write(json.dumps(live) + "\n")
+        subject, html = W.build_email_html(day)
+        assert "Marché (caractère)" in html            # nouvelle colonne caractère→marché
+        assert "DEMONSTRATION" in html                 # λ 2.6/0.5 → démonstration
+        assert "Over 2.5 + Handicap favori" in html    # mapping du profil
+        assert "<h2>En direct</h2>" in html and "17:00" in html   # KO en direct
+        assert "Historique des mouvements" in html
+        assert "Blowout 60→80" in html or "blowout 60→80" in html  # trajectoire du signal
     finally:
         W.SNAP = old
 
@@ -400,6 +556,49 @@ def test_compute_bilan_grades_done_only(tmp_path):
         assert "BILAN" in subj and "Conclusions" in html
     finally:
         W.SNAP = old
+
+
+def test_live_emerging_market_reads_score_and_phase():
+    # 0–0 : Under se renforce ; mention de la pause à HT
+    assert "Under 2.5 se renforce" in W.live_emerging_market({"home": 0, "away": 0}, "2H")
+    assert "pause" in W.live_emerging_market({"home": 0, "away": 0}, "HT")
+    # 1 but : équilibré en 1re période, Under se dessine en 2nde
+    assert "équilibré" in W.live_emerging_market({"home": 1, "away": 0}, "1H")
+    assert "Under 2.5 se dessine" == W.live_emerging_market({"home": 0, "away": 1}, "2H")
+    # Over franchi
+    assert "Over 2.5" in W.live_emerging_market({"home": 2, "away": 1}, "2H")
+    assert "Over 3.5 ✓" in W.live_emerging_market({"home": 3, "away": 1}, "2H")
+    # écart ≥ 2 → handicap favori signalé
+    assert "handicap favori" in W.live_emerging_market({"home": 2, "away": 0}, "1H")
+    # score absent → jamais inventé
+    assert W.live_emerging_market(None, "1H") == "—"
+    assert W.live_emerging_market({"home": None, "away": 0}, "1H") == "—"
+
+
+def _reco_rec(**kw):
+    base = {"odds": {}, "data_quality": 80, "blowout": 100, "upset": None, "convergence": None,
+            "sharp": 20, "convergence_dir": None, "ev_best": None, "ev_best_idx": None,
+            "exchange_confirmation": False, "rlm": None}
+    base.update(kw)
+    return base
+
+
+def test_min_played_guard_blocks_promotion_on_short_sample():
+    # BLOWOUT 100 mais 2 matchs joués → signal structurel NON FIABLE, jamais promu (audit 2026-10-05)
+    out = W.recommend(_reco_rec(min_played=2))
+    assert out["decision"]["tier"] == "SURVEILLER"
+    assert out["small_sample"]["min_played"] == 2 and out["small_sample"]["seuil"] == W.MIN_PLAYED
+
+
+def test_min_played_guard_allows_promotion_on_full_sample():
+    out = W.recommend(_reco_rec(min_played=10))
+    assert out["decision"]["tier"] in ("JOUER", "JOUER_PETIT")
+    assert "small_sample" not in out
+
+
+def test_min_played_guard_ignored_when_played_unknown():
+    out = W.recommend(_reco_rec(min_played=None))
+    assert "small_sample" not in out
 
 
 def _run_all():

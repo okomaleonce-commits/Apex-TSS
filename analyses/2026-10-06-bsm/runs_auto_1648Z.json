@@ -1,0 +1,92 @@
+[
+ {
+  "fixture_id": 1640081,
+  "match": "Jordan – Venezuela",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1640082,
+  "match": "Algeria – Niger",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1528952,
+  "match": "Croatia – Spain",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1528953,
+  "match": "England – Czechia",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1528954,
+  "match": "Albania – San Marino",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1528955,
+  "match": "Belarus – Finland",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1528956,
+  "match": "Moldova – Slovakia",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1528957,
+  "match": "Estonia – Iceland",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1545612,
+  "match": "Luxembourg – Bulgaria",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1545655,
+  "match": "Switzerland – FYR Macedonia",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1545657,
+  "match": "Scotland – Slovenia",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1545838,
+  "match": "Angola – Malawi",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1639999,
+  "match": "Montserrat – Turks and Caicos Islands",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1640000,
+  "match": "Saint Martin – Bahamas",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1640001,
+  "match": "St. Vincent / Grenadines – Sint Maarten",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1640002,
+  "match": "Antigua and Barbuda – Aruba",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1640517,
+  "match": "Argentina – Benin",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ },
+ {
+  "fixture_id": 1632359,
+  "match": "Colombia – Peru",
+  "erreur": "Traceback (most recent call last):\n  File \"/home/user/Apex-TSS/tools/apex_bsm.py\", line 36, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'"
+ }
+]

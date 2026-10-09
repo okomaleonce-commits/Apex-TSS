@@ -83,6 +83,22 @@ La règle ci-dessous s'applique aussi au turf. `apex_turf_worm.py scan` construi
 
 Les secrets `WORM_SMTP_*` ne sont pas configurés dans l'environnement : `tools/apex_worm.py scan --email` **génère** seulement le HTML (`reports/worm/<jour>.email.html`) et affiche « Email non envoyé : WORM_SMTP_* non configurés ». L'envoi réel se fait **en session interactive via le connecteur Gmail** (`mcp__Gmail__send_message`), depuis `okoma.leonce@gmail.com` (OAuth géré par le connecteur, aucun secret manipulé). Procédure : (1) `scan --money --email`, (2) `apex_worm.build_email_html("<jour>")` → `(sujet, html)`, (3) `mcp__Gmail__send_message` avec `to`, `subject`, `htmlBody` (recharger l'outil via `ToolSearch` si le connecteur s'est déconnecté), (4) preuve = `id`/`threadId` Gmail. Pour un envoi 100 % autonome par le cron (GitHub Actions ou Routine à session fraîche), il faudrait renseigner les secrets `WORM_SMTP_*`.
 
+## Moteur unique : APEX-FUSION (un seul digest, un seul email)
+
+Les quatre cellules (WORM radar, MI bruit marché/comportemental, PROTOCOL/BSM simulation calibrée, ORION arbitrage) sont fondues dans un **moteur unique** : `tools/apex_fusion.py`. Il produit **UN seul digest et UN seul email**, au lieu de quatre sorties séparées.
+
+- `python3 tools/apex_fusion.py run --date <J>` : enchaîne (optionnellement `--scan` pour relancer WORM+MI, sinon lit le dernier snapshot), puis rend **par match un verdict ORION unique** (`ACCEPTER / REJETER / ATTENDRE / COLLECTER`) obtenu en fondant les couches présentes en voix **sourcées** via `tools/orion_consensus.py`. Le digest (`reports/fusion/<J>.email.html` + `.subject.txt` + `.txt`) porte la carte ORION en tête et réutilise tel quel le corps WORM/MI/SYNC/CHARACTER/bilan.
+- **Couches et sources honnêtes** : `W`=structure WORM (classement), `M`=marché/MI, `C`=comportemental, `S`=FORECAST BSM. La Poisson-classement WORM n'est **jamais** étiquetée BSM ; une voix `S` n'existe que pour une ligue backtestée ET une simulation calibrée réellement présente (`data/fusion/bsm/<J>.json`). META fond les sources partagées, le désaccord pénalise la confiance, **< 3 voix indépendantes → COLLECTER**. WORM peut dire « JOUER » : ORION refuse tant qu'une confirmation indépendante manque.
+- **Gel actif** : aucune mise réelle émise ; tout « ACCEPTER » est rétrogradé en ATTENDRE.
+- **Email unique** : `run` affiche la bannière « ENVOI EMAIL OBLIGATOIRE » avec `subject` + `htmlBody = reports/fusion/<J>.email.html`. Enchaîner `mcp__Gmail__send_message` (`to=["okoma.leonce@gmail.com"]`). Ce digest de fusion **remplace** les envois WORM/MI séparés pour un passage interactif.
+
+## Sources externes & voix sharp : APEX-SOURCES
+
+`tools/apex_sources.py` agrège des sources externes pour renforcer la robustesse (voix indépendantes). **Câblé par défaut** : `football-data.co.uk` (cotes Pinnacle ouverture/clôture dé-viggées + O/U 2.5 — référence sharp et CLV, gratuit). **À configurer côté client/clés** (jamais simulé sinon) : Infersports (MCP), SSB/PropProfessor (MCP), SharpAPI/`SHARPAPI_KEY`, odds-api.io/`ODDSAPI_IO_KEY`, TheStatsAPI/`THESTATSAPI_KEY`. Procédure complète dans `SOURCES.md`.
+
+- Ces sources ajoutent à ORION une voix **`marche_sharp`** (couche **K** d'`apex_fusion`), indépendante du classement WORM et du bruit MI — c'est elle qui peut porter le nombre de voix indépendantes à ≥ 3 et permettre un vrai arbitrage (hors COLLECTER). **Anti-invention absolu** : ligue non couverte ou source absente ⇒ voix écrite absente, jamais fabriquée.
+- **Ajouter des sources ne lève pas le gel** : plus de données ≠ bord. Le CLV (`tools/apex_clv.py`) reste le seul juge ; le dé-vigging est une estimation de la proba implicite, pas une vérité.
+
 ## Environnement
 
 - Dépendances Python du module : `pip install numpy scipy`.

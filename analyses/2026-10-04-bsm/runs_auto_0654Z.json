@@ -1,0 +1,104 @@
+[
+ {
+  "fixture_id": 1528937,
+  "forecast_id": "fba0ed8388b0",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1640830,
+  "forecast_id": "cf208e2b9961",
+  "league": "Friendlies",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1640507,
+  "forecast_id": "be03a2febe46",
+  "league": "Friendlies",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528938,
+  "forecast_id": "937ff8b20a15",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1545610,
+  "forecast_id": "23a110c240b6",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1638601,
+  "forecast_id": "f36a18c8872a",
+  "league": "Friendlies",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528939,
+  "forecast_id": "21a21890cf4c",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528940,
+  "forecast_id": "4b1c0605477f",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528941,
+  "forecast_id": "4753a647e6b1",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528942,
+  "forecast_id": "42421a0bbf1b",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1528943,
+  "forecast_id": "72deda366850",
+  "league": "UEFA Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1639984,
+  "forecast_id": "e88677c43cc7",
+  "league": "CONCACAF Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1639985,
+  "forecast_id": "4a08d5d01fe8",
+  "league": "CONCACAF Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1639986,
+  "forecast_id": "4449bb068b6e",
+  "league": "CONCACAF Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1639987,
+  "forecast_id": "f015e57cdd32",
+  "league": "CONCACAF Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1639988,
+  "forecast_id": "d493e6a29aa4",
+  "league": "CONCACAF Nations League",
+  "kind": "intl"
+ },
+ {
+  "fixture_id": 1639989,
+  "forecast_id": "488421a8b002",
+  "league": "CONCACAF Nations League",
+  "kind": "intl"
+ }
+]

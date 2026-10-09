@@ -34,6 +34,7 @@ import argparse
 import datetime as dt
 import json
 import math
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -41,6 +42,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import apex_worm as W      # noqa: E402  (fenêtre APEX, snapshots, démarge, sélection de book via W.AF)
 import apex_common as C    # noqa: E402  (identité de match, horodatage UTC)
+import apex_ledger as L    # noqa: E402  (état durable : transaction KO+gel+réservation atomique)
 
 ROOT = Path(__file__).resolve().parent.parent
 SYNC_DIR = ROOT / "data" / "sync"
@@ -52,6 +54,11 @@ BSM = ROOT / "tools" / "apex_bsm.py"
 # ─── feux ───
 GREEN, ORANGE, RED = "VERT", "ORANGE", "ROUGE"
 LIGHT_LABEL = {GREEN: "🟢 GO", ORANGE: "🟠 WATCH", RED: "🔴 NO BET"}
+
+# Gel de promotion (audit 2026-10-05) : tant que la stratégie n'est pas validée, AUCUN chemin
+# (sync, risk autonome) ne doit afficher d'autorisation financière VERTE. Le calcul reste exact en
+# interne (testable), mais toute sortie « VERT » est rabattue sur ORANGE « gelé ».
+PROMOTION_FROZEN = True
 
 # Poids des tags d'anomalie (plan §4) : un signal Sharp confirmé prime, la convergence stats aussi.
 TAG_WEIGHT = {"SHARP": 1.0, "STATSCONVERGENCE": 0.9, "UPSET": 0.7, "BLOWOUT": 0.6}
@@ -72,6 +79,7 @@ DEFAULT_CONFIG = {
     "max_exposure_match": 0.01,  # exposition max par match
     "max_exposure_league": 0.03,
     "max_exposure_market": 0.03,
+    "max_exposure_day": 0.10,    # exposition max cumulée sur la journée (transaction ledger)
     "stop_loss_daily": -0.05,    # stop-loss quotidien (−5 % de bankroll)
     "stop_loss_weekly": -0.10,
     "min_ev": 0.03,              # EV ≥ 3 % (CLAUDE.md §4)
@@ -191,6 +199,10 @@ def basic_filters(rec: dict, cfg: dict, now: dt.datetime | None = None):
     reco = rec.get("reco") or {}
     if reco.get("primary_market") in (None, "NO BET"):
         reasons.append("WORM : NO BET (aucune anomalie exploitable)")
+    # Veto d'intégrité : un match dont le handicap asiatique a bougé anormalement est NEUTRALISÉ par
+    # WORM (jamais parié). SYNC doit propager ce veto et refuser la candidature (audit 2026-10-05).
+    if reco.get("integrity_blocked") or (rec.get("asian_integrity") or {}).get("suspect"):
+        reasons.append("intégrité AH suspecte — match NEUTRALISÉ (jamais candidat)")
     _, o1 = W.AF.pick_book(rec.get("odds") or {}, "1X2")
     if not o1:
         reasons.append("aucune cote 1X2 (liquidité/marché indisponible)")
@@ -296,8 +308,82 @@ def run_protocol(argv: list[str], home: str, away: str, kickoff: str) -> dict:
     return summarize_forecast(fc)
 
 
+# Préfixes de statut de modèle reconnus comme VALIDÉS (liste blanche POSITIVE). Ancrés en DÉBUT de
+# chaîne ET suivis d'une frontière de mot (fin de chaîne, espace ou parenthèse) — « OK » est retiré
+# et « OKAY » n'est plus accepté (audit 2026-10-05, défaut D1 : « validation par préfixe »).
+VALIDATED_STATUSES = {"VALIDÉ", "VALIDE", "VALIDATED", "MODÈLE VALIDÉ", "MODELE VALIDE"}
+_VALID_RE = re.compile(
+    r"^(?:" + "|".join(sorted((re.escape(s) for s in VALIDATED_STATUSES), key=len, reverse=True)) +
+    r")(?![0-9A-ZÀ-Ÿ])", re.IGNORECASE)
+
+
+def _validation_proof(fc: dict) -> bool:
+    """Preuve de validation STRUCTURÉE : bloc `validation` = {validated: true, run_id: <backtest>}.
+    C'est la seule forme qui autorise une mise dans la transaction de décision (audit 2026-10-05 :
+    la racine des défauts est la validation par texte libre). Le `statut_modele` textuel ne sert plus
+    qu'à l'affichage."""
+    v = fc.get("validation")
+    if not isinstance(v, dict):
+        return False
+    return v.get("validated") is True and bool(str(v.get("run_id") or "").strip())
+
+
+def _model_validated(fc: dict) -> bool:
+    """Validation POSITIVE. Priorité à la PREUVE STRUCTURÉE (`validation`), sinon repli texte STRICT :
+    le statut_modele doit COMMENCER par un préfixe blanc suivi d'une frontière de mot (« VALIDÉ (walk-
+    forward …) »). « NON VALIDÉ », « NON CONCLUANT », « OKAY » et tout statut inconnu/vide sont refusés."""
+    if _validation_proof(fc):
+        return True
+    sm = (fc.get("statut_modele") or "").strip()
+    if not sm or "NON VALID" in sm.upper():
+        return False
+    return bool(_VALID_RE.match(sm))
+
+
+def _is_full_settle(market) -> bool:
+    """Marché à règlement PLEIN binaire (p, cote) : 1X2, BTTS, ou Over/Under sur ligne .5 uniquement.
+    Les lignes quart (2.25/2.75) règlent en demi, les lignes entières (2.0) peuvent faire push, un
+    marché absent/handicap est partiel — tous REFUSÉS (audit 2026-10-05)."""
+    if not market:
+        return False
+    m = str(market).strip()
+    if m.startswith(("1X2", "BTTS")):
+        return True
+    # Une ligne SPLIT (« Over 2.5/3.0 » = 2,75, « 2.5/3 ») règle en demi → PARTIEL. On refuse dès qu'un
+    # séparateur de double ligne (/, virgule entre deux nombres, tiret) suit le mot-clé (audit 2026-10-05,
+    # défaut D2 : « Over 2.5/3.0 » était pris pour une ligne .5 pleine).
+    if re.match(r"^(Over|Under)\s+\d+(?:[.,]\d+)?\s*[/\-,]\s*\d", m, re.IGNORECASE):
+        return False
+    mm = re.match(r"^(Over|Under)\s+(\d+(?:[.,]\d+)?)", m, re.IGNORECASE)
+    if mm:
+        x = float(mm.group(2).replace(",", "."))
+        return abs((x % 1.0) - 0.5) < 1e-9   # seule une ligne .5 SEULE règle en binaire sans push ni split
+    return False
+
+
+def _finite_prob(x):
+    """Probabilité FINIE dans ]0,1[ ou None (refuse NaN, ±inf, hors bornes — audit 2026-10-05, D3)."""
+    v = C.as_float(x)
+    if v is None or not math.isfinite(v) or not (0.0 < v < 1.0):
+        return None
+    return v
+
+
+def _finite_odds(x):
+    """Cote FINIE > 1 ou None (refuse NaN, ±inf, ≤ 1 — audit 2026-10-05, défaut D3 : NaN/inf passaient)."""
+    v = C.as_float(x)
+    if v is None or not math.isfinite(v) or v <= 1.0:
+        return None
+    return v
+
+
 def summarize_forecast(fc: dict, min_ev: float = DEFAULT_CONFIG["min_ev"]) -> dict:
-    """Traduit un forecast BSM en statut PROTOCOL + meilleure sélection exploitable (plan §3.9)."""
+    """Traduit un forecast BSM en statut PROTOCOL + sélection officielle (plan §3.9).
+
+    AUDIT 2026-10-05 : SYNC ne CHOISIT PLUS un marché. Il conserve EXACTEMENT la sélection officielle
+    que BSM a transmise (`official_selection`), avec son éventuel veto ; il ne reconstruit jamais une
+    sélection depuis la liste d'EV brute (sinon il réintroduit une branche écartée par BSM pour
+    instabilité). Sans sélection officielle structurée → abstention."""
     decision = fc.get("decision", "")
     out = {"status": None, "decision": decision, "forecast_id": fc.get("forecast_id"),
            "statut_modele": fc.get("statut_modele"), "official": None}
@@ -307,16 +393,41 @@ def summarize_forecast(fc: dict, min_ev: float = DEFAULT_CONFIG["min_ev"]) -> di
         else:
             out["status"] = "abstention"
         return out
-    # sélection proposée : retenir l'EV éligible la plus forte (EV ≥ seuil, stable, non suspecte)
-    ok = [e for e in fc.get("ev", []) if e.get("ev", -1) >= min_ev and not e.get("suspect")]
-    if not ok:
-        out["status"] = "abstention"
+    # Garde-fou : modèle NON VALIDÉ (ou statut inconnu) → jamais de sélection, jamais VERT.
+    if not _model_validated(fc):
+        out["status"] = "unvalidated"
         return out
-    official = max(ok, key=lambda e: e["ev"])
+    off = fc.get("official_selection")
+    if not isinstance(off, dict) or not off.get("marche"):
+        out["status"] = "abstention"
+        out["raison"] = "aucune sélection officielle structurée transmise par BSM"
+        return out
+    # Veto/sensibilité propagés exactement depuis BSM.
+    if off.get("veto") or off.get("suspect") or off.get("instable"):
+        out["status"] = "abstention"
+        out["raison"] = "sélection officielle sous veto/suspecte/instable (BSM)"
+        return out
+    # EV RECALCULÉE depuis p & cote FINIES de la sélection officielle (jamais une EV fournie telle quelle,
+    # jamais une p/cote NaN ou ±inf — audit 2026-10-05, D3). Sans p & cote valides, pas de sélection.
+    p, cote = _finite_prob(off.get("p")), _finite_odds(off.get("cote"))
+    if p is None or cote is None:
+        out["status"] = "abstention"
+        out["raison"] = "p/cote manquants ou non finis sur la sélection officielle"
+        return out
+    ev = p * cote - 1.0
+    if ev < min_ev:
+        out["status"] = "abstention"
+        out["raison"] = f"EV recalculée {ev * 100:.2f} % < seuil {min_ev * 100:.0f} %"
+        return out
+    # Sensibilité conservée EXACTEMENT depuis BSM. BSM exporte `sensibilite_min` ; on le restitue sous
+    # ce nom (audit 2026-10-05, défaut D4 : le contrat retournait `sensibilite=None`).
+    sens_min = C.as_float(off.get("sensibilite_min"))
+    if sens_min is None:
+        sens_min = C.as_float(off.get("sensibilite"))
     out["status"] = "selection"
-    out["official"] = {"marche": official["marche"], "p": official.get("p"),
-                       "cote": official.get("cote"), "ev": official.get("ev"),
-                       "full_settle": official["marche"].startswith(FULL_SETTLE_PREFIX)}
+    out["official"] = {"marche": off["marche"], "p": p, "cote": cote, "ev": round(ev, 4),
+                       "full_settle": _is_full_settle(off["marche"]),
+                       "sensibilite_min": sens_min}
     return out
 
 
@@ -354,8 +465,8 @@ def _ledger_new_forecast(before: set, home: str, away: str, kickoff: str):
 
 def kelly_stake_pct(p, odds, fraction: float, cap: float) -> float:
     """Kelly fractionné, borné par le plafond de mise. 0 si pas de bord."""
-    p = C.as_float(p)
-    odds = C.as_float(odds)
+    p = _finite_prob(p)
+    odds = _finite_odds(odds)
     if p is None or odds is None:
         return 0.0
     b = odds - 1.0
@@ -387,9 +498,34 @@ def risk_decision(sel: dict, cfg: dict, exposure: dict | None = None,
     if mid and exposure["matchs"].get(mid, 0.0) > 0:
         reasons.append("corrélation : un pari est déjà engagé sur ce match")
 
+    # EV minimale (CLAUDE.md §4) : TOUJOURS recalculée depuis p & cote (on n'accepte jamais une EV
+    # fournie telle quelle — audit 2026-10-05 : ev=0.10 fourni contournait le seuil). Sans p & cote,
+    # pas de bord démontrable → refus.
+    p_ = _finite_prob(sel.get("p"))
+    o_ = _finite_odds(sel.get("odds"))
+    if p_ is None or o_ is None:
+        # p NaN/±inf/hors ]0,1[ ou cote NaN/±inf/≤1 : NaN fausse toute comparaison (nan<seuil == False),
+        # d'où une approbation erronée — on refuse AVANT tout calcul (audit 2026-10-05, défaut D3).
+        reasons.append("p/cote manquants ou non finis — EV non recalculable")
+    else:
+        ev = p_ * o_ - 1.0
+        if ev < cfg["min_ev"]:
+            reasons.append(f"EV {ev * 100:.2f} % < seuil {cfg['min_ev'] * 100:.0f} %")
+
+    # Type de règlement : le Kelly binaire (p, cote) suppose un règlement PLEIN sur ligne .5. Le type
+    # est TOUJOURS recalculé depuis le marché — un `full_settle` fourni n'est jamais cru (audit
+    # 2026-10-05 : full_settle=True sur « Over 2.25 » contournait l'identification du contrat).
+    full_settle = _is_full_settle(sel.get("market"))
+    if not full_settle:
+        reasons.append("règlement partiel/non identifié — incompatible avec le Kelly binaire")
+
     base_pct = kelly_stake_pct(sel.get("p"), sel.get("odds"), cfg["kelly_fraction"], cfg["max_stake_pct"])
     if base_pct <= 0:
         reasons.append("Kelly ≤ 0 (aucun bord exploitable)")
+
+    # Un refus FERME (stop-loss, corrélation, EV sous seuil, règlement partiel, Kelly ≤ 0) doit
+    # produire ROUGE en aval, pas ORANGE (audit 2026-10-05).
+    hard_block = bool(reasons)
 
     # plafonds d'exposition résiduels
     stake_pct = base_pct
@@ -409,7 +545,7 @@ def risk_decision(sel: dict, cfg: dict, exposure: dict | None = None,
         stake_pct = 0.0
     return {"approved": approved, "stake_pct": round(stake_pct, 5),
             "stake_amount": round(stake_pct * bankroll, 2),
-            "reasons": reasons, "caps_applied": caps}
+            "reasons": reasons, "caps_applied": caps, "hard_block": hard_block}
 
 
 def add_exposure(exposure: dict, sel: dict, stake_pct: float) -> None:
@@ -427,10 +563,14 @@ def traffic_light(eligible: bool, protocol: dict | None, risk: dict | None) -> s
     st = protocol.get("status")
     if st in ("abstention", "error"):
         return RED
-    if st == "wait":
-        return ORANGE
+    if st in ("wait", "unvalidated"):
+        return ORANGE                         # modèle non validé → jamais VERT (audit 2026-10-05)
     if st == "selection":
-        return GREEN if (risk and risk.get("approved")) else ORANGE
+        if risk and risk.get("approved"):
+            return ORANGE if PROMOTION_FROZEN else GREEN   # gel : jamais de VERT tant que non levé
+        if risk and risk.get("hard_block"):
+            return RED                         # refus Risk FERME → ROUGE (audit 2026-10-05)
+        return ORANGE                          # refus mou (plancher de mise) → à surveiller
     return ORANGE
 
 
@@ -527,8 +667,31 @@ def cmd_sync(a):
                      "market": off["marche"], "p": off["p"], "odds": off["cote"]}
                 risk = risk_decision(s, cfg, exposure, pnl_day, pnl_week)
                 entry["risk"] = risk
-                if risk["approved"]:
-                    add_exposure(exposure, s, risk["stake_pct"])
+                # TRANSACTION UNIQUE (point 3) : une seule opération atomique vérifie le KO sous verrou,
+                # fige la sélection et réserve l'exposition. AUTORISATION FINALE EXPLICITE : sous gel
+                # (ou risk non approuvé), authorized=False → mise effective 0 ; le montant Kelly reste
+                # une information de recherche, aucune exposition engagée. Jamais un freeze puis un
+                # reserve séparés (audit 2026-10-05).
+                authorized = bool(risk.get("approved")) and not PROMOTION_FROZEN
+                caps = {"match": cfg["max_exposure_match"], "league": cfg["max_exposure_league"],
+                        "market": cfg["max_exposure_market"], "total_day": cfg.get("max_exposure_day", 0.10)}
+                try:
+                    committed, payload = L.commit_decision(
+                        day, s, c["kickoff"],
+                        {"marche": off["marche"], "p": off["p"], "cote": off["cote"],
+                         "ev": off.get("ev"), "sensibilite_min": off.get("sensibilite_min"),
+                         "worm_tier": c["worm_tier"], "light": None},
+                        risk.get("stake_pct", 0.0), authorized=authorized, caps=caps)
+                    entry["commit"] = {"committed": committed, "authorized": authorized,
+                                       "stake_calcule": risk.get("stake_pct", 0.0),
+                                       "stake_effectif": (risk.get("stake_pct", 0.0) if authorized else 0.0),
+                                       "payload": payload if not committed else None}
+                    if committed and authorized:
+                        add_exposure(exposure, s, risk["stake_pct"])
+                except L.LedgerError as e:
+                    # fail-closed : état durable illisible → aucune autorisation, trace l'échec.
+                    entry["commit"] = {"committed": False, "authorized": False,
+                                       "stake_effectif": 0.0, "payload": {"reason": f"ledger: {e}"}}
         elif a.run_protocol and not cmd["runnable"]:
             protocol = {"status": "wait", "reason": cmd["reason"]}
             entry["protocol"] = protocol
@@ -570,11 +733,24 @@ def _print_sync_report(day, cfg, sel, decisions, counts, ran):
             print(f"   PROTOCOL : SÉLECTION {off['marche']} @ {off['cote']} · "
                   f"p={off['p']:.3f} · EV {off['ev']:+.1%} · {p.get('statut_modele', '')}")
             r = e.get("risk") or {}
-            if r.get("approved"):
+            # Le rapport ne doit JAMAIS afficher « GO · mise » tant que le feu n'est pas VERT : sous
+            # gel, un risk approved + feu ORANGE s'affiche GELÉ, pas GO (audit 2026-10-05).
+            if e["light"] == GREEN and r.get("approved"):
                 print(f"   RISK : GO · mise {r['stake_pct'] * 100:.2f} % = {r['stake_amount']:.2f} "
                       f"(bankroll {cfg['bankroll']:.0f})" + (f" · {', '.join(r['caps_applied'])}" if r.get("caps_applied") else ""))
+            elif r.get("approved") and PROMOTION_FROZEN:
+                print("   RISK : GELÉ — mise calculée mais NON autorisée (promotion suspendue, audit 2026-10-05)")
             else:
                 print(f"   RISK : refus · {', '.join(r.get('reasons', [])) or '—'}")
+            cm = e.get("commit")
+            if cm is not None:
+                if cm.get("committed"):
+                    print(f"   LEDGER : décision figée + exposition {'RÉSERVÉE' if cm['authorized'] else 'NON réservée'} · "
+                          f"mise effective {cm['stake_effectif'] * 100:.2f} % · autorisée={cm['authorized']} "
+                          f"(calculée {cm['stake_calcule'] * 100:.2f} %)")
+                else:
+                    why = (cm.get("payload") or {}).get("reason", "—")
+                    print(f"   LEDGER : non figée · {why}")
         else:
             why = p.get("reason") or p.get("decision") or p.get("status")
             print(f"   PROTOCOL : {p.get('status', '?').upper()} · {why}")
@@ -582,19 +758,34 @@ def _print_sync_report(day, cfg, sel, decisions, counts, ran):
           "APEX-SYNC optimise le processus, pas le résultat.")
 
 
+def risk_light(validated: bool, risk: dict) -> str:
+    """Feu d'une décision Risk autonome. Exige une validation POSITIVE du modèle ET applique le gel
+    de promotion : aucun VERT tant que PROMOTION_FROZEN (audit 2026-10-05)."""
+    if not validated:
+        return RED                             # modèle non validé → jamais d'autorisation
+    if not risk.get("approved"):
+        return RED if risk.get("hard_block") else ORANGE
+    return ORANGE if PROMOTION_FROZEN else GREEN
+
+
 def cmd_risk(a):
     cfg = load_config(a)
     sel = {"match_id": a.match_id, "league": a.league, "market": a.market, "p": a.p, "odds": a.odds}
     r = risk_decision(sel, cfg, pnl_day=a.pnl_day or 0.0, pnl_week=a.pnl_week or 0.0)
-    light = GREEN if r["approved"] else RED
+    validated = _model_validated({"statut_modele": getattr(a, "statut_modele", None)})
+    light = risk_light(validated, r)
     print(f"APEX-SYNC · Risk Manager")
-    print(f"p={a.p} · cote={a.odds} · bankroll={cfg['bankroll']:.0f} · Kelly ×{cfg['kelly_fraction']}")
+    print(f"p={a.p} · cote={a.odds} · marché={a.market or '—'} · modèle={'VALIDÉ' if validated else 'NON VALIDÉ/inconnu'}"
+          f" · bankroll={cfg['bankroll']:.0f} · Kelly ×{cfg['kelly_fraction']}")
     print(f"{LIGHT_LABEL[light]}")
-    if r["approved"]:
+    if light == GREEN:
         print(f"Mise : {r['stake_pct'] * 100:.2f} % = {r['stake_amount']:.2f}"
               + (f" · {', '.join(r['caps_applied'])}" if r["caps_applied"] else ""))
+    elif light == ORANGE and validated and r["approved"]:
+        print("Mise GELÉE (promotion suspendue — audit 2026-10-05) : aucune autorisation financière.")
     else:
-        print("Refus : " + (", ".join(r["reasons"]) or "—"))
+        motifs = r["reasons"] if r["reasons"] else (["modèle non validé"] if not validated else ["—"])
+        print("Refus : " + ", ".join(motifs))
 
 
 def cmd_kpi(a):
@@ -662,6 +853,8 @@ def main():
     r.add_argument("--match-id", dest="match_id")
     r.add_argument("--league")
     r.add_argument("--market")
+    r.add_argument("--statut-modele", dest="statut_modele",
+                   help="statut de validation du modèle (VALIDÉ requis pour une autorisation)")
     r.add_argument("--bankroll", type=float)
     r.add_argument("--config")
     r.add_argument("--kelly-fraction", type=float, dest="kelly_fraction")
