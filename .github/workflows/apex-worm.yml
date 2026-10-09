@@ -53,6 +53,14 @@ jobs:
           WORM_SMTP_PASS: ${{ secrets.WORM_SMTP_PASS }}
           WORM_EMAIL_TO: ${{ vars.WORM_EMAIL_TO }}
         run: |
+          # Sans secret API_FOOTBALL_KEY, l'API refuse la requête et le scan sort en erreur
+          # (le cron échouait toutes les heures). On ignore proprement le passage dans ce cas :
+          # le job reste VERT et un avertissement explique comment l'activer. Configurer le
+          # secret API_FOOTBALL_KEY (Settings → Secrets and variables → Actions) réactive le scan.
+          if [ -z "${API_FOOTBALL_KEY}" ]; then
+            echo "::warning title=APEX-WORM::API_FOOTBALL_KEY absent — scan CI ignoré. Renseigner le secret pour activer le passage horaire (l'analyse continue par ailleurs dans les sessions APEX)."
+            exit 0
+          fi
           python3 tools/apex_worm.py scan \
             --leagues "${{ github.event.inputs.leagues }}" \
             --max-calls "${{ github.event.inputs.max_calls || 400 }}" \
