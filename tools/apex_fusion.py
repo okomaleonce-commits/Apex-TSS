@@ -40,6 +40,7 @@ import apex_worm as W          # noqa: E402  (radar + builder d'email réutilis�
 import orion_consensus as O    # noqa: E402  (cœur d'arbitrage)
 import gel_matrix as GM        # noqa: E402  (matrice du gel : conditions par match + portes globales)
 import apex_bsm as B           # noqa: E402  (dérivation des marchés depuis les λ structurels WORM)
+import apex_apifootball as AF   # noqa: E402  (correspondance league_id → division football-data)
 
 # Ligues réellement couvertes par le backtest BSM (backtests/latest_params.json "divs").
 # Hors de cette liste, FORECAST (BSM) ne peut pas rendre de voix calibrée : écrite ABSENTE.
@@ -172,9 +173,16 @@ def _load_bsm_cache(day: str) -> dict:
     p = ROOT / "data" / "fusion" / "bsm" / f"{day}.json"
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
-        return {int(k): v for k, v in raw.items()}
     except (OSError, ValueError):
         return {}
+    # Skip par entrée : une clé non entière (métadonnée, code ligue) ne doit pas jeter tout le cache.
+    out = {}
+    for k, v in (raw.items() if isinstance(raw, dict) else []):
+        try:
+            out[int(k)] = v
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def _reco_market_param(worm_rec: dict):
@@ -186,6 +194,10 @@ def _reco_market_param(worm_rec: dict):
         return "over25"
     if "under 2.5" in m:
         return "under25"
+    # Double chance / handicap asiatique n'ont pas d'équivalent 1X2 simple : ne pas mapper vers
+    # une proba de victoire sèche (ce serait une voix sharp mal calibrée). Mieux vaut absente.
+    if "double chance" in m or "handicap" in m or "ah " in m or "+0.5" in m or "-0.5" in m or "-1" in m:
+        return None
     if "domicile" in m or "home" in m:
         return "home"
     if "extérieur" in m or "exterieur" in m or "away" in m:
@@ -229,7 +241,9 @@ def arbitrate_day(day: str):
         if r.get("phase") in ("DONE", "DEAD"):
             continue
         fid = r.get("fixture_id")
-        div = r.get("division") or r.get("div")
+        # Les records WORM ne portent pas de clé 'division'/'div' : la division football-data se
+        # résout depuis league_id (sinon BSM, sharp et mi-temps restaient silencieusement désactivés).
+        div = AF.LEAGUE_TO_DIV.get(r.get("league_id")) or r.get("division") or r.get("div")
         bsm_rec = bsm.get(fid)
         # Marqueur de périmètre BSM : une voix FORECAST n'est légitime QUE pour une ligue backtestée.
         in_scope = bool(div and div in scope)
@@ -517,8 +531,11 @@ def cmd_run(a):
         print("→ APEX-WORM scan (radar + MI) …")
         ns = argparse.Namespace(date=day, money=True, email=False, max_calls=a.max_calls,
                                 mi=not a.no_mi, no_mi=a.no_mi)
-        # cmd_scan lit ses attributs ; on complète les manquants prudemment.
-        for k, dv in (("leagues", None), ("window", 60.0), ("within", 60.0), ("dry_run", False)):
+        # cmd_scan lit ses attributs ; on complète les manquants prudemment (sinon AttributeError
+        # avalé par le try/except → --scan ne collectait rien et brûlait juste le quota DISCOVER).
+        for k, dv in (("leagues", None), ("window", 60.0), ("within", 60.0), ("dry_run", False),
+                      ("max_fixtures", None), ("odds_only", False), ("normalize", False),
+                      ("only_if_complete", False), ("cmd", "scan")):
             if not hasattr(ns, k):
                 setattr(ns, k, dv)
         try:
