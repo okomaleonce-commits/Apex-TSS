@@ -107,6 +107,15 @@ Cellule **descriptive** (`tools/apex_favorites.py`, agents `apex-favorites-condu
 - **Seuils calibrés sur les coupons 1xBet partagés** : un favori modèle à **82 %** (Augsburg–Bayern, Bayern ext.) a perdu ⇒ seuil **exigeant**. `strict` = p ≥ 75 % + marge ≥ 40 pts + `data_quality` ≥ 65 + signal stable + hors profil volatil ; sous-classe **DOMINANT** ≥ 85 %/60 pts. Profils `modere`/`large` disponibles. La variance n'est pas supprimable : un FAVORI_NET gagne *souvent*, jamais *toujours*, et un combiné de favoris reste à espérance négative.
 - `scan --date <J> [--profile strict] [--json] [--include-live]` ; `calibrate --coupon <legs.json>` score des jambes de coupon par bande de probabilité (anti-invention : match sans proba modèle → non listé).
 
+## Moteur de backtest de règles : APEX-STRATEGY
+
+`tools/apex_strategy.py` transforme une **règle de pari précise** en **verdict chiffré** sur l'historique réel (football-data en cache, ~20 000 matchs, cotes Pinnacle). C'est le moteur qui remplace les scripts jetables : « un jour ça va prendre » → un nombre.
+
+- **Règle** = CLI ou `--spec <fichier.json>` : bandes de cotes (`fav_min/max`, `opp_min/max`, `max_diff`, `draw_min/max`), camp (`--pick fav|dog|home|away|draw`), marché (`--market 1X2|DNB`), ligues (`--divs`), saisons (`--seasons`), filtre d'équipes (`--only-teams/--exclude-teams <fichier>`).
+- **Sortie** : échantillon, taux de victoire, cote moyenne, seuil de rentabilité, **ROI** à mise plate, **stabilité par saison** (`--by-season`), verdict EDGE/PAS D'EDGE.
+- **Garde-fous anti-illusion** : ROI sur cotes **Pinnacle** (marge ~2,5 %) — sur un book soft (betclic/1xBet, 6–10 %) retrancher 4–8 pts, affiché ; échantillon < 200 → marqué **BRUIT** ; le moteur **ne price pas, n'émet aucun pari** (gel), **n'invente rien**. Un edge n'est retenu que confirmé par CLV + gros échantillon + book réel.
+- Exemple validé : règle « favori 2,00–2,35, adversaire 2,35–3,20, DNB » → 1 484 paris, 44,1 % de réussite, ROI +1,0 % (Pinnacle) mais instable par saison (−3,3 % à +3,5 %) ⇒ **pas d'edge**.
+
 ## Environnement
 
 - Dépendances Python du module : `pip install numpy scipy`.
