@@ -99,6 +99,14 @@ Les quatre cellules (WORM radar, MI bruit marché/comportemental, PROTOCOL/BSM s
 - Ces sources ajoutent à ORION une voix **`marche_sharp`** (couche **K** d'`apex_fusion`), indépendante du classement WORM et du bruit MI — c'est elle qui peut porter le nombre de voix indépendantes à ≥ 3 et permettre un vrai arbitrage (hors COLLECTER). **Anti-invention absolu** : ligue non couverte ou source absente ⇒ voix écrite absente, jamais fabriquée.
 - **Ajouter des sources ne lève pas le gel** : plus de données ≠ bord. Le CLV (`tools/apex_clv.py`) reste le seul juge ; le dé-vigging est une estimation de la proba implicite, pas une vérité.
 
+## Favoris raisonnables, SANS cote : APEX-FAVORITES
+
+Cellule **descriptive** (`tools/apex_favorites.py`, agents `apex-favorites-conductor` / `apex-favorites-reader`), miroir d'APEX-CHARACTER : elle liste, par journée, les favoris que le **modèle** soutient nettement, **indépendamment du marché** (aucune cote lue, aucun EV calculé). Source = classement Poisson-λ WORM (`model_prob_1x2`, `lambdas`, `data_quality`, `signal_stable`, flags `upset`/`blowout`), **jamais étiqueté BSM** ; `+BSM` signale seulement une ligue backtestée qui corrobore.
+
+- **Favori raisonnable ≠ pari.** Sans cote, pas de value : la sortie est une liste **SURVEILLER — NON JOUABLE**. La cellule ne price pas, n'émet aucun pari (gel), alimente la brique DATA de la convergence 3-voix, ne la remplace pas.
+- **Seuils calibrés sur les coupons 1xBet partagés** : un favori modèle à **82 %** (Augsburg–Bayern, Bayern ext.) a perdu ⇒ seuil **exigeant**. `strict` = p ≥ 75 % + marge ≥ 40 pts + `data_quality` ≥ 65 + signal stable + hors profil volatil ; sous-classe **DOMINANT** ≥ 85 %/60 pts. Profils `modere`/`large` disponibles. La variance n'est pas supprimable : un FAVORI_NET gagne *souvent*, jamais *toujours*, et un combiné de favoris reste à espérance négative.
+- `scan --date <J> [--profile strict] [--json] [--include-live]` ; `calibrate --coupon <legs.json>` score des jambes de coupon par bande de probabilité (anti-invention : match sans proba modèle → non listé).
+
 ## Environnement
 
 - Dépendances Python du module : `pip install numpy scipy`.
