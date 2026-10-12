@@ -9,6 +9,7 @@ reports/*.md
 # Digests e-mail generes a la racine de reports/ (newsdesk, etc.) — ephemeres, non versionnes
 reports/*.email.html
 reports/*.email.txt
+reports/*.subject.txt
 reports/newsdesk_*
 # NE PAS ignorer fbref_cache.db — il est commité pour Render
 runs/.cache/
