@@ -168,6 +168,36 @@ def uefa_engine(league_id):
     return _UEFA_ENGINES.get(league_id)
 
 
+# Force inter-ligue des clubs (Elo walk-forward UCL+UEL+UECL, cf. tools/apex_uefa_elo.py).
+# Absent ⇒ repli silencieux sur le modèle structurel + shrinkage (anti-crash, jamais d'invention).
+_CLUB_ELO = {}
+try:
+    with open(os.path.join(os.path.dirname(__file__), os.pardir, "data", "uefa", "club_elo.json"),
+              encoding="utf-8") as _f:
+        _CLUB_ELO = json.load(_f)
+except Exception:
+    _CLUB_ELO = {}
+
+
+def elo_lambdas(home_name, away_name, avg_gf):
+    """λ (dom, ext) depuis l'Elo club inter-ligue, ou None si un club manque / trop peu vu.
+    Supériorité de buts = K_GOALS · (ΔElo + avantage terrain en pts) / 100, split du total avg_gf.
+    Validé walk-forward (1918 matchs UCL+UEL+UECL) : bat le taux de base. Jamais BSM (INDICATIF)."""
+    elo = _CLUB_ELO.get("elo") or {}
+    seen = _CLUB_ELO.get("seen") or {}
+    warm = _CLUB_ELO.get("warmup", 3)
+    p = (_CLUB_ELO.get("_meta") or {}).get("params", {})
+    eh, ea = elo.get(home_name), elo.get(away_name)
+    if eh is None or ea is None or seen.get(home_name, 0) < warm or seen.get(away_name, 0) < warm:
+        return None
+    k_goals = p.get("K_GOALS", 0.45)
+    ha = p.get("HA_ELO", 65.0)
+    sup = k_goals * (((eh - ea) + ha) / 100.0)
+    lh = min(4.5, max(0.15, avg_gf / 2 + sup / 2))
+    la = min(4.5, max(0.15, avg_gf / 2 - sup / 2))
+    return round(lh, 3), round(la, 3)
+
+
 def poisson_1x2(lh, la, max_goals=15):
     """Probabilités 1X2 par Poisson indépendant (modèle structurel, pas de calage marché)."""
     ph = [math.exp(-lh) * lh ** k / math.factorial(k) for k in range(max_goals + 1)]
@@ -811,14 +841,23 @@ def cmd_scan(a):
 
         # modèle structurel + probas (spec §19)
         rec["model_prob_1x2"] = None
-        if rec["strength_ok"]:
+        lam = None
+        # Coupe européenne : force inter-ligue Elo d'abord (ordonne les clubs à travers les ligues),
+        # repli sur le classement + shrinkage si un club manque à la table Elo.
+        if _eng:
+            lam = elo_lambdas(rec["home"], rec["away"], avg_gf)
+            if lam:
+                rec["lambda_source"] = "elo-club-interligue"
+        if not lam and rec["strength_ok"]:
             lam = structural_lambdas(strength, rec["home_id"], rec["away_id"], avg_gf,
                                      home_adv=_eng["home_adv"] if _eng else HOME_ADV,
                                      shrink_k=_eng.get("shrink_k", 0.0) if _eng else 0.0)
             if lam:
-                rec["lambdas"] = lam
-                rec["model_prob_1x2"] = poisson_1x2(*lam)
-                rec["expected_score"] = {"xg_dom": lam[0], "xg_ext": lam[1]}
+                rec["lambda_source"] = "structure-shrink" if _eng else "structure"
+        if lam:
+            rec["lambdas"] = lam
+            rec["model_prob_1x2"] = poisson_1x2(*lam)
+            rec["expected_score"] = {"xg_dom": lam[0], "xg_ext": lam[1]}
         # proba ajustée : ancrée sur le marché (le modèle ne bat pas le marché → poids modèle faible, honnête)
         adj = fair
         if fair and rec["model_prob_1x2"]:

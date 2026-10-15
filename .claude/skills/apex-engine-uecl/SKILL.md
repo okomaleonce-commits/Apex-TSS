@@ -28,9 +28,14 @@ aucun pari seul : fournit la couche structurelle de buts à la chaîne BSM / WOR
   **1,33** vs 1,04 ; 202 « favoris à ≥70 % » dont 50 % d'échec = pile ou face déguisé). Un
   **rétrécissement bayésien `shrink_k=10`** (câblé dans `apex_worm`) ramène le log-loss au niveau du
   base-rate (~1,03) et fait quasi disparaître les artefacts. Le 1X2 est désormais sain.
-- **Limite résiduelle** : le shrinkage retire le mal, **ne crée pas d'edge** — sans force inter-ligue
-  (coefficient UEFA club / Elo club, non joignable réseau à ce jour), le 1X2 structurel vaut ≈ le taux
-  de base. `data_quality ≤ 68`. Les marchés de **buts** (avg_goals mesuré) sont la partie fiable.
+- **Force inter-ligue CÂBLÉE : Elo club** (`tools/apex_uefa_elo.py` → `data/uefa/club_elo.json`), Elo
+  walk-forward sur 1 918 matchs UCL+UEL+UECL (clubelo injoignable réseau → Elo bâti sur les résultats
+  réels). **Bat le taux de base** (1,025 vs 1,033), edge réel mais modeste, sans sur-confiance.
+  `apex_worm` l'utilise en priorité ; **repli classement + shrinkage** pour un club absent (fréquent en
+  UECL : champions de micro-championnats non présents dans l'historique continental).
+- **Limite résiduelle / honnêteté** : « bat le taux de base » ≠ « bat le marché ». Statut **INDICATIF**
+  maintenu (`data_quality ≤ 68`), jamais BSM, tant qu'un backtest sur **cotes** (CLV) n'a pas eu lieu.
+  Marchés de **buts** (avg_goals mesuré) = partie la plus fiable.
 
 ## 2. Paramètres calibrés (mesurés, n=818)
 

@@ -28,10 +28,16 @@ BSM / WORM / S1-S8.
   1,04). Un **rétrécissement bayésien `shrink_k=8`** (câblé dans `apex_worm`) ramène le log-loss au
   niveau du base-rate (1,03) et fait tomber les artefacts p≥70 % de 110 à 2. Le 1X2 est désormais
   **sain** (ex. Lyon–Crystal Palace 37/25/38 au lieu de 2/9/89).
-- **Limite résiduelle** : le shrinkage **retire le mal, ne crée pas d'edge** — sans **force inter-ligue**
-  (coefficient UEFA club / Elo club, non joignable réseau à ce jour), le 1X2 structurel vaut ≈ le taux
-  de base. `data_quality` reste plafonnée (≤ 70). Les marchés de **buts (O/U, BTTS)**, portés par
-  l'`avg_goals` mesuré, sont la partie la plus robuste.
+- **Force inter-ligue CÂBLÉE : Elo club (`tools/apex_uefa_elo.py` → `data/uefa/club_elo.json`).** Elo
+  walk-forward sur **1 918 matchs UCL+UEL+UECL** (clubelo étant injoignable réseau, cet Elo est
+  construit sur les résultats réels). **Il BAT le taux de base** (log-loss 1,025 vs base 1,033) — un
+  edge **réel mais modeste**, et sans sur-confiance. `apex_worm` l'utilise en priorité pour ordonner
+  les forces (ex. Milan favori à Salzburg, Real Sociedad à Union SG) ; **repli sur le classement +
+  shrinkage** pour un club absent de la table (promu, petit championnat). Top Elo cohérent : PSG,
+  Arsenal, Aston Villa, Bayern, Chelsea, Barcelone.
+- **Limite résiduelle / honnêteté** : « bat le taux de base » n'est **pas** « bat le marché ». Statut
+  **INDICATIF** maintenu (`data_quality ≤ 70`), jamais BSM, tant qu'un backtest sur **cotes** (CLV)
+  n'a pas eu lieu. Les marchés de **buts** (avg_goals mesuré) restent la partie la plus robuste.
 
 ## 2. Paramètres calibrés (mesurés, n=540)
 
