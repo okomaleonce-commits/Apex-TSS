@@ -126,6 +126,18 @@ En coupe d'Europe, l'ancrage au seul favori marché rate les deux vecteurs d'ups
 
 Portée : ces modulateurs **ajustent la proba lue**, le palier de décision restant soumis au gel, à l'EV ≥ 3 % horodatée et à la convergence. L'UCL/UEL est couverte par `apex-engine-uefa` mais **sans historique backtesté** : tant que la calibration n'existe pas, toute proba de coupe reste **INDICATIVE / NON VALIDÉE**, jamais étiquetée BSM.
 
+## Audit d'un coupon partagé (captures de parieurs) : protocole en 5 temps
+
+Un coupon reçu en capture (BetsWall, 1xBet, etc.) s'audite **toujours dans cet ordre** — c'est un protocole reproductible, pas une lecture au jugé. Il ne lève pas le module BSM : il l'applique jambe par jambe.
+
+1. **Identifier les vrais matchs de la période d'édition AVANT de juger.** La date affichée est celle de l'**édition**, pas forcément du coup d'envoi : vérifier chaque fixture (date réelle, compétition, round, résultat) sur source externe recoupée. *Leçon du coupon Hacker2 (édité 12/10/2026) :* des matchs bien réels joués le 14/10 (UCL J2) avaient d'abord été qualifiés à tort de « fabriqués » faute d'avoir cherché les fixtures. **On ne déclare jamais un match faux sans avoir cherché le fixture réel.**
+2. **Classer chaque jambe par périmètre.** Pour chaque match : dans les **21 moteurs de ligue** ? dans **football-data** (APEX-STRATEGY) ? Une **2ᵉ division**, une ligue mineure ou une coupe non backtestée sort **HORS_PERIMETRE** — ce n'est pas une invention, c'est une **absence de moteur**. *Leçon du coupon Xander (édité 09/10/2026, 4 jambes en 2ᵉˢ divisions KAZ/SUI + NIFL) :* **0 jambe sur 4 chiffrable**, verdict ORION **COLLECTER** partout, aucune voix DATA calibrée disponible.
+3. **Appliquer le BSM là où c'est possible, NON VALIDÉ ailleurs.** Dans le périmètre : backtest + `simulate` calibré. Hors périmètre : `--lh/--la` manuels marqués NON VALIDÉS, ou pas de simulation du tout — jamais de pricing présenté comme calibré quand il ne l'est pas.
+4. **Lire la côte totale comme une probabilité, pas comme un gain.** Côte totale 276 ⇒ proba implicite ≈ 0,36 %. **Gagner un longshot une fois est de la variance / survie, jamais une preuve d'edge** : sur 100 coupons de ce profil, 99+ perdent la mise entière. Un combiné de favoris est déjà à espérance négative (cf. APEX-FAVORITES) ; un combiné d'outsiders en ligues non calibrées l'est davantage. Le résultat affiché « gagné » ne change rien au verdict pré-match.
+5. **Picks illisibles = non-invention stricte.** Si la capture masque les sélections (marché/camp de chaque jambe), **ne pas les supposer** pour faire « coller » l'analyse au résultat affiché. On audite ce qu'on voit, on écrit *absent* ce qu'on ne voit pas.
+
+Gel maintenu : un audit de coupon ne produit **jamais** une mise, seulement une lecture honnête de ce qu'APEX peut — ou ne peut pas — chiffrer. Le passage se termine par l'envoi du digest (connecteur Gmail), comme tout passage APEX.
+
 ## Environnement
 
 - Dépendances Python du module : `pip install numpy scipy`.
