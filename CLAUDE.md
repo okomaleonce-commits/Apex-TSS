@@ -115,6 +115,7 @@ Cellule **descriptive** (`tools/apex_favorites.py`, agents `apex-favorites-condu
 - **Sortie** : échantillon, taux de victoire, cote moyenne, seuil de rentabilité, **ROI** à mise plate, **stabilité par saison** (`--by-season`), verdict EDGE/PAS D'EDGE.
 - **Garde-fous anti-illusion** : ROI sur cotes **Pinnacle** (marge ~2,5 %) — sur un book soft (betclic/1xBet, 6–10 %) retrancher 4–8 pts, affiché ; échantillon < 200 → marqué **BRUIT** ; le moteur **ne price pas, n'émet aucun pari** (gel), **n'invente rien**. Un edge n'est retenu que confirmé par CLV + gros échantillon + book réel.
 - Exemple validé : règle « favori 2,00–2,35, adversaire 2,35–3,20, DNB » → 1 484 paris, 44,1 % de réussite, ROI +1,0 % (Pinnacle) mais instable par saison (−3,3 % à +3,5 %) ⇒ **pas d'edge**.
+- Exemple validé (audit du coupon Xander, 4 nuls, 09/10/2026) : règle « camp = nul, cote du nul 3,75–4,33 » → **4 632 paris, 24,1 % de réussite (seuil 25,2 %), ROI −4,3 % (Pinnacle)**, instable par saison ⇒ **pas d'edge**. Parier le nul à ~4.0 est structurellement perdant ; empiler 4 nuls (−EV chacun) donne une EV de combiné ≈ −16 % (book sharp) à −30/−35 % (book soft) — un ticket gagnant à 0,36 % reste une décision négative.
 
 ## Modulateurs de contexte en coupe (UCL/UEL/UECL) : disrupteur contextuel & forteresse
 
