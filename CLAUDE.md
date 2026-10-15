@@ -137,6 +137,13 @@ En coupe d'Europe, l'ancrage au seul favori marché rate les deux vecteurs d'ups
 
 Portée : ces modulateurs **ajustent la proba lue**, le palier de décision restant soumis au gel, à l'EV ≥ 3 % horodatée et à la convergence. L'UCL/UEL est couverte par `apex-engine-uefa` mais **sans historique backtesté** : tant que la calibration n'existe pas, toute proba de coupe reste **INDICATIVE / NON VALIDÉE**, jamais étiquetée BSM.
 
+### Moteurs de coupe dédiés : apex-engine-uel & apex-engine-uecl (séparés du moteur unifié)
+
+Deux moteurs **dédiés et séparés** du moteur unifié `apex-engine-uefa` : `apex-engine-uel` (UEFA Europa League, league_id **3**) et `apex-engine-uecl` (UEFA Conference League, league_id **848**). Source de vérité des paramètres : `tools/params/uefa_engines.json` (lu par `apex_worm.py` via `uefa_engine(league_id)`).
+
+- **Calibrés sur données réelles** (anti-invention) : UEL sur **540 matchs**, UECL sur **818 matchs** (saisons 2024-25 + 2025-26, scores API-Football). avg_goals **2,72** pour les deux (dom/ext UEL 1,55/1,17 · UECL 1,62/1,10) ; HOME_ADV DC **1,12** (UEL) / **1,15** (UECL, tier forteresse 1,21) ; baselines 1X2, O2.5, BTTS mesurées. **Correction mesurée** : `apex-engine-uefa` sous-estimait avg_goals (UEL 2,58 → réel 2,72 ; UECL **2,44 → réel 2,72**).
+- **Statut INDICATIF / NON VALIDÉ** : aucun backtest walk-forward sur cotes n'existe pour ces coupes → jamais étiqueté BSM. **Limite connue câblée** : la force inter-ligue (coefficient UEFA club / Elo club) n'est pas branchée ⇒ le **1X2 structurel est sur-confiant** (un « 98 % » WORM en coupe est un artefact). Garde-fou automatique dans `apex_worm` : `data_quality` plafonnée (UEL ≤ 70, UECL ≤ 68), et HOME_ADV + avg_goals calibrés appliqués (les marchés de **buts** sont la partie fiable). Chemin de validation : câbler la force inter-ligue, puis backtest sur cotes → `apex-llm-council-audit`, avant tout passage à VALIDÉ.
+
 ## Audit d'un coupon partagé (captures de parieurs) : protocole en 5 temps
 
 Un coupon reçu en capture (BetsWall, 1xBet, etc.) s'audite **toujours dans cet ordre** — c'est un protocole reproductible, pas une lecture au jugé. Il ne lève pas le module BSM : il l'applique jambe par jambe.

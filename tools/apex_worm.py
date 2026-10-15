@@ -152,6 +152,21 @@ def book_dispersion(odds_by_book, market="1X2"):
 
 HOME_ADV = 1.10  # avantage terrain générique, INFERRED (spec §19 : ne jamais prétendre à la certitude)
 
+# Moteurs de coupe européenne calibrés (apex-engine-ucl / -uel / -uecl) : params par league_id
+# (tools/params/uefa_engines.json, source de vérité). Fichier absent ⇒ repli silencieux sur le
+# modèle générique — anti-crash, jamais d'invention.
+_UEFA_ENGINES = {}
+try:
+    with open(os.path.join(os.path.dirname(__file__), "params", "uefa_engines.json"), encoding="utf-8") as _f:
+        _UEFA_ENGINES = {int(k): v for k, v in json.load(_f).get("engines", {}).items()}
+except Exception:
+    _UEFA_ENGINES = {}
+
+
+def uefa_engine(league_id):
+    """Params calibrés d'un moteur de coupe pour ce league_id, ou None si ligue non continentale."""
+    return _UEFA_ENGINES.get(league_id)
+
 
 def poisson_1x2(lh, la, max_goals=15):
     """Probabilités 1X2 par Poisson indépendant (modèle structurel, pas de calage marché)."""
@@ -194,8 +209,9 @@ def team_rates(strength, tid, avg_gf):
     return s["gf"] / s["played"], s["ga"] / s["played"]
 
 
-def structural_lambdas(strength, home_id, away_id, avg_gf):
+def structural_lambdas(strength, home_id, away_id, avg_gf, home_adv=HOME_ADV):
     """λ attendus (dom, ext) = force d'attaque × faiblesse défensive adverse, normalisées à avg_gf.
+    home_adv : multiplicateur terrain (générique 1.10, ou calibré par compétition via uefa_engine).
     Renvoie (lh, la) ou None si le classement ne couvre pas les deux équipes."""
     rh = team_rates(strength, home_id, avg_gf)
     ra = team_rates(strength, away_id, avg_gf)
@@ -207,8 +223,8 @@ def structural_lambdas(strength, home_id, away_id, avg_gf):
     atk_h, def_h = gf_h / half, ga_h / half
     atk_a, def_a = gf_a / half, ga_a / half
     # bornes : au-delà de ~4.5 buts attendus, c'est de l'extrapolation d'un écart de division non fiable.
-    lh = min(4.5, max(0.2, half * atk_h * def_a * HOME_ADV))
-    la = min(4.5, max(0.2, half * atk_a * def_h / HOME_ADV))
+    lh = min(4.5, max(0.2, half * atk_h * def_a * home_adv))
+    la = min(4.5, max(0.2, half * atk_a * def_h / home_adv))
     return round(lh, 3), round(la, 3)
 
 
@@ -761,7 +777,8 @@ def cmd_scan(a):
             if len(strength_cache) > before:
                 calls += 1
         rec["strength_ok"] = bool(strength.get(rec["home_id"]) and strength.get(rec["away_id"]))
-        avg_gf = 1.35 * 2
+        _eng = uefa_engine(rec["league_id"])  # moteur de coupe calibré (UCL/UEL/UECL) ou None
+        avg_gf = _eng.get("avg_goals", 1.35 * 2) if _eng else 1.35 * 2
         if rec["strength_ok"]:
             sh, sa = strength[rec["home_id"]], strength[rec["away_id"]]
             rec["min_played"] = min(sh.get("played", 0), sa.get("played", 0))
@@ -783,7 +800,8 @@ def cmd_scan(a):
         # modèle structurel + probas (spec §19)
         rec["model_prob_1x2"] = None
         if rec["strength_ok"]:
-            lam = structural_lambdas(strength, rec["home_id"], rec["away_id"], avg_gf)
+            lam = structural_lambdas(strength, rec["home_id"], rec["away_id"], avg_gf,
+                                     home_adv=_eng["home_adv"] if _eng else HOME_ADV)
             if lam:
                 rec["lambdas"] = lam
                 rec["model_prob_1x2"] = poisson_1x2(*lam)
@@ -866,6 +884,10 @@ def cmd_scan(a):
 
         # qualité, confiance, recommandation
         rec["data_quality"] = data_quality(rec)
+        if _eng and _eng.get("data_quality_cap"):
+            # coupe continentale : force inter-ligue non câblée ⇒ 1X2 structurel sur-confiant,
+            # on plafonne la qualité (garde-fou INDICATIF, cf. apex-engine-uel/-uecl).
+            rec["data_quality"] = min(rec["data_quality"], _eng["data_quality_cap"])
         rec["confidence"] = confidence(rec, disp)
         rec["reco"] = recommend(rec)
 
