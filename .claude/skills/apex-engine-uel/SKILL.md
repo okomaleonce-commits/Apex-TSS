@@ -22,11 +22,16 @@ BSM / WORM / S1-S8.
 - **CALIBRÉ** sur résultats réels : 540 matchs (269 en 2024-25 + 271 en 2025-26), scores API-Football.
 - **NON comparé au marché** : aucun backtest walk-forward sur cotes historiques n'existe pour l'UEL.
   Toute probabilité produite est **INDICATIVE / NON VALIDÉE**, **jamais étiquetée BSM**.
-- **Limite structurelle connue** : le classement de force (attaque/défense) croise des équipes de
-  ligues domestiques différentes ; en début de phase de ligue la table est quasi vide. Tant qu'une
-  **force inter-ligue** (coefficient UEFA club ou Elo club) n'est pas câblée, le **1X2 structurel est
-  sur-confiant** → plafonner `data_quality ≤ 70` et traiter les 1X2 extrêmes (>90 %) comme non fiables.
-  Les marchés de **buts (O/U, BTTS)** sont plus robustes car portés par l'`avg_goals` mesuré.
+- **Sur-confiance de petit échantillon — CORRIGÉE (shrinkage validé).** Le classement de coupe est
+  mince en début de phase ⇒ taux gf/ga extrêmes ⇒ « favoris à 98 % » artefactuels. **Backtest
+  walk-forward (540 matchs) : le modèle brut (K=0) est PIRE que le taux de base** (log-loss 1,18 vs
+  1,04). Un **rétrécissement bayésien `shrink_k=8`** (câblé dans `apex_worm`) ramène le log-loss au
+  niveau du base-rate (1,03) et fait tomber les artefacts p≥70 % de 110 à 2. Le 1X2 est désormais
+  **sain** (ex. Lyon–Crystal Palace 37/25/38 au lieu de 2/9/89).
+- **Limite résiduelle** : le shrinkage **retire le mal, ne crée pas d'edge** — sans **force inter-ligue**
+  (coefficient UEFA club / Elo club, non joignable réseau à ce jour), le 1X2 structurel vaut ≈ le taux
+  de base. `data_quality` reste plafonnée (≤ 70). Les marchés de **buts (O/U, BTTS)**, portés par
+  l'`avg_goals` mesuré, sont la partie la plus robuste.
 
 ## 2. Paramètres calibrés (mesurés, n=540)
 

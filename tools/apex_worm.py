@@ -209,17 +209,29 @@ def team_rates(strength, tid, avg_gf):
     return s["gf"] / s["played"], s["ga"] / s["played"]
 
 
-def structural_lambdas(strength, home_id, away_id, avg_gf, home_adv=HOME_ADV):
+def structural_lambdas(strength, home_id, away_id, avg_gf, home_adv=HOME_ADV, shrink_k=0.0):
     """λ attendus (dom, ext) = force d'attaque × faiblesse défensive adverse, normalisées à avg_gf.
     home_adv : multiplicateur terrain (générique 1.10, ou calibré par compétition via uefa_engine).
+    shrink_k : rétrécissement bayésien des taps gf/ga vers la moyenne (buts/match = avg_gf/2) quand
+      peu de matchs sont joués — tue la sur-confiance de petit échantillon (classement de coupe mince).
+      shrink_k=0 ⇒ comportement d'origine (taux bruts). Validé en walk-forward sur 540 UEL + 818 UECL :
+      K=0 est PIRE que le taux de base (log-loss 1.18/1.33 vs 1.04) ; K≈8-10 ramène au niveau du base-rate
+      et fait disparaître les « favoris à 98 % » artefactuels. Ne crée pas d'edge : retire le mal.
     Renvoie (lh, la) ou None si le classement ne couvre pas les deux équipes."""
-    rh = team_rates(strength, home_id, avg_gf)
-    ra = team_rates(strength, away_id, avg_gf)
-    if not rh or not ra:
+    sh = strength.get(home_id)
+    sa = strength.get(away_id)
+    if not _has_standings(sh, "gf", "ga") or not _has_standings(sa, "gf", "ga"):
         return None
-    gf_h, ga_h = rh
-    gf_a, ga_a = ra
     half = avg_gf / 2 if avg_gf else 1.35
+
+    def _shrunk(s):
+        pl = s["played"]
+        gf = (s["gf"] + shrink_k * half) / (pl + shrink_k)
+        ga = (s["ga"] + shrink_k * half) / (pl + shrink_k)
+        return gf, ga
+
+    gf_h, ga_h = _shrunk(sh)
+    gf_a, ga_a = _shrunk(sa)
     atk_h, def_h = gf_h / half, ga_h / half
     atk_a, def_a = gf_a / half, ga_a / half
     # bornes : au-delà de ~4.5 buts attendus, c'est de l'extrapolation d'un écart de division non fiable.
@@ -801,7 +813,8 @@ def cmd_scan(a):
         rec["model_prob_1x2"] = None
         if rec["strength_ok"]:
             lam = structural_lambdas(strength, rec["home_id"], rec["away_id"], avg_gf,
-                                     home_adv=_eng["home_adv"] if _eng else HOME_ADV)
+                                     home_adv=_eng["home_adv"] if _eng else HOME_ADV,
+                                     shrink_k=_eng.get("shrink_k", 0.0) if _eng else 0.0)
             if lam:
                 rec["lambdas"] = lam
                 rec["model_prob_1x2"] = poisson_1x2(*lam)

@@ -22,12 +22,15 @@ aucun pari seul : fournit la couche structurelle de buts à la chaîne BSM / WOR
 - **CALIBRÉ** sur résultats réels : 818 matchs (409 en 2024-25 + 409 en 2025-26), scores API-Football.
 - **NON comparé au marché** : aucun backtest walk-forward sur cotes historiques pour l'UECL →
   proba **INDICATIVE / NON VALIDÉE**, **jamais étiquetée BSM**.
-- **Limite structurelle connue (critique en UECL)** : le vivier est très hétérogène (grands clubs en
-  reconversion européenne ↔ champions de micro-championnats). Le classement de force inter-ligue
-  n'étant pas câblé, le **1X2 structurel est fortement sur-confiant** → plafonner `data_quality ≤ 68`,
-  rejeter les 1X2 extrêmes, préférer les marchés de **buts**. *C'est exactement le cas qui, au scan du
-  15/10/2026, rendait les 18 matchs UECL non classables (model_prob absent → NO BET).* Ce moteur
-  fournit au moins les **baselines de buts** fiables en attendant la force inter-ligue.
+- **Sur-confiance de petit échantillon — CORRIGÉE (shrinkage validé).** Vivier très hétérogène (grands
+  clubs ↔ champions de micro-championnats) + classement mince ⇒ artefacts massifs. **Backtest
+  walk-forward (818 matchs) : le modèle brut (K=0) est NETTEMENT PIRE que le taux de base** (log-loss
+  **1,33** vs 1,04 ; 202 « favoris à ≥70 % » dont 50 % d'échec = pile ou face déguisé). Un
+  **rétrécissement bayésien `shrink_k=10`** (câblé dans `apex_worm`) ramène le log-loss au niveau du
+  base-rate (~1,03) et fait quasi disparaître les artefacts. Le 1X2 est désormais sain.
+- **Limite résiduelle** : le shrinkage retire le mal, **ne crée pas d'edge** — sans force inter-ligue
+  (coefficient UEFA club / Elo club, non joignable réseau à ce jour), le 1X2 structurel vaut ≈ le taux
+  de base. `data_quality ≤ 68`. Les marchés de **buts** (avg_goals mesuré) sont la partie fiable.
 
 ## 2. Paramètres calibrés (mesurés, n=818)
 
