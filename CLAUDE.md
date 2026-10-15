@@ -116,6 +116,16 @@ Cellule **descriptive** (`tools/apex_favorites.py`, agents `apex-favorites-condu
 - **Garde-fous anti-illusion** : ROI sur cotes **Pinnacle** (marge ~2,5 %) — sur un book soft (betclic/1xBet, 6–10 %) retrancher 4–8 pts, affiché ; échantillon < 200 → marqué **BRUIT** ; le moteur **ne price pas, n'émet aucun pari** (gel), **n'invente rien**. Un edge n'est retenu que confirmé par CLV + gros échantillon + book réel.
 - Exemple validé : règle « favori 2,00–2,35, adversaire 2,35–3,20, DNB » → 1 484 paris, 44,1 % de réussite, ROI +1,0 % (Pinnacle) mais instable par saison (−3,3 % à +3,5 %) ⇒ **pas d'edge**.
 
+## Modulateurs de contexte en coupe (UCL/UEL/UECL) : disrupteur contextuel & forteresse
+
+En coupe d'Europe, l'ancrage au seul favori marché rate les deux vecteurs d'upset les plus répétables. Ces deux règles sont des **modulateurs de lecture**, pas une autorité de pari : elles **n'émettent aucun pari seules** (gel), ne remplacent ni le BSM ni la convergence 3 voix, et ne valent que sur **signal observable** (anti-invention : signal absent = écrit absent). Elles alimentent les briques existantes — le **disrupteur** entre par la cellule comportementale **APEX-MI** (`apex-bi-*`), la **forteresse** par la structure **APEX-WORM** / le moteur de ligue domestique de l'équipe à domicile.
+
+1. **Disrupteur contextuel (→ APEX-MI).** Quand une équipe — surtout un favori marché — aborde le match avec une **perturbation extra-sportive documentée et datée** (sanction/condamnation, crise de gouvernance, changement d'entraîneur récent, conflit de vestiaire public, enjeu asymétrique type dead rubber), **baisser la confiance** sur son camp et **relever la probabilité de l'issue adverse**. Jamais un diagnostic mental ni une généralisation : uniquement un **proxy observable** daté, pondéré comme les signaux `apex-bi-*`. Cas d'école : Man City–PSG (14/10/2026), 1er match à domicile de City après sa condamnation pour irrégularités financières → PSG l'emporte 4-2 ; le favori marché était fragilisé par un signal que la lecture statistique seule ignorait.
+
+2. **Forteresse à domicile en coupe (→ APEX-WORM / moteur domestique).** Pour l'équipe qui **reçoit**, intégrer son **avantage structurel à domicile mesuré par son propre moteur de ligue** (ex. Bodø/Glimt `HOME_ADV 1,22`, pelouse synthétique, déplacement arctique — `apex-engine-eliteserien`) **au lieu de s'ancrer au seul favori marché** venu de l'extérieur. Un club modeste dans une **forteresse documentée** face à un cador en déplacement est un **vecteur d'upset structurel**, pas une surprise aléatoire. Cas d'école : Bodø/Glimt 1-0 Dortmund (14/10/2026), déjà accroché 2-2 fin 2025 à domicile.
+
+Portée : ces modulateurs **ajustent la proba lue**, le palier de décision restant soumis au gel, à l'EV ≥ 3 % horodatée et à la convergence. L'UCL/UEL est couverte par `apex-engine-uefa` mais **sans historique backtesté** : tant que la calibration n'existe pas, toute proba de coupe reste **INDICATIVE / NON VALIDÉE**, jamais étiquetée BSM.
+
 ## Environnement
 
 - Dépendances Python du module : `pip install numpy scipy`.
