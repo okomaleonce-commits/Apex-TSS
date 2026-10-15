@@ -117,6 +117,16 @@ Cellule **descriptive** (`tools/apex_favorites.py`, agents `apex-favorites-condu
 - Exemple validé : règle « favori 2,00–2,35, adversaire 2,35–3,20, DNB » → 1 484 paris, 44,1 % de réussite, ROI +1,0 % (Pinnacle) mais instable par saison (−3,3 % à +3,5 %) ⇒ **pas d'edge**.
 - Exemple validé (audit du coupon Xander, 4 nuls, 09/10/2026) : règle « camp = nul, cote du nul 3,75–4,33 » → **4 632 paris, 24,1 % de réussite (seuil 25,2 %), ROI −4,3 % (Pinnacle)**, instable par saison ⇒ **pas d'edge**. Parier le nul à ~4.0 est structurellement perdant ; empiler 4 nuls (−EV chacun) donne une EV de combiné ≈ −16 % (book sharp) à −30/−35 % (book soft) — un ticket gagnant à 0,36 % reste une décision négative.
 
+### Leçon mesurée — le « contexte-nul » n'est pas un edge, c'est un veto
+
+Audit causal du même coupon (3 jambes/4 = « un favori modéré ne gagne pas »). Tous les angles de cette situation mesurés sur l'historique réel (favori 1,70–2,15, 7 227 matchs, Pinnacle) : **NUL −5,3 % · FAVORI −2,9 % · OUTSIDER (fade) −5,6 % · FAVORI en DNB −1,3 %**. **Aucun angle ne bat la marge : le marché price ces situations efficacement.** Le seul sous-cas du nul qui frôle l'équilibre est le **match sans favori net** (écart de cote faible) : −1,0 % sur 2 449 paris, neutre sur book sharp, négatif sur book soft.
+
+Trois conséquences durables :
+
+1. **Audit d'une conjonction : expliquer les jambes, jamais le combiné.** Chaque nul est un événement ~24 % (fréquent) ; un 4-fold de nuls à 0,36 % n'a pas d'autre « cause » que la variance. Coller un récit à la conjonction est le biais de survie.
+2. **« Le favori a calé » (ex post) ≠ « le favori était surcoté » (ex ante).** Fader le favori est encore plus perdant que le suivre (−5,6 %). Un résultat surprenant n'implique pas un prix inefficace.
+3. **Si un lecteur « contexte-nul » est ajouté** (frère des modulateurs disrupteur/forteresse : il relèverait la proba lue du nul quand match équilibré + deux blocs défensifs/peu prolifiques + enjeu faible + rivalité + rythme perturbé), **garde-fou dur** : comme le meilleur contexte mesuré reste ≤ seuil de rentabilité, il ne **déclenche jamais** un pari sur le nul — son seul usage légitime est de **retirer ou rétrograder un pari sur un favori fragile** (un veto de prudence, pas un déclencheur). La seule zone encore à backtester avant toute idée d'edge : le match **sans favori net**, plutôt en **DNB / lignes asiatiques** et par ligue — à prouver, jamais à affirmer.
+
 ## Modulateurs de contexte en coupe (UCL/UEL/UECL) : disrupteur contextuel & forteresse
 
 En coupe d'Europe, l'ancrage au seul favori marché rate les deux vecteurs d'upset les plus répétables. Ces deux règles sont des **modulateurs de lecture**, pas une autorité de pari : elles **n'émettent aucun pari seules** (gel), ne remplacent ni le BSM ni la convergence 3 voix, et ne valent que sur **signal observable** (anti-invention : signal absent = écrit absent). Elles alimentent les briques existantes — le **disrupteur** entre par la cellule comportementale **APEX-MI** (`apex-bi-*`), la **forteresse** par la structure **APEX-WORM** / le moteur de ligue domestique de l'équipe à domicile.
