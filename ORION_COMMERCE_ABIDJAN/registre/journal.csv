@@ -7,3 +7,6 @@ date_iso,type,jalon,piste,montant_fcfa,sens,preuve,note
 2026-10-16,NOTE,G2,transport_confirme,,,"devis/devis_transport_groupage_chine_abidjan_2026-10-16.md","Transport confirme : douane INCLUSE, min 0-0.5m3=10000 XOF, delai 45-75j, Anyama via Yango"
 2026-10-16,NOTE,G1,prix_marche_abidjan,,,"preuves/G1_prix_marche_abidjan_et_3devis_2026-10-16.md","Prix vente Abidjan boite 66L ~5000-6300 FCFA promo (ref 8000-10400) ; cout rendu ~2100-2400 ; marge ~1900/u si client paie livraison"
 2026-10-16,NOTE,G2,3devis_fournisseurs,,,"preuves/G1_prix_marche_abidjan_et_3devis_2026-10-16.md","3 devis : Kition 1.45\$/MOQ20 (reference, meilleur pour pilote) ; LINSHU 1.45-1.85\$/MOQ50 ; Ningbo Refine 4.60-4.90\$/MOQ500"
+2026-10-16,NOTE,G2,budget_pilote,,,"preuves/G2_budget_pilote_20boites_2026-10-16.md","Yango Anyama 20000/20 boites ; cout rendu finalise ~2341 XOF/boite ; pilote total ~77600 XOF (26pct capital)"
+2026-10-16,NOTE,G2,questions_kition,,,"devis/questions_kition_echantillon_2026-10-16.md","Liste de questions vendeur Kition prete (spec, prix, livraison entrepot Chine, echantillon)"
+2026-10-16,NOTE,G1,synthese,,,"SYNTHESE_decision_2026-10-16.md","Note de synthese 1 page : produit retenu, chiffres, plan pilote, decisions dirigeant"
