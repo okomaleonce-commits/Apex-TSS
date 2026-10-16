@@ -2,3 +2,5 @@ date_iso,type,jalon,piste,montant_fcfa,sens,preuve,note
 2026-10-16,NOTE,G1,alibaba_4_liens,,,"preuves/G1_candidats_alibaba_2026-10-16.md","4 liens Alibaba lus : 1 objet rangement + 3 complements alimentaires"
 2026-10-16,VETO,G1,complements_sante,,,"preuves/VETO_sante_complements_2026-10-16.md","VETO sante : produits 2-3-4 ingeres, reglementes CI, autorisation non prouvee"
 2026-10-16,NOTE,G2,P1_boite_rangement,,,"devis/devis_achat_P1_boite_rangement_2026-10-16.md","Devis 1/3 produit rangement ; ALERTE transport ~17$/piece ; fret maritime+douane a obtenir"
+2026-10-16,NOTE,G2,transport_groupage,,,"devis/devis_transport_groupage_chine_abidjan_2026-10-16.md","Transporteur dirigeant : groupage CBM<=1 250000 XOF/m3, CBM>1 215000 XOF/m3 ; douane/min CBM/Anyama a confirmer"
+2026-10-16,NOTE,G2,P1_boite_rangement,,,"preuves/G2_cout_rendu_P1_2026-10-16.md","Cout rendu P1 ~2000-2200 XOF/piece (vs 10500 express) ; seuil rentable >=6000 XOF si client paie livraison"
