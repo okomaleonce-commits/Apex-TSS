@@ -152,6 +152,25 @@ def book_dispersion(odds_by_book, market="1X2"):
 
 HOME_ADV = 1.10  # avantage terrain générique, INFERRED (spec §19 : ne jamais prétendre à la certitude)
 
+# Rétrécissement bayésien par défaut des taux gf/ga vers la moyenne de la ligue (avg_gf/2), appliqué à
+# TOUTES les compétitions (pas seulement les coupes) : en début de saison un classement de 2-5 matchs
+# donne des taux extrêmes → « favoris à 90 %+ » artefactuels. Validé walk-forward sur football-data
+# (~20 000 matchs domestiques) : K=0 (brut) log-loss 1,071 (calib) / 1,092 (hors-échantillon) PIRE que
+# K=8 (1,027 / 1,029) ; les « favoris ≥ 70 % » tombent de 2508 à 676 et leur taux d'échec de 37 % à 25 %.
+# K=8 optimal et robuste hors-échantillon (2025-27). Un moteur de coupe peut surcharger via shrink_k.
+# Rétrécissement bayésien universel des taps de buts (gf/ga par équipe), appliqué à TOUTES les
+# compétitions domestiques comme aux coupes. rate_shrunk = (buts + K·prior)/(joués + K), prior =
+# avg_gf/2 (moyenne de buts/équipe de la ligue). Tame la sur-confiance de petit échantillon : un λ
+# brut tiré de 2-7 matchs (début de saison, 2e divisions) est tiré vers la moyenne de ligue tant que
+# l'échantillon est mince, et retrouve sa valeur brute à mesure que les matchs s'accumulent.
+# Validation walk-forward CHRONOLOGIQUE sur football-data (scratchpad/shrink_dom.py, ~20 000 matchs) :
+#   CALIBRATION (saisons 2021-2025, n=15553) : log-loss K=0 1,0712 (2508 "favoris ≥70%", 37% d'échec)
+#                                              → K=8 1,0269 (676 favoris, 25% d'échec) = optimum.
+#   VALIDATION hors-échantillon (2025-2027, n=4278) : K=0 1,0923 → K=8 1,0293 = optimum confirmé.
+# K=8 bat le taux de base en calibration ET out-of-sample. Les coupes gardent leur K dédié
+# (uefa_engines.json : UCL 6 · UEL 8 · UECL 10) ; tout le reste prend ce défaut.
+DEFAULT_SHRINK_K = 8.0
+
 # Moteurs de coupe européenne calibrés (apex-engine-ucl / -uel / -uecl) : params par league_id
 # (tools/params/uefa_engines.json, source de vérité). Fichier absent ⇒ repli silencieux sur le
 # modèle générique — anti-crash, jamais d'invention.
@@ -851,9 +870,9 @@ def cmd_scan(a):
         if not lam and rec["strength_ok"]:
             lam = structural_lambdas(strength, rec["home_id"], rec["away_id"], avg_gf,
                                      home_adv=_eng["home_adv"] if _eng else HOME_ADV,
-                                     shrink_k=_eng.get("shrink_k", 0.0) if _eng else 0.0)
+                                     shrink_k=(_eng.get("shrink_k", DEFAULT_SHRINK_K) if _eng else DEFAULT_SHRINK_K))
             if lam:
-                rec["lambda_source"] = "structure-shrink" if _eng else "structure"
+                rec["lambda_source"] = "structure-shrink"
         if lam:
             rec["lambdas"] = lam
             rec["model_prob_1x2"] = poisson_1x2(*lam)
