@@ -27,8 +27,17 @@ Abidjan** → **livraison dirigeant jusqu'à Anyama** (à sa charge).
 | Assurance de la marchandise incluse ? | | à obtenir |
 | Produits interdits / restreints au groupage | | à obtenir |
 | Mode de paiement du transport | | à obtenir |
-| Coût réel entrepôt Abidjan → Anyama (par volume) | | à obtenir |
-| Adresse exacte de l'entrepôt en Chine (à donner au fournisseur) | | à obtenir |
+| Coût réel entrepôt Abidjan → Anyama (par volume) | ~20 000 XOF / 20 boîtes (confirmé) | ✅ partiel |
+
+## Adresse de l'entrepôt en Chine (à donner au fournisseur comme adresse de livraison)
+```
+仓库地址：广东省广州市白云区鹤龙二横路3号A栋104
+(Guangdong, Guangzhou, Baiyun District, Helong 2nd Cross Road No. 3, Building A, Room 104)
+Contact : Samuel  +86 130 7688 4795
+Horaires : 09:00–20:00
+```
+> Expéditions **maritime et aérienne**. Note : le fournisseur Kition est à **Yiwu
+> (Zhejiang)** ; livraison interne Chine **Yiwu → Guangzhou** à sa charge/à chiffrer.
 
 > Tarif propre au dirigeant. **Nettement moins cher que l'express Alibaba** pour les
 > colis légers/volumineux (facturation au m³, pas à la pièce).

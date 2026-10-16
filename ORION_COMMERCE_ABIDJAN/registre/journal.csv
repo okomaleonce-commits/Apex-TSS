@@ -10,3 +10,5 @@ date_iso,type,jalon,piste,montant_fcfa,sens,preuve,note
 2026-10-16,NOTE,G2,budget_pilote,,,"preuves/G2_budget_pilote_20boites_2026-10-16.md","Yango Anyama 20000/20 boites ; cout rendu finalise ~2341 XOF/boite ; pilote total ~77600 XOF (26pct capital)"
 2026-10-16,NOTE,G2,questions_kition,,,"devis/questions_kition_echantillon_2026-10-16.md","Liste de questions vendeur Kition prete (spec, prix, livraison entrepot Chine, echantillon)"
 2026-10-16,NOTE,G1,synthese,,,"SYNTHESE_decision_2026-10-16.md","Note de synthese 1 page : produit retenu, chiffres, plan pilote, decisions dirigeant"
+2026-10-16,NOTE,G2,adresse_entrepot_chine,,,"devis/devis_transport_groupage_chine_abidjan_2026-10-16.md","Adresse entrepot Chine recue (Guangzhou Baiyun, Samuel +8613076884795) ; Kition a Yiwu -> livraison interne Yiwu-Guangzhou a chiffrer"
+2026-10-16,NOTE,G2,message_kition_pret,,,"devis/message_kition_pret_a_envoyer_2026-10-16.md","Message complet pret a envoyer a Kition (EN) avec adresse Guangzhou + demande echantillon 66L"
