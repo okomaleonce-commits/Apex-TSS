@@ -12,3 +12,4 @@ date_iso,type,jalon,piste,montant_fcfa,sens,preuve,note
 2026-10-16,NOTE,G1,synthese,,,"SYNTHESE_decision_2026-10-16.md","Note de synthese 1 page : produit retenu, chiffres, plan pilote, decisions dirigeant"
 2026-10-16,NOTE,G2,adresse_entrepot_chine,,,"devis/devis_transport_groupage_chine_abidjan_2026-10-16.md","Adresse entrepot Chine recue (Guangzhou Baiyun, Samuel +8613076884795) ; Kition a Yiwu -> livraison interne Yiwu-Guangzhou a chiffrer"
 2026-10-16,NOTE,G2,message_kition_pret,,,"devis/message_kition_pret_a_envoyer_2026-10-16.md","Message complet pret a envoyer a Kition (EN) avec adresse Guangzhou + demande echantillon 66L"
+2026-10-16,DECISION,G0,mandat,100000,,"preuves/G0_mandat_2026-10-16.md","G0 FRANCHI : plafond de perte 100000 XOF ; stock domicile Anyama ; operateur = dirigeant (pilote) ; pilote 77620 < plafond OK"
