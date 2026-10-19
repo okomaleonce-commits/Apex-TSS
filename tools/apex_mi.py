@@ -257,6 +257,53 @@ def _snapshot_series(fixture_id):
     return recs
 
 
+def _enrich_with_oddsapi(out, meta, books_apifootball):
+    """Fusionne les books The Odds API dans la dispersion / le Pinnacle-vs-médiane du relevé courant.
+
+    Strictement additif : n'altère jamais la série temporelle (trajectoire) API-Football, ni le RLM.
+    Sans store local ni appariement de noms, ne change rien (statut NO_MATCH_OR_EMPTY). N'invente rien.
+    """
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import apex_oddsapi
+    except Exception as e:  # pragma: no cover
+        out.setdefault("missing", []).append(f"oddsapi non importable : {e}")
+        return
+    date = (meta.get("kickoff_utc") or "")[:10] or None
+    try:
+        extra = apex_oddsapi.books_for_fixture(meta.get("home", ""), meta.get("away", ""), date)
+    except Exception as e:
+        out.setdefault("missing", []).append(f"oddsapi indisponible : {e}")
+        return
+    added = [k for k in extra if k not in books_apifootball and "1X2" in extra[k]
+             and extra[k]["1X2"] and all(x for x in extra[k]["1X2"])]
+    if not added:
+        out["oddsapi"] = {"status": "NO_MATCH_OR_EMPTY", "added_books": []}
+        return
+    merged = dict(books_apifootball)
+    for k in added:
+        merged[k] = {"1X2": extra[k]["1X2"]}
+    fair = [f for f in (_demargin_1x2(b["1X2"]) for b in merged.values() if "1X2" in b) if f]
+    if fair:
+        disp = [round(max(f[i] for f in fair) - min(f[i] for f in fair), 4) for i in range(3)]
+        out["dispersion_1x2"] = dict(zip(["home", "draw", "away"], disp))
+        out["dispersion_max"] = max(disp)
+        out["n_books"] = len(fair)
+    if "Pinnacle" in merged and len(merged) >= 3:
+        pin = _demargin_1x2(merged["Pinnacle"]["1X2"])
+        others = [o for o in (_demargin_1x2(b["1X2"]) for kk, b in merged.items()
+                              if kk != "Pinnacle" and "1X2" in b) if o]
+        if pin and others:
+            med = [sorted(o[i] for o in others)[len(others) // 2] for i in range(3)]
+            out["pinnacle_vs_median"] = {lab: round(pin[i] - med[i], 4)
+                                         for i, lab in enumerate(["home", "draw", "away"])}
+    out["books_source"] = "API-Football + The Odds API"
+    out["oddsapi"] = {"status": "MERGED", "added_books": added,
+                      "note": ("Coupe transversale au relevé courant ; trajectoire 100 % API-Football ; "
+                               "% public non fourni par The Odds API → RLM inchangé.")}
+    out["sources"].append({"url": "the-odds-api/v4/odds (store local data/oddsapi)", "books_added": added})
+
+
 def cmd_oddsflow(a):
     mdir = a.match_dir
     meta = read_json(os.path.join(mdir, "meta.json")) or {}
@@ -343,6 +390,11 @@ def cmd_oddsflow(a):
                                              for i, lab in enumerate(["home", "draw", "away"])}
     else:
         out["missing"].append("un seul book : dispersion / Pinnacle-vs-médiane non calculables")
+
+    # Enrichissement multi-books The Odds API (opt-in, additif). Coupe transversale au relevé courant :
+    # la trajectoire ouverture→courant reste 100 % API-Football, on n'ajoute que de la largeur de books.
+    if getattr(a, "with_oddsapi", False):
+        _enrich_with_oddsapi(out, meta, books_last)
 
     # RLM : NON calculable sans % de parieurs publics (honnêteté WORM §4)
     out["rlm"] = "UNAVAILABLE"
@@ -1309,6 +1361,8 @@ def main():
     po = sp.add_parser("oddsflow", help="Métriques de marché mécaniques depuis les snapshots")
     po.add_argument("--match-dir", required=True)
     po.add_argument("--fixture", type=int, help="override du fixture_id")
+    po.add_argument("--with-oddsapi", action="store_true",
+                    help="enrichir dispersion/Pinnacle-vs-médiane avec les books The Odds API (store data/oddsapi)")
 
     ps = sp.add_parser("signal", help="Enregistre une observation de marché scorée")
     ps.add_argument("--match-dir", required=True)

@@ -116,7 +116,10 @@ FALLBACK_ADJUSTMENTS = {"dcs_delta": -5, "kelly_multiplier": 0.70}
 # --------------------------------------------------------------------------
 
 def _api_key() -> str:
-    return os.environ.get("ODDS_API_KEY", "4556cbebcaea0e8301f1c176bdb64e31")
+    key = os.environ.get("ODDS_API_KEY")
+    if not key:
+        raise RuntimeError("ODDS_API_KEY absente : définir la variable d'environnement (jamais de clé en dur).")
+    return key
 
 
 def _cache_path(name: str) -> str:
@@ -146,9 +149,12 @@ def catalogue(refresh: bool = False) -> list[dict]:
         hit = _cached("catalogue", CATALOGUE_TTL)
         if hit is not None:
             return hit
-    resp = requests.get(f"{ODDS_API_BASE}/sports",
-                        params={"apiKey": _api_key()}, timeout=25)
-    resp.raise_for_status()
+    try:
+        resp = requests.get(f"{ODDS_API_BASE}/sports",
+                            params={"apiKey": _api_key()}, timeout=25)
+        resp.raise_for_status()
+    except (requests.RequestException, RuntimeError):
+        return []
     soccer = [s for s in resp.json()
               if s.get("group") == "Soccer" and s.get("active")]
     _store("catalogue", soccer)
@@ -169,7 +175,7 @@ def events(sport_key: str, refresh: bool = False) -> list[dict]:
         if resp.status_code != 200:
             return []
         data = resp.json()
-    except requests.RequestException:
+    except (requests.RequestException, RuntimeError):
         return []
     _store(name, data)
     return data

@@ -16,7 +16,8 @@ from difflib import SequenceMatcher
 
 log = logging.getLogger("odds_api")
 
-ODDS_API_KEY  = os.environ.get("ODDS_API_KEY", "4556cbebcaea0e8301f1c176bdb64e31")
+# Clé lue UNIQUEMENT dans la variable d'environnement ODDS_API_KEY — jamais en dur dans le code.
+ODDS_API_KEY  = os.environ.get("ODDS_API_KEY", "")
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 
 # The Odds API sport keys per league
@@ -44,6 +45,9 @@ REGIONS = "eu"
 
 def _fetch_sport_odds(sport_key: str) -> List[Dict]:
     """Fetch h2h + totals odds for a sport."""
+    if not ODDS_API_KEY:
+        log.error("OddsAPI: ODDS_API_KEY absente — définir la variable d'environnement (aucune clé en dur).")
+        return []
     try:
         r = requests.get(
             f"{ODDS_API_BASE}/sports/{sport_key}/odds/",
