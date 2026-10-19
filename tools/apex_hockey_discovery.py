@@ -108,7 +108,14 @@ def _cache(name: str, fetch):
 
 
 def _odds_key() -> str:
-    return os.environ.get("ODDS_API_KEY", "4556cbebcaea0e8301f1c176bdb64e31")
+    key = os.environ.get("ODDS_API_KEY")
+    if not key:
+        raise RuntimeError(
+            "ODDS_API_KEY absente de l'environnement. La clé The Odds API doit "
+            "être fournie par une variable d'environnement, jamais codée en dur "
+            "(règle CLAUDE.md : « Jamais dans le code »)."
+        )
+    return key
 
 
 def nhl_schedule(day: str):

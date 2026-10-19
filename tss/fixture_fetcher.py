@@ -273,7 +273,10 @@ def _fetch_odds_api_fixtures(date_from: str, date_to: str) -> List[Dict]:
     Returns upcoming fixtures WITH odds — always up to date for current season.
     """
     import os
-    api_key = os.environ.get("ODDS_API_KEY", "4556cbebcaea0e8301f1c176bdb64e31")
+    api_key = os.environ.get("ODDS_API_KEY")  # jamais de clé en dur (règle CLAUDE.md)
+    if not api_key:
+        log.warning("OddsAPI fixtures: ODDS_API_KEY absente de l'environnement — aucun appel")
+        return []
     base    = "https://api.the-odds-api.com/v4"
 
     SPORT_KEYS = {
