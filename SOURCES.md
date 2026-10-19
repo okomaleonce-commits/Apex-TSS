@@ -14,6 +14,22 @@ et, surtout, **mesurer le CLV** (seul juge du bord réel). Outil : `tools/apex_s
   Utilisé automatiquement par `apex_fusion` comme voix `marche_sharp` (couche **K**) sur les ligues
   couvertes. Test : `python3 tools/apex_sources.py`.
 
+- **The Odds API** (`api.the-odds-api.com`) — REST, clé **`ODDS_API_KEY`** (variable
+  d'environnement). **Pinnacle dé-viggé en DIRECT pré-match** (1X2 + O/U 2.5). Complète
+  football-data : il donne la cote sharp **avant** le coup d'envoi, quand le CSV de clôture
+  n'existe pas encore. Branché dans `apex_sources.sharp_voice()` juste après football-data, donc
+  alimente la même voix `marche_sharp` (couche **K**) d'`apex_fusion` — aucune modif d'`apex_fusion`
+  nécessaire. Ligues mappées (code football-data → sport_key vérifié) : E0, E1, SP1, SP2, I1, D1,
+  F1, N1, SC0. Une division non mappée renvoie `absent` (jamais de sport_key inventé). Testé le
+  19/10/2026 : clé valide (20 000 req restantes), Pinnacle présent, dé-vigging opérationnel via le
+  proxy.
+  > ⚠️ **Clé en env uniquement, jamais en dur.** Une ancienne clé était codée en dur en fallback
+  > dans quatre fichiers (`apex_resolve.py`, `apex_hockey_discovery.py`, `tss/odds_api.py`,
+  > `tss/fixture_fetcher.py`) ; elle a été retirée. Cette clé **a été exposée dans l'historique git
+  > public** : elle doit être **révoquée/régénérée** sur le dashboard The Odds API, la nouvelle
+  > valeur placée en variable d'environnement — le retrait du code ne la purge pas des anciens
+  > commits.
+
 ## À brancher côté client (toi) — jamais simulé tant que non configuré
 
 Ces sources renvoient « non configuré » (honnête) jusqu'à ce que tu les actives. Deux canaux :

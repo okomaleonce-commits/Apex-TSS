@@ -18,8 +18,12 @@ Sources REST/MCP (Infersports, SSB, SharpAPI, odds-api.io, TheStatsAPI, Apify) :
 variables d'environnement / connecteurs MCP côté client. Tant qu'elles ne sont pas configurées,
 leurs adaptateurs renvoient un statut « non configuré » — honnête, jamais simulé. Voir SOURCES.md.
 
-Seule source réellement joignable et CÂBLÉE par défaut ici : football-data.co.uk (CSV gratuit,
-cotes Pinnacle ouverture PSH/PSD/PSA et clôture PSCH/PSCD/PSCA + O/U 2.5). Benchmark CLV de référence.
+Sources réellement joignables et CÂBLÉES par défaut ici :
+  • football-data.co.uk (CSV gratuit, Pinnacle ouverture PSH/PSD/PSA + clôture PSCH/PSCD/PSCA + O/U 2.5).
+    Benchmark CLV de référence (clôture = vraie ligne sharp a posteriori).
+  • The Odds API (REST, clé ODDS_API_KEY) : Pinnacle dé-viggé en DIRECT pré-match — complète
+    football-data pour les matchs à venir (dont la clôture n'existe pas encore). Clé lue depuis
+    l'environnement uniquement, jamais codée en dur.
 """
 from __future__ import annotations
 
@@ -255,6 +259,133 @@ def thestatsapi(home, away):
     return {"absent": "adaptateur TheStatsAPI à brancher (clé présente)"}
 
 
+# ───────────────────────── The Odds API (ODDS_API_KEY, Pinnacle live pré-match) ─────────────────────────
+# Divisions football-data ↔ sport_key The Odds API. Clés VÉRIFIÉES dans le repo
+# (tools/apex_resolve.py : ENGINE_BY_SPORT_KEY / LEAGUE_ALIASES). Une division absente
+# d'ici n'est PAS devinée : on renvoie "absent" plutôt qu'un sport_key inventé.
+DIV_TO_ODDS_SPORT = {
+    "E0":  "soccer_epl",
+    "E1":  "soccer_efl_champ",
+    "SP1": "soccer_spain_la_liga",
+    "SP2": "soccer_spain_segunda_division",
+    "I1":  "soccer_italy_serie_a",
+    "D1":  "soccer_germany_bundesliga",
+    "F1":  "soccer_france_ligue_one",
+    "N1":  "soccer_netherlands_eredivisie",
+    "SC0": "soccer_spl",
+}
+TOA_BASE = "https://api.the-odds-api.com/v4"
+
+
+def _toa_fetch(sport_key: str, max_age_min: float = 10.0):
+    """Cotes h2h + totals d'un sport The Odds API (cache ~10 min). None si clé absente/injoignable.
+    La clé vient UNIQUEMENT de l'environnement (ODDS_API_KEY), jamais codée en dur (règle CLAUDE.md)."""
+    key = os.environ.get("ODDS_API_KEY")
+    if not key:
+        return None
+    path = CACHE / f"toa_{sport_key}.json"
+    fresh = path.exists() and (time.time() - path.stat().st_mtime) < max_age_min * 60
+    if not fresh:
+        from urllib.parse import urlencode
+        qs = urlencode({"apiKey": key, "regions": "eu", "markets": "h2h,totals",
+                        "oddsFormat": "decimal", "dateFormat": "iso"})
+        url = f"{TOA_BASE}/sports/{sport_key}/odds/?{qs}"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 APEX"})
+            with urllib.request.urlopen(req, timeout=30) as r:    # noqa: S310 (domaine connu)
+                data = r.read()
+            if data and data.strip().startswith(b"["):
+                path.write_bytes(data)
+        except Exception:
+            if not path.exists():
+                return None
+    try:
+        import json as _json
+        return _json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def the_odds_api(div: str, home: str, away: str):
+    """Pinnacle DÉ-VIGGÉ en DIRECT (pré-match) via The Odds API (ODDS_API_KEY).
+
+    Complète football-data : donne la cote sharp AVANT que le CSV de clôture n'existe (match à venir).
+    Renvoie {source, phase:"prematch", p1x2, over25, odds_1x2, score_appariement} ou {"absent": raison}.
+    Anti-invention : clé absente, division non mappée, match introuvable ou colonnes vides → raison écrite."""
+    if not os.environ.get("ODDS_API_KEY"):
+        return _needs("ODDS_API_KEY")
+    sport_key = DIV_TO_ODDS_SPORT.get(div)
+    if not sport_key:
+        return {"absent": f"division {div} non mappée vers The Odds API"}
+    events = _toa_fetch(sport_key)
+    if not events:
+        return {"absent": "The Odds API injoignable / aucune cote (et pas de cache)"}
+
+    best, bestsc = None, 0.0
+    for ev in events:
+        h, a = ev.get("home_team", ""), ev.get("away_team", "")
+        if not h or not a:
+            continue
+        sc = (_sim(home, h) + _sim(away, a)) / 2
+        if sc > bestsc:
+            best, bestsc = ev, sc
+    if not best or bestsc < 0.6:
+        return {"absent": f"match introuvable dans {sport_key} (meilleur score {bestsc:.2f})"}
+
+    books = best.get("bookmakers", []) or []
+    bk = next((b for b in books if b.get("key") == "pinnacle"), None)
+    provider = "the_odds_api/pinnacle"
+    if bk is None:                     # pas de Pinnacle → premier book, étiqueté honnêtement
+        bk = books[0] if books else None
+        provider = f"the_odds_api/{bk.get('key')}" if bk else None
+    if bk is None:
+        return {"absent": "aucun book pour ce match"}
+
+    mkts = {m.get("key"): m for m in bk.get("markets", [])}
+    p1x2, odds_1x2 = None, None
+    h2h = mkts.get("h2h")
+    if h2h:
+        oh = od = oa = None
+        for o in h2h.get("outcomes", []):
+            nm, pr = o.get("name", ""), o.get("price")
+            if nm == best["home_team"]:
+                oh = pr
+            elif nm == best["away_team"]:
+                oa = pr
+            elif nm.lower() == "draw":
+                od = pr
+        if None not in (oh, od, oa):
+            dv = devig([oh, od, oa])
+            if dv:
+                p1x2 = {"home": round(dv[0], 4), "draw": round(dv[1], 4), "away": round(dv[2], 4)}
+                odds_1x2 = [oh, od, oa]
+
+    over25 = None
+    tot = mkts.get("totals")
+    if tot:
+        oo = ou = None
+        for o in tot.get("outcomes", []):
+            try:
+                pt = float(o.get("point") or 0)
+            except (TypeError, ValueError):
+                continue
+            if abs(pt - 2.5) < 1e-9:
+                if o.get("name", "").lower() == "over":
+                    oo = o.get("price")
+                elif o.get("name", "").lower() == "under":
+                    ou = o.get("price")
+        if None not in (oo, ou):
+            dv = devig([oo, ou])
+            over25 = round(dv[0], 4) if dv else None
+
+    if p1x2 is None and over25 is None:
+        return {"absent": "ni 1X2 ni O/U 2.5 exploitables pour ce match"}
+    return {"source": provider, "phase": "prematch",
+            "match": f"{best['home_team']} - {best['away_team']}",
+            "p1x2": p1x2, "over25": over25, "odds_1x2": odds_1x2,
+            "score_appariement": round(bestsc, 2)}
+
+
 # ───────────────────────── voix consolidée pour ORION ─────────────────────────
 def sharp_voice(div: str, home: str, away: str, market: str = "over25"):
     """Renvoie une proba « marché sharp » exploitable comme VOIX ORION, ou None + raison.
@@ -273,6 +404,17 @@ def sharp_voice(div: str, home: str, away: str, market: str = "over25"):
         if val is not None:
             return {"p": val, "source": "marche_sharp", "provider": pin["source"],
                     "phase": pin["phase"], "market": market, "trace": trace}
+
+    # The Odds API (ODDS_API_KEY) : Pinnacle dé-viggé en DIRECT pré-match — couvre les matchs
+    # à venir que football-data n'a pas encore (clôture inexistante avant le coup d'envoi).
+    toa = the_odds_api(div, home, away)
+    trace.append(("the_odds_api", toa.get("absent", "ok")))
+    if not toa.get("absent"):
+        val = toa.get("over25") if market == "over25" else (toa.get("p1x2") or {}).get(market)
+        if val is not None:
+            return {"p": val, "source": "marche_sharp", "provider": toa["source"],
+                    "phase": toa["phase"], "market": market, "trace": trace}
+
     for name, fn in (("infersports", infersports), ("ssb", ssb_sharp),
                      ("sharpapi", sharpapi), ("oddsapi_io", oddsapi_io)):
         r = fn(home, away)
@@ -349,6 +491,10 @@ def registry() -> list[dict]:
     return [
         {"nom": "football-data.co.uk", "type": "sharp (Pinnacle open/close) + benchmark CLV",
          "transport": "CSV", "statut": "CÂBLÉ (gratuit, joignable)", "couvre": sorted(FD_DIVS)},
+        {"nom": "The Odds API", "type": "sharp (Pinnacle dé-viggé live pré-match) — 1X2 + O/U 2.5",
+         "transport": "REST",
+         "statut": "CÂBLÉ (ODDS_API_KEY " + ("présente)" if os.environ.get("ODDS_API_KEY") else "ABSENTE)"),
+         "couvre": sorted(DIV_TO_ODDS_SPORT)},
         {"nom": "Infersports", "type": "sharp (Pinnacle + books asiatiques dé-viggés)",
          "transport": "MCP", "statut": "à ajouter côté client (claude mcp add)"},
         {"nom": "SSB / PropProfessor", "type": "signaux sharp coordonnés (31 outils)",
@@ -381,6 +527,18 @@ def _demo():
         print(" ", json.dumps(pinnacle_devig("E0", h, a), ensure_ascii=False))
     else:
         print("  (E0 injoignable)")
+    print("\n=== Test The Odds API (Pinnacle dé-viggé live, ODDS_API_KEY) ===")
+    if os.environ.get("ODDS_API_KEY"):
+        ev = _toa_fetch("soccer_epl")
+        if ev:
+            e0 = ev[0]
+            h, a = e0.get("home_team"), e0.get("away_team")
+            print(f"  1er match EPL The Odds API : {h} - {a}")
+            print(" ", json.dumps(the_odds_api("E0", h, a), ensure_ascii=False))
+        else:
+            print("  (soccer_epl injoignable)")
+    else:
+        print("  (ODDS_API_KEY absente)")
 
 
 if __name__ == "__main__":
