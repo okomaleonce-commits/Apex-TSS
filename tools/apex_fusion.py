@@ -501,7 +501,17 @@ def build_fusion_digest(day: str):
     card = _orion_card_html(day, verdicts)
     matrix = _gel_matrix_html(day, verdicts)       # matrice du gel, juste sous la carte ORION
     extended = _extended_markets_html(day, verdicts)   # marchés étendus (structure WORM, non BSM)
-    head = card + ("\n" + matrix if matrix else "") + ("\n" + extended if extended else "")
+    # APEX-OMEGA : couche de triage/transparence EN TÊTE du digest (import différé → anti-cycle).
+    # OMEGA ne décide ni ne price : il classe les marchés par EV honnête et explique chaque abstention.
+    try:
+        import apex_omega as OMG
+        omega_blocks = OMG.triage_from_verdicts(day, verdicts)
+        omega_card = OMG.build_card_html(day, omega_blocks)
+    except Exception as e:                          # OMEGA ne doit jamais casser le digest FUSION
+        omega_card = ""
+        print(f"⚠ carte OMEGA non générée ({str(e)[:120]}) — digest FUSION rendu sans elle.")
+    head = (omega_card + ("\n" if omega_card else "") + card
+            + ("\n" + matrix if matrix else "") + ("\n" + extended if extended else ""))
     # Greffe : carte ORION + matrice du gel en tête, juste après <body>.
     if "<body>" in worm_html:
         html = worm_html.replace("<body>", "<body>\n" + head, 1)

@@ -92,6 +92,17 @@ Les quatre cellules (WORM radar, MI bruit marché/comportemental, PROTOCOL/BSM s
 - **Gel actif** : aucune mise réelle émise ; tout « ACCEPTER » est rétrogradé en ATTENDRE.
 - **Email unique** : `run` affiche la bannière « ENVOI EMAIL OBLIGATOIRE » avec `subject` + `htmlBody = reports/fusion/<J>.email.html`. Enchaîner `mcp__Gmail__send_message` (`to=["okoma.leonce@gmail.com"]`). Ce digest de fusion **remplace** les envois WORM/MI séparés pour un passage interactif.
 
+## Couche de triage & transparence : APEX-OMEGA
+
+`tools/apex_omega.py` (skill `apex-engine-omega`) est une **couche au-dessus de FUSION**, pas un moteur de pricing et pas un `apex-engine-*`. Elle règle un seul défaut : **trop de NO BET *secs***. OMEGA ne price pas, ne décide pas, ne force rien — il lit les verdicts ORION de FUSION et, par match, (1) **explique** l'abstention (gate bloquante, donnée manquante, seuil raté, verdict des moteurs), (2) **classe** tous les marchés (« closest-to-actionable » : 1X2, double chance, O/U, BTTS, handicap asiatique) avec un **EV honnête**, (3) tient une **WATCH list** réelle, (4) range chaque marché en **BET / LEAN / WATCH / PASS** adossé à l'EV mesuré.
+
+- **EV honnête, jamais inventé** : un EV n'est calculé que s'il existe une **cote réelle horodatée** dans le snapshot. Pas de cote ⇒ pas d'EV ⇒ WATCH (à tracker), jamais BET/LEAN. Corners/cartons/buteurs absents ⇒ écrits absents.
+- **PASS justifié, jamais vide** : si tous les marchés cotés sont à EV < 0, OMEGA affiche les **3 moins mauvais à titre informatif** (EV négatif marqué), aucune mise.
+- **Interdits explicites (non implémentés)** : aucune recommandation forcée à EV négatif, aucun « emprunt » de proba fabriqué quand le moteur de ligue est muet, aucune relance anti-NO BET, aucune abrogation des gates. Ces mécaniques de la directive « OMEGA souverain » reviendraient à recommander des paris perdants ; elles sont refusées.
+- **Garde-fous intacts** : gel actif (mise réelle = 0 sur **tout** palier, BET inclus), gates G0–G7 + matrice du gel, plafonds Kelly, anti-corrélation, 1 pari/marché/match, journal append-only, anti-invention, respect des backtests négatifs (statut « NON SUPÉRIEUR AU MARCHÉ » ⇒ porte globale rouge ⇒ tous GELÉS, OMEGA le rend visible sans le contourner).
+- **Probas = structure WORM** (λ de classement, Monte-Carlo Dixon-Coles), **jamais étiquetées BSM** — lecture descriptive, non validée.
+- **Intégration** : `apex_fusion.build_fusion_digest` greffe la **carte OMEGA en tête** du digest unique. Toujours **un seul digest, un seul email**. En interactif, `python3 tools/apex_omega.py triage --date <J>` donne le détail par match (→ `reports/omega/<J>.triage.{txt,json}`).
+
 ## Sources externes & voix sharp : APEX-SOURCES
 
 `tools/apex_sources.py` agrège des sources externes pour renforcer la robustesse (voix indépendantes). **Câblé par défaut** : `football-data.co.uk` (cotes Pinnacle ouverture/clôture dé-viggées + O/U 2.5 — référence sharp et CLV, gratuit). **À configurer côté client/clés** (jamais simulé sinon) : Infersports (MCP), SSB/PropProfessor (MCP), SharpAPI/`SHARPAPI_KEY`, odds-api.io/`ODDSAPI_IO_KEY`, TheStatsAPI/`THESTATSAPI_KEY`. Procédure complète dans `SOURCES.md`.
