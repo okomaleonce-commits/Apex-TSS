@@ -69,24 +69,27 @@ def collect(days=None) -> int:
         today = _dt.date.today()
         days = [today.isoformat(), (today - _dt.timedelta(days=1)).isoformat()]
     existing = {_ledger_key(b) for b in _read_ledger()}
-    CLV_LEDGER.parent.mkdir(parents=True, exist_ok=True)
-    new = 0
-    with open(CLV_LEDGER, "a", encoding="utf-8") as fh:
-        for d in days:
-            for b in bets_for_day(d):
-                # On ne persiste QUE les paris entièrement résolus : cote d'entrée réelle, score final
-                # connu, donc P&L et CLV calculés. Un match non terminé sera capté à un passage ultérieur.
-                if not (b.get("odds_available") and b.get("pnl") is not None and b.get("clv") is not None):
-                    continue
-                key = _ledger_key(b)
-                if key in existing:
-                    continue
-                rec = dict(b)
-                rec["collected_at_utc"] = _now_utc()
+    rows_to_add = []
+    for d in days:
+        for b in bets_for_day(d):
+            # On ne persiste QUE les paris entièrement résolus : cote d'entrée réelle, score final
+            # connu, donc P&L et CLV calculés. Un match non terminé sera capté à un passage ultérieur.
+            if not (b.get("odds_available") and b.get("pnl") is not None and b.get("clv") is not None):
+                continue
+            key = _ledger_key(b)
+            if key in existing:
+                continue
+            rec = dict(b)
+            rec["collected_at_utc"] = _now_utc()
+            rows_to_add.append(rec)
+            existing.add(key)
+    # Rien de réglé à journaliser → on NE crée PAS le fichier (évite un journal vide non suivi par git).
+    if rows_to_add:
+        CLV_LEDGER.parent.mkdir(parents=True, exist_ok=True)
+        with open(CLV_LEDGER, "a", encoding="utf-8") as fh:
+            for rec in rows_to_add:
                 fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-                existing.add(key)
-                new += 1
-    return new
+    return len(rows_to_add)
 
 
 def _ou_odd(odds, market):
