@@ -897,6 +897,22 @@ def cmd_scan(a):
     print(f"STORE : {out_path.relative_to(ROOT)} (append-only)")
     write_report(day)
 
+    # APEX-CLV : journalisation DURABLE des paris réglés (jour courant + veille, matchs qui viennent
+    # de finir) dans ledger/clv.jsonl — committé, donc le CLV s'accumule d'une session à l'autre
+    # (les snapshots, eux, sont éphémères). Ne doit jamais faire échouer le passage WORM.
+    try:
+        import datetime as _dt
+        import apex_clv as _CLV
+        veille = (day - _dt.timedelta(days=1)).isoformat()
+        n_clv = _CLV.collect([day.isoformat(), veille])
+        if n_clv:
+            s = _CLV.summary()
+            print(f"APEX-CLV : {n_clv} pari(s) réglé(s) journalisé(s) → ledger/clv.jsonl · "
+                  f"cumul {s['clv_n']} paris, CLV moyen "
+                  f"{(s['clv_moyen']*100 if s['clv_moyen'] is not None else 0):+.2f} %")
+    except Exception as e:  # noqa: BLE001 — le passage WORM ne doit pas casser si APEX-CLV évolue
+        print(f"APEX-CLV ignoré ce passage ({str(e)[:100]}).")
+
     # APEX-MI : activation H-60 min sur les matchs imminents (focus UPSET). Produit un
     # artefact que l'email WORM joint. Ne doit jamais faire échouer le passage WORM.
     if getattr(a, "mi", True):
