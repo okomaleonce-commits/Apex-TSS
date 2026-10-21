@@ -39,7 +39,7 @@ DIV_TO_NAME = {
     "E3": "England League Two", "EC": "England National League", "SP1": "Spain La Liga",
     "SP2": "Spain Segunda División", "I1": "Italy Serie A", "I2": "Italy Serie B",
     "D1": "Germany Bundesliga", "D2": "Germany 2. Bundesliga", "F1": "France Ligue 1", "F2": "France Ligue 2",
-    "N1": "Netherlands Eredivisie", "B1": "Belgium Pro League", "P1": "Portugal Liga NOS", "T1": "Turkey Super Lig",
+    "N1": "Netherlands Eredivisie", "B1": "Belgium Pro League", "P1": "Portugal Liga NOS", "T1": "Turkey Süper Lig",
 }
 
 
