@@ -103,6 +103,19 @@ Les quatre cellules (WORM radar, MI bruit marché/comportemental, PROTOCOL/BSM s
 - **Probas = structure WORM** (λ de classement, Monte-Carlo Dixon-Coles), **jamais étiquetées BSM** — lecture descriptive, non validée.
 - **Intégration** : `apex_fusion.build_fusion_digest` greffe la **carte OMEGA en tête** du digest unique. Toujours **un seul digest, un seul email**. En interactif, `python3 tools/apex_omega.py triage --date <J>` donne le détail par match (→ `reports/omega/<J>.triage.{txt,json}`).
 
+## Compositions & absences : APEX-COMPOS (ajustement λ d'avant-match, NON CALIBRÉ)
+
+`tools/apex_compos.py plan --fixture <id>` transforme des **absences réelles et sourcées**
+(blessures/suspensions API-Football + compo publiée si dispo, importance = part buts+passes de la saison)
+en un **multiplicateur λ d'attaque borné** [0,80 ; 1,0] pour l'équipe diminuée, rendu comme un
+`--scenario proba:mult_dom:mult_ext` prêt pour `apex_bsm.py simulate` (+ `--missing-lineup` si une
+absence ≥ 20 % de la production). Le coefficient part→malus est **DÉCLARÉ et NON CALIBRÉ** : la sortie
+emprunte le chemin « scénario subjectif » de BSM (déjà testé en sensibilité), **jamais** présentée comme
+un bord validé — le gel reste entier. Anti-invention : un absent dont l'importance n'est pas sourcée est
+**signalé, pas chiffré** ; seul le malus d'attaque de l'équipe diminuée est modélisé (effet d'un
+défenseur/gardien sur le λ adverse : non modélisé, écrit comme tel). Journalisé (`--record` →
+`ledger/compos.jsonl`) pour que l'effet soit jugeable **en avant par le CLV**, seul juge d'un vrai bord.
+
 ## Sources externes & voix sharp : APEX-SOURCES
 
 `tools/apex_sources.py` agrège des sources externes pour renforcer la robustesse (voix indépendantes). **Câblé par défaut** : `football-data.co.uk` (cotes Pinnacle ouverture/clôture dé-viggées + O/U 2.5 — référence sharp et CLV, gratuit). **À configurer côté client/clés** (jamais simulé sinon) : Infersports (MCP), SSB/PropProfessor (MCP), SharpAPI/`SHARPAPI_KEY`, odds-api.io/`ODDSAPI_IO_KEY`, TheStatsAPI/`THESTATSAPI_KEY`. Procédure complète dans `SOURCES.md`.
