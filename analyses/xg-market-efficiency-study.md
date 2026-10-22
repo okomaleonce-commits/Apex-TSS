@@ -31,9 +31,9 @@ tant qu'un re‑run propre n'a pas été produit**. Corrections appliquées à l
 5. **Jointure xG renforcée.** Avant : (date, score) → un match pouvait recevoir le xG d'autres équipes.
    Désormais : date + score + **identité des deux équipes** ; ambiguïté et réutilisation **refusées**. La
    couverture « 99–100 % » doit être **re‑mesurée** après ce durcissement.
-6. **Table des 17 ligues (§4) : non fiable en l'état.** Elle provenait de l'ancien banc (benchmark
-   Pinnacle‑contaminé, repli clôture↔avant‑match, bootstrap par match, jointure par score). **À refaire**
-   avec le protocole corrigé, benchmark explicite, par ligue, avec rapport JSON traçable.
+6. **Table des 17 ligues : refaite** (§4, re‑run propre 2026‑10‑22) — protocole corrigé, benchmark
+   explicite avant‑match ET clôture, par ligue, rapports JSON `promotion_authorized=false`. L'ancienne
+   table (benchmark Pinnacle‑contaminé, repli, bootstrap par match, jointure par score) est remplacée.
 7. **Calibration : dénominateur corrigé** — 3 960 matchs (11 880 probabilités 1X2), pas 3 808 ; la tranche
    0,9–1,0 (1 cas, p=0,917, non réalisé) était omise. Petits effectifs sans IC par tranche ⇒ aucune
    propriété « démontrée ».
@@ -46,9 +46,9 @@ vs **avant‑match**, buts−marché = **+0,0123 [−0,0026 ; +0,0278] → NON_C
 [+0,0012 ; +0,0310] → **PIRE**. Le verdict dépend donc du benchmark, et le gain xG **n'est pas
 significatif**. Rapports : `backtests/xg-E0-{prematch,closing}-*/report.json` (`promotion_authorized=false`).
 
-**Ce qui reste vrai sans re‑run :** aucune supériorité prouvée (0/17 IC95 < 0), CLV réalisé non positif,
-**gel maintenu**, et la famille « rating buts/xG contre la ligne » est close. Les §1–§9 qui suivent
-décrivent le protocole et les chiffres **de l'ancien run** — à lire à travers cet erratum.
+**Confirmé par le re‑run propre (§4) :** **0/14 ligue avec IC95 < 0** (ni vs avant‑match ni vs clôture) →
+aucune supériorité prouvée ; CLV réalisé non positif ; **gel maintenu** ; famille « rating buts/xG contre
+la ligne » close. Seul apport mesuré : le xG bat le *modèle buts* (pas le marché) sur SP2 et D2.
 
 ---
 
@@ -84,7 +84,8 @@ Décision conditionnée : la **porte de promotion** du gel exige conjointement (
 
   ΔLL = moyenne( LL_modèle − LL_marché ) par match · **ΔLL < 0 ⟺ modèle meilleur**.
   **IC95 par bootstrap apparié** (2000 rééchantillonnages). Supériorité prouvée ⟺ borne haute < 0 ;
-  non‑infériorité (« à égalité ») ⟺ IC95 chevauche 0 ; infériorité ⟺ borne basse > 0.
+  **NON_CONCLUANT** ⟺ IC95 chevauche 0 (absence de preuve, PAS une équivalence : prouver la
+  non‑infériorité exigerait une marge définie à l'avance et un test dédié) ; infériorité ⟺ borne basse > 0.
 
 ---
 
@@ -113,44 +114,55 @@ comparaison marché) : Brier 0,2484 · LogLoss 0,6901.
 
 ---
 
-## 4. Résultats par ligue — ΔLL vs marché (test OOS)
+## 4. Résultats par ligue — RE‑RUN PROPRE (2026‑10‑22)
 
-Banc d'essai `apex_bsm_xg` : `w=0` = modèle buts actuel ; `w*` = meilleur poids xG retenu sur
-validation (cible du fit = (1−w)·buts + w·xG réalisé passé).
+Protocole corrigé : Pinnacle exclu ≥ 23/07/2025, **benchmark explicite** (avant‑match **et** clôture,
+sans repli), jointure date+score+**deux équipes**, **bootstrap groupé par semaine**, w\* choisi sur
+validation. `ΔLL < 0 = modèle meilleur`. 14 ligues couvertes par le xG (EC/E2/E3 : pas de xG → §4b).
 
-| Ligue | code | n(test) | ΔLL buts (w=0) | IC95 | ΔLL xG (w\*) | w\* | statut |
-|---|---|---|---|---|---|---|---|
-| Eredivisie | N1 | 306 | +0,0072 | [−0,0120 ; +0,0249] | +0,0048 | 0,25 | **à égalité** |
-| Premier League | E0 | 380 | +0,0136 | [−0,0045 ; +0,0315] | +0,0109 | 0,25 | **à égalité** |
-| 2. Bundesliga | D2 | 306 | +0,0229 | [+0,0049 ; +0,0414] | **+0,0109** | 0,75 | pire → **à égalité (xG)** |
-| Belgium Pro | B1 | 311 | +0,0188 | [+0,0013 ; +0,0370] | +0,0149 | 0,50 | limite → à égalité (xG) |
-| La Liga | SP1 | 380 | +0,0178 | [+0,0018 ; +0,0342] | — | 0 | pire · xG rejeté |
-| Championship | E1 | 552 | +0,0237 | [+0,0111 ; +0,0365] | +0,0219 | 0,50 | pire |
-| Segunda | SP2 | 462 | +0,0262 | [+0,0089 ; +0,0438] | +0,0221 | 0,25 | pire |
-| Ligue 2 | F2 | 305 | +0,0219 | [+0,0046 ; +0,0383] | +0,0222 | 0,75 | pire |
-| Serie A | I1 | 380 | +0,0226 | [+0,0036 ; +0,0402] | — | 0 | pire · xG rejeté |
-| Serie B | I2 | 380 | +0,0278 | [+0,0125 ; +0,0440] | +0,0286 | 0,25 | pire (xG adverse) |
-| Portugal | P1 | 306 | +0,0260 | [+0,0102 ; +0,0423] | +0,0303 | 0,25 | pire (xG adverse) |
-| Ligue 1 | F1 | 306 | +0,0255 | [+0,0071 ; +0,0438] | +0,0198 | 0,25 | pire |
-| Turkey Süper Lig | T1 | 306 | +0,0302 | [+0,0121 ; +0,0489] | — | 0 | pire · xG rejeté |
-| Bundesliga | D1 | 306 | +0,0306 | [+0,0127 ; +0,0489] | +0,0297 | 0,25 | pire |
+**(a) buts (w=0) vs marché** — deux benchmarks :
 
-**xG indisponible chez FootyStats** (ΔLL buts du backtest, « stabilité par ligue ») :
-
-| Ligue | code | n | ΔLL buts | IC95 | statut |
+| Ligue | code | ΔLL vs **avant‑match** | verdict | ΔLL vs **clôture** | verdict |
 |---|---|---|---|---|---|
-| National League | EC | 529 | +0,0053 | [−0,0057 ; +0,0173] | à égalité |
-| League One | E2 | 540 | +0,0217 | [+0,0065 ; +0,0380] | pire |
-| League Two | E3 | 540 | +0,0186 | [+0,0036 ; +0,0326] | pire |
+| Premier League | E0 | +0,0123 [−0,003 ; +0,028] | NON_CONCLUANT | +0,0157 [+0,001 ; +0,031] | PIRE |
+| Eredivisie | N1 | +0,0102 [−0,006 ; +0,027] | NON_CONCLUANT | +0,0060 [−0,012 ; +0,023] | NON_CONCLUANT |
+| Belgium Pro | B1 | +0,0137 [−0,001 ; +0,028] | NON_CONCLUANT | +0,0196 [+0,003 ; +0,035] | PIRE |
+| Ligue 2 | F2 | +0,0169 [−0,000 ; +0,034] | NON_CONCLUANT | +0,0228 [+0,004 ; +0,041] | PIRE |
+| Serie B | I2 | +0,0180 [+0,003 ; +0,034] | PIRE | +0,0258 [+0,010 ; +0,041] | PIRE |
+| La Liga | SP1 | +0,0188 [+0,005 ; +0,032] | PIRE | +0,0179 [+0,002 ; +0,034] | PIRE |
+| Serie A | I1 | +0,0201 [+0,006 ; +0,034] | PIRE | +0,0218 [+0,005 ; +0,038] | PIRE |
+| Championship | E1 | +0,0219 [+0,009 ; +0,035] | PIRE | +0,0224 [+0,007 ; +0,037] | PIRE |
+| 2. Bundesliga | D2 | +0,0223 [+0,007 ; +0,037] | PIRE | +0,0225 [+0,006 ; +0,039] | PIRE |
+| Segunda | SP2 | +0,0239 [+0,009 ; +0,040] | PIRE | +0,0268 [+0,009 ; +0,045] | PIRE |
+| Portugal | P1 | +0,0134 [+0,002 ; +0,024] | PIRE | +0,0241 [+0,011 ; +0,037] | PIRE |
+| Bundesliga | D1 | +0,0277 [+0,012 ; +0,044] | PIRE | +0,0299 [+0,011 ; +0,047] | PIRE |
+| Turkey Süper Lig | T1 | +0,0280 [+0,008 ; +0,053] | PIRE | +0,0296 [+0,009 ; +0,054] | PIRE |
+| Ligue 1 | F1 | +0,0297 [+0,014 ; +0,044] | PIRE | +0,0274 [+0,011 ; +0,043] | PIRE |
 
-> ⚠️ **Table de l'ancien banc — à refaire (erratum §0‑6).** Benchmark Pinnacle‑contaminé, repli
-> clôture↔avant‑match, bootstrap par match, jointure par score. Les verdicts « à égalité » ci‑dessus se
-> lisent **NON_CONCLUANT**, et ces chiffres ne sont pas opposables tant qu'un re‑run propre
-> (`--benchmark prematch` **et** `closing`, par ligue) n'a pas été produit.
+**Décompte : 0/14 MEILLEUR.** vs avant‑match : 4 NON_CONCLUANT (E0, N1, B1, F2), 10 PIRE. vs **clôture**
+(plus sharp) : **1 seule** NON_CONCLUANT (N1), 13 PIRE. Contre la référence la plus informée, le modèle
+est significativement battu presque partout — Eredivisie exceptée, où le résultat reste non concluant.
 
-**Synthèse :** sur **17 ligues**, **aucune** n'a d'IC95 entièrement < 0 → **aucune supériorité prouvée**.
-NON_CONCLUANT (absence de preuve, pas équivalence) sur E0, EC, N1, D2 (et B1). Partout ailleurs, infériorité
-significative.
+**(c) Apport incrémental du xG** — IC95 apparié de `LL_xG(w*) − LL_buts`, benchmark avant‑match :
+
+| Résultat | Ligues | Lecture |
+|---|---|---|
+| **MEILLEUR** (xG réduit la log‑loss vs buts, IC95 < 0) | **SP2** (−0,0048, w=0,25) · **D2** (−0,0111, w=0,75) | xG réellement informatif **vs le modèle buts** |
+| NON_CONCLUANT | les 12 autres (dont w\*=0 pour SP1/I1) | pas d'apport xG significatif |
+
+> **Nuance capitale :** sur SP2 et D2, le mélange xG est un **gain statistiquement significatif *vs la
+> version buts du modèle*** (hypothèse de réduction de variance validée) — mais ces deux ligues restent
+> **PIRE vs marché**. Le xG rend le modèle meilleur que lui‑même, **jamais meilleur que la ligne**.
+
+### 4b. xG indisponible (EC, E2, E3)
+
+Pas de xG FootyStats → non rejouables par ce banc. Les ΔLL buts dont on dispose viennent de l'**ancien
+backtest Pinnacle‑contaminé** et sont donc eux aussi **à re‑mesurer** par un backtest corrigé (non
+exécuté ici) ; ils ne sont pas reportés comme propres.
+
+**Synthèse :** re‑run propre, **0/14 ligue avec IC95 < 0 → aucune supériorité prouvée**, contre
+avant‑match comme contre clôture. L'apport du xG est significatif uniquement *vs le modèle buts* (SP2,
+D2) et jamais suffisant pour battre le marché.
 
 ---
 
@@ -204,11 +216,12 @@ Hypothèse : **buts = xG + bruit de finition/gardien**, donc le xG réalisé pas
 **moins bruité de la force latente**. Mélange `(1−w)·buts + w·xG` dans la cible du fit ; `w` choisi sur
 validation ; xG **strictement antérieur** (walk‑forward respecté, aucun usage du xG du match prédit).
 
-**Verdict :** effet **marginal et non significatif**. Réduction de ΔLL maximale observée **−0,0121 sur D2**
-(2. Bundesliga, w=0,75 → fait passer « pire » à « à égalité »), nulle ou **adverse** ailleurs (I2, P1).
-`w=1` (xG pur) **systématiquement dominé** : la composante finition porte un signal résiduel. **Nulle
-part** le xG ne fait franchir l'IC95 sous 0. → **non injecté dans le moteur gelé** (pas de bord à
-revendiquer).
+**Verdict (re‑run propre, IC95 apparié `LL_xG − LL_buts` par semaine) :** l'apport du xG **vs le modèle
+buts** est **significatif (IC95 < 0) sur deux ligues : SP2 (−0,0048, w=0,25) et D2 (−0,0111, w=0,75)** —
+l'hypothèse de réduction de variance s'y vérifie. Partout ailleurs : **NON_CONCLUANT** (dont w\*=0 retenu
+pour SP1/I1, le xG n'ajoutant rien). `w=1` (xG pur) dominé ailleurs : la finition porte un signal
+résiduel. **Mais ce gain est « vs buts », pas « vs marché » :** SP2 et D2 restent **PIRE vs la ligne**.
+→ xG **non injecté dans le moteur gelé** (améliore le modèle contre lui‑même, jamais contre le marché).
 
 ---
 
@@ -220,28 +233,32 @@ peut au mieux le **répliquer** (parité), jamais le dominer. S'ajoute la barri�
 (~2–5 % sur 1X2) : « aussi précis » que le marché ⇒ perdre la marge. Le **CLV négatif** confirme
 l'absence de bord *ex‑ante*.
 
-La corrélation observée **parité ↔ faible liquidité** (Eredivisie, 2. Bundesliga tiennent mieux que le
-big‑5) est cohérente avec une efficience croissante avec le volume — **mais insuffisante** pour produire
-ΔLL < 0, y compris en D2.
+La trace de **liquidité** est ténue : contre la **clôture** (référence la plus informée), **seule
+l'Eredivisie (N1)** reste NON_CONCLUANT ; les D2 (SP2, I2, D2, F2) et la Turquie sont **PIRE** comme le
+big‑5. L'inefficience des petits marchés, si elle existe, ne suffit **nulle part** à produire ΔLL < 0.
+Le xG améliore le *modèle* (SP2, D2) sans jamais combler l'écart au marché.
 
 ---
 
 ## 9. Limites statistiques
 
-- **Test mono‑saison** par ligue (n ≈ 300–552) → IC95 larges, puissance limitée.
-- **Comparaisons multiples** (17 ligues) → risque de parité « par hasard » (garden of forking paths) ;
-  E0/N1/D2 sont des **hypothèses à répliquer**, pas des acquis.
-- Hyperparamètres **non re‑tunés par ligue** (ξ,K,ρ,σ globaux) → conservateur.
-- Jointure xG par (date, score final) : 99–100 % d'appariement ; non‑appariés en **repli sur buts** (pas
-  d'imputation). xG **absent** pour EC/E2/E3 et toutes les D2 non cochées — écrit absent, jamais fabriqué.
+- **Test mono‑saison** par ligue (2526, n ≈ 300–552) → IC95 (bootstrap par semaine) larges, puissance limitée.
+- **Comparaisons multiples** (14 ligues × 2 benchmarks + gain xG) → risque de faux positif (garden of
+  forking paths) ; les 2 gains xG significatifs (SP2, D2) sont des **hypothèses à répliquer** sur une
+  période vierge (≥ 2627), pas des acquis, d'autant qu'ils ne battent pas le marché.
+- Hyperparamètres **non re‑tunés par ligue** (ξ,K,ρ,σ globaux, gelés pour éviter une fausse porte) → conservateur.
+- Jointure xG désormais **date + score + identité des deux équipes** ; ambiguïté/réutilisation refusées
+  (couverture re‑mesurée : apparié/ambigu/sans‑candidat publiés par run). Non‑appariés en repli sur buts.
+- xG **absent** pour EC/E2/E3 (non rejouables ici) ; saison 2526 **déjà observée** → ne peut pas promouvoir.
 
 ---
 
 ## 10. Décision
 
-Les **deux portes** de promotion sont rouges : (i) aucune ligue avec IC95 ΔLL < 0 ; (ii) CLV réglé non
-disponible/négatif. **Gel maintenu**, rien injecté. La recherche de bord par **enrichissement d'entrée
-(xG)** ou **descente en liquidité (D2)** est **réfutée empiriquement**. L'edge éventuel est à chercher
+Les **deux portes** de promotion sont rouges : (i) **0/14 ligue** avec IC95 ΔLL < 0 (re‑run propre, vs
+avant‑match comme vs clôture) ; (ii) CLV réglé non disponible/négatif. **Gel maintenu**, rien injecté. La
+recherche de bord par **enrichissement d'entrée (xG)** ou **descente en liquidité (D2)** est **réfutée
+empiriquement** — le xG bat le modèle buts (SP2, D2) mais jamais le marché. L'edge éventuel est à chercher
 **hors de l'information déjà agrégée par la ligne** : micro‑timing, marchés secondaires illiquides,
 closing‑line value / steam. Le **seul KPI prospectif** habilité à lever une porte est le **CLV réalisé**
 accumulé (`ledger/clv.jsonl`).
@@ -254,7 +271,7 @@ accumulé (`ledger/clv.jsonl`).
 | Outil | Rôle dans l'étude |
 |---|---|
 | `apex_bsm.py` | Moteur Dixon‑Coles/Monte‑Carlo : `backtest` (walk‑forward, ΔLL, bootstrap, calibration, sim de paris), `simulate`, `settle`, `audit`. Cœur **gelé** réutilisé. |
-| `apex_bsm_xg.py` | **Banc d'essai xG** (créé ici) : jointure football‑data↔xG par (date,score), `fit_ratings_blend` (cible buts↔xG), walk‑forward ΔLL vs marché par poids. |
+| `apex_bsm_xg.py` | **Banc d'essai xG** (créé + corrigé ici) : jointure date+score+**deux équipes**, `fit_ratings_blend` (cible buts↔xG), walk‑forward, `--benchmark prematch\|closing` sans repli, bootstrap par semaine, 3 deltas (dont gain xG apparié), rapport JSON `promotion_authorized=false`. |
 | `apex_footystats.py` | Connecteur FootyStats : `status`, `leagues` (résolution `season_id`), `history` (xG réalisé → `data/footystats/`). Correction libellé `T1` ici. |
 | `apex_apifootball.py` | API‑Football : `snapshot` (fixtures, cotes horodatées, blessures, compositions), `fixtures`, `injuries`, `fixtures/lineups`, `players`. |
 | `apex_clv.py` | **CLV / ROI réel** : reconstruction cote entrée/clôture, P&L, CLV ; `collect` → journal durable `ledger/clv.jsonl` (étendu ici). |
@@ -265,7 +282,7 @@ accumulé (`ledger/clv.jsonl`).
 ### Données & services externes
 | Source | Usage | Auth |
 |---|---|---|
-| **football‑data.co.uk** (format mmz4281) | Scores, tirs (HS/HST), **cotes de clôture Pinnacle** (PSH/PSD/PSA, P>2.5/P<2.5) = benchmark marché. | libre |
+| **football‑data.co.uk** (format mmz4281) | Scores, tirs (HS/HST) ; cotes **avant‑match** (PSH/PSD/PSA, P>2.5/P<2.5) et **clôture** (PSCH…) = benchmarks ; **Pinnacle exclu ≥ 23/07/2025** (périmé, cf. data.php), moyenne/Bet365 sinon ; prix de mise = offre bookmaker. | libre |
 | **FootyStats API** | **xG réalisé** par match (`team_a_xg`/`team_b_xg`). | `FOOTYSTATS_KEY` (var. env., `?key=`) |
 | **API‑Football v3** | Fixtures, cotes, **blessures**, **compositions**, stats joueurs (pour COMPOS). | clé injectée par le proxy (`x-apisports-key`) |
 | **Connecteur Gmail (MCP)** | Envoi des digests FUSION/OMEGA (`mcp__Gmail__send_message`). | OAuth connecteur |
