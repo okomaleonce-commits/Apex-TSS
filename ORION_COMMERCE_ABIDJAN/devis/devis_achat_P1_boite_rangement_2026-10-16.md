@@ -43,3 +43,28 @@
 
 > **Aucune commande engagée.** Échantillon et achat = propositions chiffrées à
 > décider par le dirigeant, après coût rendu réel. Consigné dans `registre/`.
+
+---
+
+## Mise à jour 22/10/2026 — réponses du vendeur
+
+- **MOQ FOB = 1 000 pièces** → le prix 1,45 $ du site N'EST PAS atteignable en
+  petite quantité. Pour 20/50/100 pièces, le vendeur ne propose que **EXW**
+  (prix sortie usine ; transport Yiwu→Guangzhou à la charge de l'acheteur).
+  **EXW convient** : le transitaire consolide à Guangzhou.
+- **Échantillon (1 pc 66 L) → entrepôt Guangzhou** : produit **10 $** + transport
+  interne au choix : **ZTO 8,34 $** (retenu) · Deppon 12,14 $ · SF 22,04 $ (3 j).
+  Total ZTO = **18,34 $ ≈ ~10 600 FCFA**.
+- **3 tailles proposées (dimensions MONTÉES)** :
+  | Modèle | Dimensions montées |
+  |--------|--------------------|
+  | 24 L | 40×30×20 cm |
+  | **66 L (retenu)** | **50×40×33 cm** |
+  | 100 L | 60×42×40 cm |
+- **Choix dirigeant : 66 L**, prix EXW demandé à **20 / 50 / 100 pièces**.
+- **ENCORE À OBTENIR (critique pour le fret au m³)** : taille **du colis PLIÉ** +
+  poids par pièce, et nombre de pièces/carton + dimensions/poids du carton.
+  (Le 62×44×2 cm lu en ligne était peut-être un autre modèle — à reconfirmer.)
+- **Impact coût rendu** : le prix EXW 20–100 pc sera > 1,45 $, et il faut AJOUTER
+  le transport Yiwu→Guangzhou. Le coût rendu ~2 341 XOF/boîte calculé avant
+  (basé sur 1,45 $ FOB) **sera révisé à la hausse** dès réception des chiffres EXW.
