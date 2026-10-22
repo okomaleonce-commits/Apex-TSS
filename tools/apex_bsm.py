@@ -42,6 +42,9 @@ HIST_DIR = ROOT / "data" / "history"
 BT_DIR = ROOT / "backtests"
 LEDGER_DIR = ROOT / "ledger"
 FD_URL = "https://www.football-data.co.uk/mmz4281/{season}/{div}.csv"
+# Depuis cette date, Pinnacle (public) est systématiquement en retard et exclu des moyennes/max du
+# marché par le fournisseur (football-data.co.uk/data.php) → on l'exclut du benchmark ET du prix de mise.
+PINNACLE_STALE_FROM = dt.date(2025, 7, 23)
 N_GOALS = 11
 
 # Règles de pari fixées AVANT le backtest (ne pas modifier après avoir vu le test final).
@@ -107,14 +110,29 @@ def fetch_matches(div: str, season: str, refresh: bool = False) -> list[dict]:
             hg, ag = int(float(r["FTHG"])), int(float(r["FTAG"]))
         except ValueError:
             continue
+        # Fournisseur : Pinnacle « public » est systématiquement en retard depuis le 23/07/2025
+        # (football-data.co.uk/data.php) et exclu des moyennes/max du marché → on l'exclut aussi,
+        # avant-match ET clôture, pour les matchs à partir de cette date. Benchmark probabiliste et
+        # prix de mise sont SÉPARÉS : le benchmark peut être une moyenne de marché, pas le prix de mise
+        # (une moyenne n'est l'offre d'aucun bookmaker).
+        stale = d >= PINNACLE_STALE_FROM
+        pin1x2 = [] if stale else [(("PSH", "PSD", "PSA"), "pinnacle")]
         o1x2, src = None, None
-        for cols, name in ((("PSH", "PSD", "PSA"), "pinnacle"), (("AvgH", "AvgD", "AvgA"), "moyenne"),
-                           (("B365H", "B365D", "B365A"), "bet365")):
+        for cols, name in pin1x2 + [(("AvgH", "AvgD", "AvgA"), "moyenne"), (("B365H", "B365D", "B365A"), "bet365")]:
             o1x2 = _odds(r, *cols)
             if o1x2:
                 src = name
                 break
-        ou = _odds(r, "P>2.5", "P<2.5") or _odds(r, "Avg>2.5", "Avg<2.5") or _odds(r, "B365>2.5", "B365<2.5")
+        # Prix de mise : UNE offre bookmaker identifiée (Pinnacle non périmé, sinon Bet365) — jamais la moyenne.
+        o1x2_bet, bet_src = None, None
+        for cols, name in pin1x2 + [(("B365H", "B365D", "B365A"), "bet365")]:
+            o1x2_bet = _odds(r, *cols)
+            if o1x2_bet:
+                bet_src = name
+                break
+        pin_ou = None if stale else _odds(r, "P>2.5", "P<2.5")
+        ou = pin_ou or _odds(r, "Avg>2.5", "Avg<2.5") or _odds(r, "B365>2.5", "B365<2.5")
+        ou_bet = pin_ou or _odds(r, "B365>2.5", "B365<2.5")           # mise O/U : bookmaker, jamais la moyenne
 
         def _int(col):
             v = r.get(col, "")
@@ -128,7 +146,9 @@ def fetch_matches(div: str, season: str, refresh: bool = False) -> list[dict]:
             "div": div, "season": season, "date": d, "home": r["HomeTeam"].strip(),
             "away": r["AwayTeam"].strip(), "hg": hg, "ag": ag,
             "o1x2": o1x2, "o1x2_src": src, "ou25": ou,
-            "close1x2": _odds(r, "PSCH", "PSCD", "PSCA") or _odds(r, "AvgCH", "AvgCD", "AvgCA"),
+            "o1x2_bet": o1x2_bet, "o1x2_bet_src": bet_src, "ou25_bet": ou_bet,
+            # Clôture : Pinnacle closing exclu lui aussi à partir du 23/07/2025 ; sinon moyenne de clôture.
+            "close1x2": (None if stale else _odds(r, "PSCH", "PSCD", "PSCA")) or _odds(r, "AvgCH", "AvgCD", "AvgCA"),
             # Mi-temps (réels) et stats périphériques (réelles) quand la source les fournit.
             "ht_hg": _int("HTHG"), "ht_ag": _int("HTAG"),
             "hst": _int("HST"), "ast": _int("AST"),      # tirs cadrés dom / ext
@@ -446,13 +466,15 @@ def cmd_backtest(a):
     # 3) paris : règles fixées à l'avance, cotes avant match, 1 marché max par match
     bets = []
     for x in sorted(rows, key=lambda x: x["r"]["m"]["date"]):
+        # Prix de mise = offre bookmaker (o1x2_bet / ou25_bet), JAMAIS la moyenne du marché.
         m = x["r"]["m"]; cands = []
-        if m["o1x2"]:
+        o_bet = m.get("o1x2_bet"); ou_bet = m.get("ou25_bet")
+        if o_bet:
             for j, lab in enumerate(("1", "X", "2")):
-                cands.append(("1X2", lab, float(x["r"]["P"]["1X2"][j]), m["o1x2"][j], x["k"] == j))
-        if m["ou25"]:
-            cands.append(("OU2.5", "Over", x["r"]["P"]["O25"], m["ou25"][0], x["over"]))
-            cands.append(("OU2.5", "Under", 1 - x["r"]["P"]["O25"], m["ou25"][1], not x["over"]))
+                cands.append(("1X2", lab, float(x["r"]["P"]["1X2"][j]), o_bet[j], x["k"] == j))
+        if ou_bet:
+            cands.append(("OU2.5", "Over", x["r"]["P"]["O25"], ou_bet[0], x["over"]))
+            cands.append(("OU2.5", "Under", 1 - x["r"]["P"]["O25"], ou_bet[1], not x["over"]))
         cands = [c for c in cands if c[2] * c[3] - 1 >= BET_RULES["ev_min"]]
         if cands:
             mkt, sel, p, o, won = max(cands, key=lambda c: c[2] * c[3] - 1)

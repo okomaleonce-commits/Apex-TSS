@@ -81,9 +81,13 @@ def test_reco_market_param_mapping():
     def wr(m): return {"reco": {"decision": {"marche": m}}}
     assert F._reco_market_param(wr("Over 2.5")) == "over25"
     assert F._reco_market_param(wr("Under 2.5")) == "under25"
-    assert F._reco_market_param(wr("Handicap asiatique -0.5/-1 domicile")) == "home"
-    assert F._reco_market_param(wr("Handicap asiatique -0.5/-1 extérieur")) == "away"
-    assert F._reco_market_param(wr("Double chance X2 / +0.5 AH extérieur")) == "away"
+    # Handicap asiatique et double chance n'ont PAS d'équivalent 1X2 sec : le code refuse de les
+    # mapper vers une victoire (voix sharp mal calibrée sinon) et renvoie None. Le test l'exige.
+    assert F._reco_market_param(wr("Handicap asiatique -0.5/-1 domicile")) is None
+    assert F._reco_market_param(wr("Handicap asiatique -0.5/-1 extérieur")) is None
+    assert F._reco_market_param(wr("Double chance X2 / +0.5 AH extérieur")) is None
+    # Un marché 1X2 sec, lui, se mappe bien.
+    assert F._reco_market_param(wr("Victoire domicile")) == "home"
 
 
 def test_tier_edge_monotone():

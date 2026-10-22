@@ -54,3 +54,6 @@ data/turf_worm/
 reports/turf_worm/
 runs_turf_mi/*
 !runs_turf_mi/.gitkeep
+
+# bancs d'essai xG (diagnostic, reproductibles)
+backtests/xg-*/

@@ -6,12 +6,59 @@
 
 ---
 
+## 0. ERRATUM — correction d'audit (2026‑10‑22)
+
+Un audit a relevé des **défauts de mesure** dans la version initiale de cette note. Ils ne changent pas
+la décision (gel maintenu, aucun bord prouvé) mais **invalident les chiffres quantitatifs ci‑dessous
+tant qu'un re‑run propre n'a pas été produit**. Corrections appliquées à l'outillage
+(`tools/apex_bsm.py`, `tools/apex_bsm_xg.py`, tests `tests/test_apex_bsm_xg.py`) :
+
+1. **Benchmark contaminé par Pinnacle périmé.** Depuis le **23/07/2025**, l'API Pinnacle publique de
+   football‑data est systématiquement en retard (avant‑match ET clôture) et exclue des moyennes de
+   marché ([source](https://www.football-data.co.uk/data.php)). Or le moteur priorisait Pinnacle →
+   **tout le benchmark de la saison test 2526 était faussé**. Correctif : Pinnacle exclu à partir de
+   cette date (benchmark : moyenne puis Bet365 ; clôture : moyenne de clôture), **prix de mise séparé**
+   du benchmark (offre bookmaker, jamais la moyenne).
+2. **« Clôture » était en réalité « avant‑match ».** Le ΔLL du run BSM compare au prix **d'avant‑match**
+   (`o1x2`), pas à la clôture. Les deux références ne sont pas interchangeables (colonnes `PSCH…`=clôture
+   vs `PSH…`=avant‑match). Benchmark désormais **explicite** (`--benchmark prematch|closing`), **sans repli**.
+3. **« à égalité » / « non‑infériorité » = abus de langage.** Un IC95 chevauchant 0 est **NON_CONCLUANT**
+   (absence de preuve), pas une équivalence (qui exigerait une marge et un test dédiés). Tous les
+   « à égalité » des §4 ci‑dessous se lisent **NON_CONCLUANT**.
+4. **Inférence par match → bootstrap groupé par semaine** (dépendance intra‑journée préservée) ; IC plus
+   larges, plus honnêtes. Publication séparée de 3 deltas : buts−marché, xG−marché, **et xG−buts**
+   (apport incrémental du xG, avec son propre IC apparié — jamais plus « non significatif » asséné sans IC).
+5. **Jointure xG renforcée.** Avant : (date, score) → un match pouvait recevoir le xG d'autres équipes.
+   Désormais : date + score + **identité des deux équipes** ; ambiguïté et réutilisation **refusées**. La
+   couverture « 99–100 % » doit être **re‑mesurée** après ce durcissement.
+6. **Table des 17 ligues (§4) : non fiable en l'état.** Elle provenait de l'ancien banc (benchmark
+   Pinnacle‑contaminé, repli clôture↔avant‑match, bootstrap par match, jointure par score). **À refaire**
+   avec le protocole corrigé, benchmark explicite, par ligue, avec rapport JSON traçable.
+7. **Calibration : dénominateur corrigé** — 3 960 matchs (11 880 probabilités 1X2), pas 3 808 ; la tranche
+   0,9–1,0 (1 cas, p=0,917, non réalisé) était omise. Petits effectifs sans IC par tranche ⇒ aucune
+   propriété « démontrée ».
+8. **CLV mal interprété** — voir §4 corrigé : `CLV_fair` (proba de clôture dé‑marginée) ≠ `CLV_prix`
+   (dérive de cote). Un `CLV_fair` négatif n'isole pas la dérive de prix de la marge.
+
+**Illustration avec l'outil corrigé (E0, test 2526, Pinnacle exclu, bootstrap par semaine) :**
+vs **avant‑match**, buts−marché = **+0,0123 [−0,0026 ; +0,0278] → NON_CONCLUANT** ; xG(w=0,25)−buts =
+−0,0028 [−0,0078 ; +0,0019] → NON_CONCLUANT. vs **clôture** (plus sharp), buts−marché = +0,0157
+[+0,0012 ; +0,0310] → **PIRE**. Le verdict dépend donc du benchmark, et le gain xG **n'est pas
+significatif**. Rapports : `backtests/xg-E0-{prematch,closing}-*/report.json` (`promotion_authorized=false`).
+
+**Ce qui reste vrai sans re‑run :** aucune supériorité prouvée (0/17 IC95 < 0), CLV réalisé non positif,
+**gel maintenu**, et la famille « rating buts/xG contre la ligne » est close. Les §1–§9 qui suivent
+décrivent le protocole et les chiffres **de l'ancien run** — à lire à travers cet erratum.
+
+---
+
 ## 1. Problème
 
 Tester l'**efficience semi‑forte** du marché football vis‑à‑vis de l'information exploitée par le moteur
 (historique de buts et de xG) : le moteur **Poisson bivarié à correction Dixon‑Coles** produit‑il des
 prévisions probabilistes **strictement plus précises que la ligne de clôture dé‑marginée**, hors
-échantillon, ligue par ligue ? Référence sharp = cote de **clôture Pinnacle** (football‑data.co.uk),
+échantillon, ligue par ligue ? Référence = cote **d'avant‑match** dé‑marginée (football‑data.co.uk ;
+Pinnacle avant le 23/07/2025, sinon moyenne de marché puis Bet365 — cf. erratum §0),
 meilleur estimateur public connu de la probabilité réalisée.
 
 Décision conditionnée : la **porte de promotion** du gel exige conjointement (i) supériorité OOS
@@ -45,7 +92,7 @@ Décision conditionnée : la **porte de promotion** du gel exige conjointement (
 
 | Modèle | Brier 1X2 | LogLoss 1X2 | RPS 1X2 | Brier O/U2.5 | LogLoss O/U2.5 |
 |---|---|---|---|---|---|
-| **Marché dé‑marginé** (clôture) | **0,5993** | **≈1,0022** | — | — | *(réf.)* |
+| **Marché dé‑marginé** (**avant‑match**) | **0,5993** | **≈1,0022** | *(réf.)* | — | **0,6815** |
 | APEX‑BSM (gelé) | 0,6115 | 1,0208 | 0,2117 | 0,2503 | 0,6939 |
 | Skill legacy | 0,6197 | 1,0327 | 0,2154 | 0,2555 | 0,7054 |
 | Modèle simple de buts | 0,6506 | 1,0748 | 0,2309 | 0,2488 | 0,6908 |
@@ -96,8 +143,13 @@ validation (cible du fit = (1−w)·buts + w·xG réalisé passé).
 | League One | E2 | 540 | +0,0217 | [+0,0065 ; +0,0380] | pire |
 | League Two | E3 | 540 | +0,0186 | [+0,0036 ; +0,0326] | pire |
 
+> ⚠️ **Table de l'ancien banc — à refaire (erratum §0‑6).** Benchmark Pinnacle‑contaminé, repli
+> clôture↔avant‑match, bootstrap par match, jointure par score. Les verdicts « à égalité » ci‑dessus se
+> lisent **NON_CONCLUANT**, et ces chiffres ne sont pas opposables tant qu'un re‑run propre
+> (`--benchmark prematch` **et** `closing`, par ligue) n'a pas été produit.
+
 **Synthèse :** sur **17 ligues**, **aucune** n'a d'IC95 entièrement < 0 → **aucune supériorité prouvée**.
-Parité (non‑infériorité) sur E0, EC, N1, D2 (et B1 à la limite). Partout ailleurs, infériorité
+NON_CONCLUANT (absence de preuve, pas équivalence) sur E0, EC, N1, D2 (et B1). Partout ailleurs, infériorité
 significative.
 
 ---
@@ -115,10 +167,12 @@ significative.
 | 0,6–0,7 | 371 | 0,640 | 0,687 |
 | 0,7–0,8 | 99 | 0,743 | 0,778 |
 | 0,8–0,9 | 25 | 0,837 | 0,880 |
+| 0,9–1,0 | 1 | 0,917 | 0,000 |
 
-> Calibration **globalement bonne** jusqu'à ~0,5, puis **léger sous‑pricing des favoris** (0,6–0,9 :
-> fréquence observée > proba prédite). Le modèle est bien calibré mais moins *tranchant* que le marché :
-> un modèle calibré peut être inférieur au marché en log‑loss s'il est moins résolu (resolution).
+> Table sur **3 960 matchs (11 880 probabilités)**, pas 3 808. La tranche 0,9–1,0 (1 seul cas, non
+> réalisé) est non informative. **Sans IC par tranche**, aucune propriété n'est *démontrée* : la lecture
+> « léger sous‑pricing des favoris » (0,6–0,9) est une **indication**, pas une preuve. Un modèle calibré
+> mais moins **résolu** que le marché perd quand même au log‑loss.
 
 ---
 
@@ -135,8 +189,12 @@ Flat‑stake 1u · filtre **EV ≥ 3 %** contre cote dé‑marginée · 1 march�
 | Perte max cumulée | −431,0 u |
 | **CLV moyen 1X2** | **−6,0 %** |
 
-> Le **CLV négatif** est le symptôme dur : les « value bets » du modèle sont de l'**anti‑sélection** —
-> on parie systématiquement un prix battu par la clôture. Indépendant de la variance des résultats.
+> **Deux CLV à ne pas confondre (erratum §0‑8).** Le backtest mesure `CLV_fair = cote_entrée ×
+> proba_clôture_dé‑marginée − 1` ; le suivi `apex_clv.py` mesure `CLV_prix = cote_entrée /
+> dernière_cote_prématch − 1`. Un `CLV_fair` négatif **n'isole pas** la dérive de prix de la **marge** :
+> à cote d'issue inchangée, `CLV_prix = 0` mais `CLV_fair ≈ −marge`. Ce **−6,0 % est un `CLV_fair` sur
+> suivi papier** (snapshot prématch ≠ vraie clôture certifiée, aucun ticket exécuté) : il est cohérent
+> avec l'absence de bord, mais ne prouve ni dérive systématique ni rentabilité future.
 
 ---
 
@@ -234,7 +292,8 @@ python3 tools/apex_bsm.py backtest --divs E0,E1,E2,E3,EC,SP1,I1,D1,F1 \
 # 2. xG : couverture, tirage, éval buts vs xG vs marché (par ligue)
 python3 tools/apex_footystats.py leagues --divs <DIVS> --seasons 2122,2223,2324,2425,2526
 python3 tools/apex_footystats.py history --divs <DIVS> --seasons 2122,2223,2324,2425,2526
-python3 tools/apex_bsm_xg.py eval --div <DIV>
+python3 tools/apex_bsm_xg.py eval --div <DIV> --benchmark prematch   # puis --benchmark closing
+# (rapport JSON de diagnostic, promotion_authorized=false ; latest_params NON modifié)
 
 # 3. CLV prospectif (accumulé à chaque scan WORM)
 python3 tools/apex_clv.py            # résumé ROI/CLV cumulé (journal durable)
