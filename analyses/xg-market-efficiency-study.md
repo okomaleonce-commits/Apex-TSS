@@ -1,7 +1,7 @@
 # Étude de non‑supériorité au marché & levier xG — note technique
 
-**Run de référence :** `bsm-20261021T152819Z` (backtest walk‑forward) + banc d'essai `apex_bsm_xg`
-**Date :** 2026‑10‑21 · **Statut modèle :** `NON SUPÉRIEUR AU MARCHÉ — EV contre le marché présumée illusoire`
+**Run de référence :** `bsm-20261022T091437Z` (backtest corrigé, Pinnacle exclu) + banc `apex_bsm_xg` (re‑run propre 14 ligues)
+**Date :** 2026‑10‑22 · **Statut modèle :** `NON SUPÉRIEUR AU MARCHÉ — EV contre le marché présumée illusoire` (confirmé sur données corrigées)
 **Gel :** actif (aucune mise réelle) · **Juge prospectif :** CLV réalisé (`ledger/clv.jsonl`)
 
 ---
@@ -154,11 +154,18 @@ est significativement battu presque partout — Eredivisie exceptée, où le ré
 > version buts du modèle*** (hypothèse de réduction de variance validée) — mais ces deux ligues restent
 > **PIRE vs marché**. Le xG rend le modèle meilleur que lui‑même, **jamais meilleur que la ligne**.
 
-### 4b. xG indisponible (EC, E2, E3)
+### 4b. xG indisponible (EC, E2, E3) — backtest buts corrigé
 
-Pas de xG FootyStats → non rejouables par ce banc. Les ΔLL buts dont on dispose viennent de l'**ancien
-backtest Pinnacle‑contaminé** et sont donc eux aussi **à re‑mesurer** par un backtest corrigé (non
-exécuté ici) ; ils ne sont pas reportés comme propres.
+Pas de xG FootyStats → banc xG inapplicable. Mais le **backtest 9‑ligues corrigé**
+(`bsm-20261022T091437Z`, Pinnacle exclu) donne leur ΔLL buts vs marché (avant‑match) :
+
+| Ligue | code | n | ΔLL buts | IC95 | verdict |
+|---|---|---|---|---|---|
+| National League | EC | 529 | +0,0054 | [−0,0059 ; +0,0171] | NON_CONCLUANT |
+| League Two | E3 | 540 | +0,0191 | [+0,0045 ; +0,0329] | PIRE |
+| League One | E2 | 540 | +0,0206 | [+0,0052 ; +0,0364] | PIRE |
+
+(EC rejoint E0/N1 parmi les NON_CONCLUANT ; E2/E3 PIRE. Aucun MEILLEUR.)
 
 **Synthèse :** re‑run propre, **0/14 ligue avec IC95 < 0 → aucune supériorité prouvée**, contre
 avant‑match comme contre clôture. L'apport du xG est significatif uniquement *vs le modèle buts* (SP2,
@@ -194,12 +201,13 @@ Flat‑stake 1u · filtre **EV ≥ 3 %** contre cote dé‑marginée · 1 march�
 
 | Métrique | Valeur |
 |---|---|
-| Paris | 3 186 |
-| Taux de réussite | 33,4 % |
-| Rendement net / unité | **−12,8 %** (IC95 [−17,9 % ; −7,8 %]) |
-| P&L cumulé | **−407,5 u** |
-| Perte max cumulée | −431,0 u |
-| **CLV moyen 1X2** | **−6,0 %** |
+| Paris | 3 232 |
+| Taux de réussite | 34,0 % |
+| Rendement net / unité | **−11,95 %** (IC95 [−16,7 % ; −7,0 %]) |
+| P&L cumulé | **−386,2 u** |
+| **CLV moyen 1X2** | **−5,45 %** |
+
+*(backtest corrigé `bsm-20261022T091437Z` : mise au **prix bookmaker** (Bet365 à défaut de Pinnacle), jamais à la moyenne — d'où le léger mieux vs l'archive −12,8 %/−6,0 %, toujours nettement négatif.)*
 
 > **Deux CLV à ne pas confondre (erratum §0‑8).** Le backtest mesure `CLV_fair = cote_entrée ×
 > proba_clôture_dé‑marginée − 1` ; le suivi `apex_clv.py` mesure `CLV_prix = cote_entrée /
