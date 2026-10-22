@@ -295,7 +295,8 @@ def _orion_card_html(day: str, verdicts: list) -> str:
         return str(x).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     # On met en avant les matchs où ORION a quelque chose à dire (ACCEPTER/REJETER/ATTENDRE),
-    # puis les COLLECTER. Jamais plus de 20 lignes pour rester lisible en email.
+    # puis les COLLECTER. Plafond à 50 lignes : couvre une journée continentale entière
+    # (Europa + Conference = 36 matchs) tout en restant lisible en email.
     order = {"ACCEPTER": 0, "REJETER": 1, "ATTENDRE": 2, "COLLECTER": 3}
     vv = sorted(verdicts, key=lambda v: (order.get(v["decision"], 9), -v.get("relevance", 0)))
     from collections import Counter
@@ -318,7 +319,7 @@ def _orion_card_html(day: str, verdicts: list) -> str:
          "<table><tr><th>Match</th><th>Compét.</th><th>KO</th><th>Couches</th>"
          "<th class='r'>Voix&nbsp;ind.</th><th class='r'>Désac.</th><th class='r'>Conf.</th>"
          "<th>WORM</th><th>ORION</th></tr>"]
-    for v in vv[:20]:
+    for v in vv[:50]:
         cch = "".join(k for k, on in v["couches"].items() if on) or "—"
         ko = (v.get("kickoff") or "")[11:16]
         conf = v.get("confiance")
@@ -380,13 +381,14 @@ def _gel_matrix_html(day: str, verdicts: list) -> str:
     heads = "".join(f"<th class='r'>{esc(sh)}</th>" for _, sh, _ in GM.CELLS)
     H.append("<table><tr><th>Match</th><th>KO</th>" + heads + "<th>Verrou</th></tr>")
 
-    # On montre d'abord les matchs « à dire » puis les candidats WORM, 20 lignes max.
+    # On montre d'abord les matchs « à dire » puis les candidats WORM, 50 lignes max
+    # (une journée continentale entière tient dans la matrice).
     order = {"ACCEPTER": 0, "REJETER": 1, "ATTENDRE": 2, "COLLECTER": 3}
     def worm_rank(v):
         return 0 if (v.get("tier_worm") in ("JOUER", "JOUER_PETIT")) else 1
     vv = sorted(verdicts, key=lambda v: (order.get(v["decision"], 9), worm_rank(v),
                                          -v.get("relevance", 0)))
-    for v in vv[:20]:
+    for v in vv[:50]:
         gm = v.get("gel") or GM.evaluate_match(v, g)
         cells = gm["cells"]
         tds = ""
