@@ -35,6 +35,7 @@ Usage :
 from __future__ import annotations
 
 import argparse
+import csv as _csv
 import datetime as dt
 import json
 import sys
@@ -635,6 +636,45 @@ def cmd_demo(a):
     return 0
 
 
+def cmd_csv(a):
+    """Exporte le triage OMEGA en CSV (une ligne par match) sur les N derniers jours. N'émet des
+    lignes QUE pour les jours réellement présents dans data/worm/snapshots (conteneur éphémère :
+    seuls les jours scannés existent — aucune donnée fabriquée pour les jours absents)."""
+    n = int(a.days)
+    end = dt.date.fromisoformat(a.end) if a.end else dt.datetime.now(dt.timezone.utc).date()
+    days = [(end - dt.timedelta(days=i)).isoformat() for i in range(n)]
+    snap = ROOT / "data" / "worm" / "snapshots"
+    present = sorted(d for d in days if (snap / f"{d}.jsonl").exists())
+    outdir = ROOT / "reports" / "omega"
+    outdir.mkdir(parents=True, exist_ok=True)
+    out = outdir / f"triage_{days[-1]}_{days[0]}.csv"
+    cols = ["jour", "competition", "pays", "match", "coup_envoi", "palier", "feu", "orion",
+            "modele_sup_marche", "meilleur_marche", "p", "cote", "ev_ou_divergence_pct",
+            "marquages", "sens_ev"]
+    nrows = 0
+    with open(out, "w", encoding="utf-8", newline="") as fh:
+        w = _csv.writer(fh)
+        w.writerow(cols)
+        for d in present:
+            for b in triage_day(d):
+                top = (b.get("classement") or [{}])[0]
+                w.writerow([
+                    d, b.get("league"), b.get("country"), b.get("match"), b.get("kickoff"),
+                    b.get("palier_match"), b.get("feu"), b.get("orion"), b.get("modele_sup_marche"),
+                    (f"{top.get('famille', '')}/{top.get('marche', '')}" if top.get("marche") else ""),
+                    top.get("p"), top.get("cote"), top.get("ev_pct"),
+                    "|".join(b.get("marquages") or []), b.get("ev_sens")])
+                nrows += 1
+    print(f"CSV OMEGA : {out}")
+    print(f"  fenêtre demandée : {n} jours ({days[-1]} → {days[0]})")
+    print(f"  jours avec données : {len(present)}/{n}" + (f" — {', '.join(present)}" if present else " — AUCUN"))
+    print(f"  lignes (matchs)   : {nrows}")
+    if len(present) < n:
+        print("  ⚠ conteneur éphémère : seuls les jours scannés en session existent ; "
+              "les autres jours de la fenêtre n'ont aucune donnée (non fabriquée).")
+    return 0
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = p.add_subparsers(dest="cmd", required=True)
@@ -646,6 +686,10 @@ def main():
     cc.set_defaults(func=cmd_card)
     d = sp.add_parser("demo", help="démonstration mécanique autonome (sans réseau)")
     d.set_defaults(func=cmd_demo)
+    cs = sp.add_parser("csv", help="export CSV du triage (1 ligne/match) sur N derniers jours")
+    cs.add_argument("--days", type=int, default=49)
+    cs.add_argument("--end", help="jour de fin AAAA-MM-JJ (défaut aujourd'hui UTC)")
+    cs.set_defaults(func=cmd_csv)
     a = p.parse_args()
     return a.func(a)
 
