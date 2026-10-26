@@ -113,3 +113,27 @@ dans football-data → ROI non calculable, hit-rate seul insuffisant (J25). **Le
 signal reste WATCH, jamais JOUER (J26).** Prochaine étape pour trancher : cote
 BTTS d'une vraie source (odds-api / SharpAPI), plus de saisons de test, et
 mesure du **CLV** — pas plus de paris sur une intuition.
+
+### B.8 Cote BTTS réelle (2026-10-26) — source trouvée, mais FORWARD-TEST only
+
+Vérifié : SharpAPI (et INFERSPORTS) exposent bien le marché `both_teams_to_score`
+sur les vrais matchs à venir — ex. les fixtures Premier League portent
+`both_teams_to_score` et `match_result_both_teams_to_score`, avec Pinnacle
+parmi les books listés. **La cote BTTS réelle existe donc.** Deux limites
+mesurées :
+
+1. **Tier free SharpAPI** : les valeurs de cote ne sont servies que pour
+   DraftKings + FanDuel (2 books) ; Pinnacle (la clôture, juge du CLV) est listé
+   mais non servi en free. 12 req/min.
+2. **Pas d'historique** : ces API donnent du **live/récent**, pas des cotes BTTS
+   de clôture sur plusieurs saisons. `football-data.co.uk` (source du backtest)
+   n'a pas non plus de BTTS. ⇒ **un backtest BTTS rétroactif reste impossible** ;
+   le fabriquer serait de l'invention (J25). Le backtest §B.7 reste hit-rate seul.
+
+**La voie correcte est donc le FORWARD-TEST, pas un backtest :**
+pré-match, relever la cote BTTS live (SharpAPI `both_teams_to_score`) + le verdict
+du signal (les 4 conditions J26), enregistrer dans `ledger/` avant le coup
+d'envoi, régler après le match, et cumuler **ROI + CLV** (cote d'entrée vs
+clôture Pinnacle via `apex_clv`). Le CLV reste le seul juge. Condition
+d'activation (J26/J01) : ROI *et* CLV positifs, stables, sur un échantillon
+suffisant — accumulé prospectivement, jamais rétro-ajusté. Statut : **WATCH**.
