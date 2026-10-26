@@ -91,8 +91,25 @@ ligues non calibrées — J13 dans l'esprit) :
    CLV>0 de façon stable (J01, J02). Sinon le signal reste descriptif.
 
 ### B.6 Implémentation proposée (à valider avec l'utilisateur)
-Nouvel outil `tools/apex_streak.py` (`backtest` / `scan` / `record`), branché
-en **voix** d'`apex_fusion` (couche dédiée, indépendante de W/M/C/S/K), lisant
-l'historique `data/history/` et les λ du BSM. Aucun chiffre en dur : tout seuil
-sort du backtest. Non implémenté tant que l'utilisateur n'a pas validé le
-périmètre (ligues, marchés prioritaires).
+Outil `tools/apex_streak.py` (`backtest`), réutilisant `apex_bsm.fetch_matches`
+(football-data.co.uk) et branchable en **voix** d'`apex_fusion`. Attente
+(« stat contredite ») = Pinnacle dé-viggé pour over25 ; base empirique de
+l'équipe pour btts (football-data n'a pas de cote BTTS). Aucun chiffre en dur :
+grille `{N, C, Q, F}` apprise en validation puis gelée.
+
+### B.7 Premier backtest (2026-10-26) — NON VALIDÉ, reste WATCH
+
+Walk-forward sur E0/E1/E2/E3/SP1/I1/D1/F1, amorçage 2122/2223, validation
+2324/2425, **test 2526** (saison en cours → échantillon court).
+
+| Marché | Seuils gelés | Test n | hit-rate | ROI | ROI IC95 | Verdict |
+|---|---|---|---|---|---|---|
+| over25 | N=3, C=0.50, Q=0.80, F=6 | 28 | 0.643 | **+15,2 %** | **[−18,5 % ; +45,5 %]** | NON VALIDÉ |
+| btts | N=4, C=0.50, Q=0.80, F=6 | 17 | 0.706 | — (pas de cote) | — | NON VALIDÉ |
+
+Lecture honnête : le ROI over25 est **positif en point** mais sur **28 paris**,
+l'IC95 franchit largement 0 — indiscernable de zéro (J01). BTTS n'a pas de cote
+dans football-data → ROI non calculable, hit-rate seul insuffisant (J25). **Le
+signal reste WATCH, jamais JOUER (J26).** Prochaine étape pour trancher : cote
+BTTS d'une vraie source (odds-api / SharpAPI), plus de saisons de test, et
+mesure du **CLV** — pas plus de paris sur une intuition.
