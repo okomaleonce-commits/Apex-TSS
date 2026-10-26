@@ -1,0 +1,33 @@
+{
+  "business": "ORION COMMERCE — boite de rangement tissu 66L (revente en ligne, Abidjan)",
+  "target": "Menages et jeunes adultes d'Abidjan qui achetent des articles de rangement maison en ligne et paient cash a la livraison",
+  "where": "Grand Abidjan (dont Anyama)",
+  "age": [20, 45],
+  "segments": [
+    {"name": "Etudiants / jeunes locataires", "share": 0.35, "income": [600000, 1800000]},
+    {"name": "Jeunes menages", "share": 0.40, "income": [1800000, 4800000]},
+    {"name": "Petits revendeurs / boutiques", "share": 0.15, "income": [1200000, 6000000]},
+    {"name": "Cadres", "share": 0.10, "income": [4800000, 12000000]}
+  ],
+  "behaviours": [
+    {"name": "Acheteur Jumia regulier", "share": 0.25, "how": "Commande sur Jumia, compare les prix et attend les promos."},
+    {"name": "Acheteur via reseaux sociaux", "share": 0.30, "how": "Achete via des pages Facebook/Instagram/WhatsApp, cash a la livraison."},
+    {"name": "Chasseur de promo", "share": 0.20, "how": "N'achete que quand il y a une reduction nette."},
+    {"name": "Prefere le marche physique", "share": 0.15, "how": "Va a Adjame/au marche, veut voir et toucher avant d'acheter."},
+    {"name": "Lit les avis", "share": 0.10, "how": "Verifie les avis et la reputation du vendeur avant de commander."}
+  ],
+  "objections": [
+    "6 500 FCFA c'est cher pour une boite",
+    "Je peux trouver moins cher au marche (Adjame)",
+    "Je veux voir et toucher avant d'acheter",
+    "La livraison me coute en plus",
+    "Le tissu va-t-il tenir ou se dechirer ?",
+    "Je n'ai pas confiance aux achats en ligne"
+  ],
+  "habits": [
+    "tu commandes parfois sur Jumia",
+    "tu suis des pages de vente sur Facebook ou Instagram",
+    "tu paies cash a la livraison",
+    "tu ranges des vetements et des couettes dans une chambre peu spacieuse"
+  ]
+}

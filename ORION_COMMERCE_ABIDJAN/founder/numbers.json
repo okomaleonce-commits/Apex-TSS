@@ -1,0 +1,23 @@
+{
+  "business": "ORION COMMERCE — boite de rangement tissu 66L (revente en ligne, Abidjan)",
+  "unit": "boite",
+  "price": 6500,
+  "variable": [
+    {"label": "Cout rendu Anyama (import + Yango, ESTIMATION echelle reappro ~50-100 pc)", "cost": 2200},
+    {"label": "Emballage", "cost": 300},
+    {"label": "Commission paiement mobile (2%)", "cost": 130},
+    {"label": "Publicite / acquisition par vente (ESTIMATION — A MESURER au test)", "cost": 1000}
+  ],
+  "fixed_monthly": [
+    {"label": "Forfait internet / outils", "cost": 5000}
+  ],
+  "startup": [
+    {"label": "Echantillon (deja paye)", "cost": 10637},
+    {"label": "Premier stock pilote (20 boites rendues)", "cost": 58000},
+    {"label": "Budget publicite de lancement (test)", "cost": 15000}
+  ],
+  "days_per_month": 30,
+  "capacity_per_day": 8,
+  "plan_per_day": 3,
+  "ramp_per_day": [1, 1, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5]
+}

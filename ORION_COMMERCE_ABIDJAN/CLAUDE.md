@@ -129,3 +129,36 @@ réussis. **À vérifier sur l'ordinateur du dirigeant :** accès, chargement et
 invocation réelle des agents. **Aucun** produit sélectionné, fournisseur contacté,
 compte commercial connecté, achat engagé ou livraison réalisée par ce kit. Le kit
 prépare la décision ; il ne la prend pas et ne dépense rien.
+
+## Cellule FOUNDER — tester l'entreprise avant de la lancer (`.claude/skills/founder-*`)
+
+Installé le 26/10/2026 : **« The Founder skill »** (Jake Schincariol, MIT, 11 skills +
+4 outils Python stdlib, **sans réseau** — vérifié : 29/29 tests du dépôt au clonage).
+C'est un **renfort de la méthode ORION**, pas un raccourci : mêmes règles d'or
+(anti-invention, preuves, gel). Le panel est **simulé** (acheteurs IA) → à lire comme
+une **borne haute**, à confirmer par de vrais clients (le test de demande réel reste
+le juge). Localisation : le CFO affiche en **FCFA** (copie locale modifiée).
+
+Branchement sur les 7 jalons :
+
+| Jalon | Skill(s) founder | Apport |
+|-------|------------------|--------|
+| G0 Mandat | `/founder-board` | 3 regards (Offres/Hormozi, Monopole/Thiel, Produit/Jobs) votent go / go-if / pass. |
+| G1 Marché | `/founder-competitors`, `/founder-consumer --quick` | Concurrents sourcés + pré-test rapide de demande. |
+| G2 Échantillon | `/founder-cfo`, `/founder-pricing` | Économie unitaire (point mort, année 1, cash) + fourchette de prix acceptable (Van Westendorp). |
+| G3 Offre/Demande | `/founder-consumer`, `/founder-offer`, `/founder-marketing`, `/founder-brand` | Panel 100 acheteurs, stack d'offre, campagne 30 j, nom/visuel. |
+| G4 Petit lot | `/founder-cfo` (what-ifs) | Stress prix/volume/coûts avant d'acheter. |
+| G5 Livraison | `/founder-ops` | Fournisseurs, routines, risques → coûts réels renvoyés au CFO. |
+| G6 Réachat | `/founder-plan` | Compile tout en un plan + **verdict calculé** : Rentable / Pas encore / Incomplet. |
+
+- **Fichiers de travail** : dans `founder/` (les skills se lisent entre eux).
+  Déjà créés pour la boîte 66 L : `numbers.json` (CFO), `customer.json` + `pitch.md`
+  (panel), `cfo.md` (sortie CFO).
+- **Les outils ne remplacent pas** le module BSM-équivalent du kit (`tools/calculateur.py`)
+  ni les preuves : ils les **croisent**. Un chiffre du CFO reste un **estimé** tant
+  qu'un devis réel ne l'a pas confirmé.
+- **Panel 100 acheteurs = sous-agents** : ne le lancer que sur demande explicite du
+  dirigeant (coût en agents). `--quick` pour une lecture légère.
+
+> Crédit : The Founder skill — Jake Schincariol (opusjake.ai), licence MIT
+> (`.claude/skills/FOUNDER_LICENSE`). Copie locale ; `founder-cfo` localisé en FCFA.
