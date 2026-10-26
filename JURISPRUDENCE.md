@@ -66,6 +66,21 @@ sont pas un consensus (corrélation des erreurs, META). WORM seul peut dire
 JOUER : ORION refuse sans confirmation indépendante.
 > *Cas : 15 « SURVEILLANCE / ABSTENTION » et la règle de fusion `< 3 voix → COLLECTER`.*
 
+### J26 — Contradiction-de-série : une série n'est pas un signal
+Un retournement de série (fin d'une série d'unders → over, et idem pour favori,
+outsider, nul, O/U 2.5, total équipe O1.5/O2.5, O3.5, O4.5, BTTS oui/non) pris
+seul est le **sophisme du joueur**. Il n'est un CANDIDATE que si **les quatre**
+conditions tiennent : (1) série de N, (2) contradiction mesurée à l'attente du
+modèle, (3) longueur atteignant le **plafond historique empirique** de l'équipe,
+(4) forme récente alignée sur le retournement. Et il ne devient un pari
+qu'après un backtest walk-forward (par marché **et** par ligue) à ROI et CLV
+positifs stables, seuils gelés avant test. Sans backtest : **WATCH, jamais
+JOUER**. Les facteurs latents (visibles en prématch, révélés en post-match) se
+versent à la couche observationnelle (MI/BI, context, character),
+`bet_authority=false`.
+> *Spéc. : `docs/signal-contradiction-serie.md`. Garde-fou cohérent avec J01,
+> J02, J10, J25.*
+
 ---
 
 ## II. Raisons NON STATISTIQUES (structure · périmètre · données · process)

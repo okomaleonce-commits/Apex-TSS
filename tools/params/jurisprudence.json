@@ -182,6 +182,13 @@
       "verdict": "ECRIRE_ABSENT",
       "regle": "Ne jamais inventer un backtest, une cote, une statistique, un volume ou une simulation. Donnée manquante = écrite manquante. Hiérarchie des sources honnête (déplacement Pinnacle ≠ post Telegram). Le RLM n'est pas calculable sans % public.",
       "preuve": "CLAUDE.md (règle anti-invention répétée dans BSM, MI, turf, FUSION, SOURCES)."
+    },
+    {
+      "id": "J26", "domaine": "football", "type": "STATISTIQUE", "code": "CONTRADICTION_DE_SERIE",
+      "declencheur": "Retournement de série invoqué comme signal (ex. fin d'une série d'unders → over) sur un marché (favori, outsider, nul, O/U 2.5, total équipe O1.5/O2.5, O3.5, O4.5, BTTS oui/non)",
+      "verdict": "WATCH_TANT_QUE_NON_BACKTESTE",
+      "regle": "Une série seule n'est pas un signal (sophisme du joueur : matchs quasi-indépendants). Le retournement n'est un CANDIDATE que si les quatre conditions tiennent : (1) série de N occurrences, (2) CONTRADICTION mesurée à l'attente du modèle (écart cumulé réalisé − attendu), (3) la longueur courante atteint le plafond historique empirique de l'équipe pour ce marché, (4) la forme récente s'aligne sur le retournement. Et il ne devient un pari qu'après un backtest walk-forward par marché ET par ligue à ROI et CLV positifs stables, seuils gelés avant test. Sans backtest : WATCH, jamais JOUER. Les facteurs latents (visibles en prématch, révélés en post-match) se versent à la couche observationnelle (MI/BI, context, character), bet_authority=false.",
+      "preuve": "docs/signal-contradiction-serie.md ; demande utilisateur 2026-10-26 ; garde-fou cohérent avec J01 (EV stable), J02 (supériorité au marché), J10 (échantillon) et J25 (anti-invention)."
     }
   ]
 }
