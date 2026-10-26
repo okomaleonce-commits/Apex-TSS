@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)",
+      "Bash(sudo *)",
+      "Bash(chmod 777 *)",
+      "Bash(chmod -R 777 *)",
+      "Bash(ssh *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd=$(jq -r '.tool_input.command // empty' 2>/dev/null); printf '%s' \"$cmd\" | grep -qiE '(>[[:space:]]*/dev/(sd|nvme|hd|vd))|((^|[[:space:]])dd[[:space:]].*of=/dev/)|((^|[[:space:]])mkfs([.][a-z0-9]+)?[[:space:]]+/)|((curl|wget)[[:space:]].*[|][[:space:]]*(sh|bash))' && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"APEX garde-fou: motif catastrophique bloque (ecriture disque brut / mkfs / curl|sh)\"}}' || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -fsS http://localhost:3111/agentmemory/livez >/dev/null 2>&1 || (command -v npx >/dev/null 2>&1 && nohup npx -y @agentmemory/agentmemory@latest >>/tmp/agentmemory-worker.log 2>&1 & ) ; exit 0",
+            "async": true,
+            "timeout": 120,
+            "statusMessage": "Starting agentmemory worker…"
+          }
+        ]
+      }
+    ]
+  }
+}
