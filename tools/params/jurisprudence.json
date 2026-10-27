@@ -189,6 +189,13 @@
       "verdict": "WATCH_TANT_QUE_NON_BACKTESTE",
       "regle": "Une série seule n'est pas un signal (sophisme du joueur : matchs quasi-indépendants). Le retournement n'est un CANDIDATE que si les quatre conditions tiennent : (1) série de N occurrences, (2) CONTRADICTION mesurée à l'attente du modèle (écart cumulé réalisé − attendu), (3) la longueur courante atteint le plafond historique empirique de l'équipe pour ce marché, (4) la forme récente s'aligne sur le retournement. Et il ne devient un pari qu'après un backtest walk-forward par marché ET par ligue à ROI et CLV positifs stables, seuils gelés avant test. Sans backtest : WATCH, jamais JOUER. Les facteurs latents (visibles en prématch, révélés en post-match) se versent à la couche observationnelle (MI/BI, context, character), bet_authority=false.",
       "preuve": "docs/signal-contradiction-serie.md ; demande utilisateur 2026-10-26 ; garde-fou cohérent avec J01 (EV stable), J02 (supériorité au marché), J10 (échantillon) et J25 (anti-invention)."
+    },
+    {
+      "id": "J27", "domaine": "transverse", "type": "STATISTIQUE", "code": "ROI_LIGUE_NEGATIF",
+      "declencheur": "Ligue dont le backtest de PARIS a un ROI (ou CLV) significativement négatif — IC95 entièrement sous 0 — même si le statut log-loss n'est pas 'significativement pire' et que le gate EV per-match passe",
+      "verdict": "ABSTENTION",
+      "regle": "Une ligue au ROI/CLV backtest significativement négatif ne parie pas, point. Le gate EV per-match (EV≥3 % stable, écart au marché <10 pts) ne regarde PAS le ROI de la ligue — il faut un garde-fou séparé. Mécanisé dans apex_bsm.simulate via tools/params/roi_gate.json (fail-open : table absente/illisible → aucun changement). Toute ligue ajoutée à roi_gate.json avec roi_ic95_haut < 0 force l'ABSTENTION.",
+      "preuve": "Révélé le 2026-10-26 : sur P1 (log-loss NON CONCLUANT) le moteur a proposé 'SÉLECTION Santa Clara @9.0 (+63 % EV)' alors que le backtest de paris P1 perdait 22 %. Mesures : P1 ROI −22,4 % IC95 [−39,3 % ; −4,2 %] CLV −6,5 % (n=232) ; T1 ROI −29,3 % IC95 [−44,6 % ; −12,4 %] CLV −4,4 % (n=220). Avant/après vérifié : la même simulation Santa Clara-Benfica passe de SÉLECTION @9.0 à ABSTENTION. Reproductible via `apex_bsm backtest --divs <DIV>`."
     }
   ]
 }

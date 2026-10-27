@@ -81,6 +81,19 @@ versent à la couche observationnelle (MI/BI, context, character),
 > *Spéc. : `docs/signal-contradiction-serie.md`. Garde-fou cohérent avec J01,
 > J02, J10, J25.*
 
+### J27 — ROI/CLV de ligue négatif → ABSTENTION (mécanisé)
+Une ligue dont le **backtest de paris** a un ROI (ou CLV) **significativement
+négatif** (IC95 entièrement sous 0) ne parie pas — **même si** le statut
+log-loss n'est pas « significativement pire » et que le gate EV per-match passe.
+Le gate per-match ne regarde pas le ROI de la ligue ; il faut un garde-fou
+séparé. **Mécanisé** dans `apex_bsm.simulate` via `tools/params/roi_gate.json`
+(fail-open). Toute ligue à `roi_ic95_haut < 0` force l'ABSTENTION.
+> *Révélé le 2026-10-26 : sur P1 (log-loss NON CONCLUANT) le moteur proposait
+> « SÉLECTION Santa Clara @9.0 (+63 % EV) » alors que le backtest de paris P1
+> perdait 22 % (ROI −22,4 % IC95 [−39,3 % ; −4,2 %]). T1 : −29,3 % IC95
+> [−44,6 % ; −12,4 %]. Avant/après vérifié : la décision passe de SÉLECTION à
+> ABSTENTION.*
+
 ---
 
 ## II. Raisons NON STATISTIQUES (structure · périmètre · données · process)

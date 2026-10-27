@@ -44,6 +44,18 @@ LEDGER_DIR = ROOT / "ledger"
 FD_URL = "https://www.football-data.co.uk/mmz4281/{season}/{div}.csv"
 N_GOALS = 11
 
+
+def load_roi_gate() -> dict:
+    """Garde-fou J27 : table ROI/CLV du backtest de paris par ligue
+    (tools/params/roi_gate.json → clé "mesures"). Fail-open : tout problème de
+    lecture renvoie une table vide, donc aucun changement de comportement."""
+    try:
+        import json as _json
+        p = ROOT / "tools" / "params" / "roi_gate.json"
+        return _json.loads(p.read_text(encoding="utf-8")).get("mesures", {})
+    except Exception:
+        return {}
+
 # Règles de pari fixées AVANT le backtest (ne pas modifier après avoir vu le test final).
 BET_RULES = {
     "markets": ["1X2", "OU2.5"],
@@ -832,6 +844,13 @@ def cmd_simulate(a):
         veto.append("backtest : modèle significativement moins précis que le marché → EV présumée illusoire")
     if a.missing_lineup:
         veto.append("composition déterminante manquante")
+    # J27 : une ligue dont le backtest de PARIS a un ROI significativement négatif
+    # (IC95 entièrement < 0) ne parie pas, même si le gate EV per-match passe.
+    _rg = load_roi_gate().get(a.div)
+    if _rg and _rg.get("roi_ic95_haut") is not None and _rg["roi_ic95_haut"] < 0:
+        veto.append(f"J27 : ROI backtest {a.div} significativement négatif "
+                    f"(ROI {_rg['roi']:+.1%} IC95 [{_rg['roi_ic95_bas']:+.1%} ; {_rg['roi_ic95_haut']:+.1%}]"
+                    f", CLV {_rg.get('clv', 0):+.1%}) → pas de pari sur cette ligue")
     # écart suspect : > 10 points de probabilité implicite avec le marché démarginé → erreur de modèle probable.
     # Marchés à règlement partiel (AH) comparés via leurs cotes justes (EV = 0).
     def fair_prob(e):

@@ -1,0 +1,8 @@
+{
+  "_doc": "Garde-fou J27 — ROI/CLV du backtest de PARIS par ligue. Une ligue dont roi_ic95_haut < 0 (ROI significativement négatif, IC95 entièrement sous 0) force l'ABSTENTION dans apex_bsm.simulate, MÊME si le gate EV per-match passe. Comble le trou mesuré le 2026-10-26 : sur P1 (statut log-loss NON CONCLUANT) le gate per-match a laissé passer une sélection alors que le backtest de paris perdait 22 %. Append-only, mesuré, jamais inventé. Reproductible via `python3 tools/apex_bsm.py backtest --divs <DIV>`.",
+  "version": "1.0.0",
+  "mesures": {
+    "P1": {"roi": -0.2241, "roi_ic95_bas": -0.3928, "roi_ic95_haut": -0.0417, "clv": -0.0653, "n_paris": 232, "mesure_utc": "2026-10-26", "statut_logloss": "NON CONCLUANT", "note": "Primeira Liga — log-loss non concluant mais paris value-destructeurs"},
+    "T1": {"roi": -0.2932, "roi_ic95_bas": -0.4459, "roi_ic95_haut": -0.1242, "clv": -0.0437, "n_paris": 220, "mesure_utc": "2026-10-26", "statut_logloss": "NON SUPÉRIEUR AU MARCHÉ", "note": "Süper Lig — ROI franchement négatif"}
+  }
+}
