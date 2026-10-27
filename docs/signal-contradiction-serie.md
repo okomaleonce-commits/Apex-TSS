@@ -137,3 +137,29 @@ d'envoi, régler après le match, et cumuler **ROI + CLV** (cote d'entrée vs
 clôture Pinnacle via `apex_clv`). Le CLV reste le seul juge. Condition
 d'activation (J26/J01) : ROI *et* CLV positifs, stables, sur un échantillon
 suffisant — accumulé prospectivement, jamais rétro-ajusté. Statut : **WATCH**.
+
+### B.9 Harness forward-test (construit le 2026-10-27)
+
+`tools/apex_streak.py` porte maintenant deux sous-commandes prospectives, en
+plus de `backtest` :
+
+- `forward [--date J] [--market btts|over25]` — lit le snapshot WORM du jour
+  (`data/worm/snapshots/<J>.jsonl`, qui porte déjà les cotes BTTS/O-U via
+  API-Football), filtre les **8 ligues backtestées** (E0–E3, SP1, I1, D1, F1),
+  détecte les équipes en série selon les **4 conditions J26** (seuils gelés de
+  §B.7), et **enregistre avant le coup d'envoi** chaque signal avec sa cote live
+  dans `ledger/forward_streak.jsonl` (append-only, dédup par fixture+marché+équipe).
+  Sans snapshot du jour : il refuse d'enregistrer (anti-invention). Sans cote :
+  signal noté mais non enregistré (J05).
+- `forward-settle` — après les matchs, apparie chaque entrée ouverte au résultat
+  football-data, calcule GAGNÉ/PERDU + le P&L, écrit `ledger/forward_streak_settled.jsonl`
+  et cumule le **ROI** (IC95 bootstrap dès 10 paris).
+
+Vérifié de bout en bout le 2026-10-27 (règlement d'une entrée test sur un vrai
+match → ROI correct). **Limites honnêtes** : (1) le **CLV n'est pas encore
+câblé** — il faut une source de cote de **clôture** BTTS/O-U fiable (champ
+`clv` laissé à `null`, note explicite) ; (2) périmètre limité aux 8 ligues à
+historique football-data ; (3) appariement de noms API-Football↔football-data
+flou, tolérant mais faillible. **Statut inchangé : WATCH** — le signal ne
+devient jouable qu'après ROI **et** CLV positifs stables (J26/J01), et le gel
+reste actif.

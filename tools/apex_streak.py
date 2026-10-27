@@ -247,8 +247,197 @@ def _write_report_md(rundir, r):
     (rundir / "REPORT.md").write_text("\n".join(L))
 
 
+# ───────────────────────── FORWARD-TEST (J26 prospectif) ─────────────────────────
+# Le backtest BTTS est impossible (pas de cote BTTS historique). La seule façon
+# honnête de valider le signal est prospective : enregistrer la cote live AVANT le
+# coup d'envoi, régler après, cumuler ROI + CLV. Les cotes live viennent du snapshot
+# WORM (API-Football), qui porte déjà BTTS et O/U 2.5.
+FWD_LEAGUES = {39: "E0", 40: "E1", 41: "E2", 42: "E3", 140: "SP1", 135: "I1", 78: "D1", 61: "F1"}
+FROZEN = {"over25": {"N": 3, "C": 0.50, "Q": 0.80, "F": 6},
+          "btts":   {"N": 4, "C": 0.50, "Q": 0.80, "F": 6}}
+FWD_LEDGER = ROOT / "ledger" / "forward_streak.jsonl"
+FWD_SETTLED = ROOT / "ledger" / "forward_streak_settled.jsonl"
+
+
+def _norm(s):
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode()
+    return "".join(c for c in s.lower() if c.isalnum())
+
+
+def _match_team(name, candidates):
+    """Meilleur nom football-data pour un libellé API-Football (exact normalisé, sinon
+    chevauchement de tokens). None si rien de convaincant."""
+    n = _norm(name)
+    norm = {c: _norm(c) for c in candidates}
+    for c, cn in norm.items():
+        if cn == n:
+            return c
+    best, score = None, 0.0
+    for c, cn in norm.items():
+        if n and (n in cn or cn in n):
+            s = min(len(n), len(cn)) / max(len(n), len(cn))
+            if s > score:
+                best, score = c, s
+    return best if score >= 0.6 else None
+
+
+def _live_odds(fixture_odds, market):
+    """(cote du côté chaud, source) depuis le bloc odds multi-books du snapshot."""
+    if not isinstance(fixture_odds, dict):
+        return None, None
+    for book, v in fixture_odds.items():
+        if book == "_update" or not isinstance(v, dict):
+            continue
+        if market == "btts" and v.get("BTTS"):
+            return v["BTTS"][0], book           # BTTS oui
+        if market == "over25" and v.get("OU", {}).get("2.5"):
+            return v["OU"]["2.5"][0], book       # Over 2.5
+    return None, None
+
+
+def _season_code(d: dt.date) -> str:
+    start = d.year if d.month >= 7 else d.year - 1
+    return f"{start % 100:02d}{(start + 1) % 100:02d}"
+
+
+def cmd_forward(a):
+    market = a.market
+    day = a.date or dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+    snap = ROOT / "data" / "worm" / "snapshots" / f"{day}.jsonl"
+    if not snap.exists():
+        print(f"Snapshot WORM absent : {snap} — lancer d'abord apex_worm/apex_fusion scan. "
+              f"Rien enregistré (anti-invention).", flush=True)
+        return
+    rows = [json.loads(l) for l in open(snap, encoding="utf-8") if l.strip()]
+    inscope = [r for r in rows if r.get("league_id") in FWD_LEAGUES]
+    th = FROZEN[market]
+    # entrées déjà ouvertes (dédup)
+    seen = set()
+    if FWD_LEDGER.exists():
+        for l in open(FWD_LEDGER, encoding="utf-8"):
+            try:
+                e = json.loads(l); seen.add((e["fixture_id"], e["market"], e["team_trigger"]))
+            except Exception:
+                pass
+    hist_cache = {}
+    recorded = 0
+    print(f"# APEX-STREAK forward — {day} · marché={market} · seuils gelés {th}", flush=True)
+    for r in inscope:
+        div = FWD_LEAGUES[r["league_id"]]
+        try:
+            fix_date = dt.date.fromisoformat((r.get("kickoff") or "")[:10])
+        except Exception:
+            continue
+        if div not in hist_cache:
+            seasons = sorted({_season_code(fix_date), _season_code(fix_date - dt.timedelta(days=120))})
+            rowsh = []
+            for s in seasons:
+                try:
+                    rowsh += B.fetch_matches(div, s)
+                except Exception:
+                    pass
+            hist_cache[div] = team_timeline(rowsh, market)
+        tl = hist_cache[div]
+        odds_hot, src = _live_odds(r.get("odds"), market)
+        for api_name in (r.get("home"), r.get("away")):
+            team = _match_team(api_name, tl.keys())
+            if not team:
+                continue
+            prior = [h for h in tl[team] if h["date"] < fix_date]
+            if not signal_before(prior, th["N"], th["C"], th["Q"], th["F"], market):
+                continue
+            key = (r["fixture_id"], market, team)
+            if key in seen:
+                continue
+            if not odds_hot:
+                print(f"  ⚠ signal {team} ({r['home']}–{r['away']}) mais cote {market} absente du snapshot → non enregistré (J05)", flush=True)
+                continue
+            entry = {
+                "ts_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+                "day": day, "div": div, "fixture_id": r["fixture_id"],
+                "home": r["home"], "away": r["away"], "kickoff": r.get("kickoff"),
+                "market": market, "side": "oui" if market == "btts" else "over",
+                "team_trigger": team, "serie_longueur": th["N"],
+                "cote_entree": odds_hot, "cote_source": src,
+                "seuils": th, "statut": "OUVERT",
+                "note": "forward-test J26 — WATCH, pas une mise réelle (gel) ; sert à mesurer ROI/CLV prospectif",
+            }
+            FWD_LEDGER.parent.mkdir(parents=True, exist_ok=True)
+            with open(FWD_LEDGER, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            seen.add(key); recorded += 1
+            print(f"  ✓ {div} {r['home']}–{r['away']} | série {market} sur {team} | cote {odds_hot} ({src})", flush=True)
+    print(f"\n{recorded} entrée(s) forward enregistrée(s) dans {FWD_LEDGER}", flush=True)
+    print("Rappel : forward-test = WATCH prospectif (gel actif). Régler après match : "
+          "python3 tools/apex_streak.py forward-settle", flush=True)
+
+
+def cmd_forward_settle(a):
+    if not FWD_LEDGER.exists():
+        print("Aucune entrée forward.", flush=True)
+        return
+    entries = [json.loads(l) for l in open(FWD_LEDGER, encoding="utf-8") if l.strip()]
+    already = set()
+    if FWD_SETTLED.exists():
+        for l in open(FWD_SETTLED, encoding="utf-8"):
+            try:
+                already.add(json.loads(l)["ref_ts"])
+            except Exception:
+                pass
+    res_cache = {}
+    pnl, settled = [], 0
+    for e in entries:
+        if e["ts_utc"] in already:
+            # déjà réglé → réintégrer son P&L au cumul
+            continue
+        div = e["div"]
+        try:
+            fdate = dt.date.fromisoformat((e.get("kickoff") or e["day"])[:10])
+        except Exception:
+            continue
+        season = _season_code(fdate)
+        if (div, season) not in res_cache:
+            try:
+                res_cache[(div, season)] = B.fetch_matches(div, season)
+            except Exception:
+                res_cache[(div, season)] = []
+        m = next((x for x in res_cache[(div, season)]
+                  if x["date"] == fdate
+                  and _match_team(e["home"], [x["home"]]) and _match_team(e["away"], [x["away"]])), None)
+        if not m:
+            continue  # pas encore joué / introuvable
+        tot = m["hg"] + m["ag"]
+        hot = (tot > 2.5) if e["market"] == "over25" else (m["hg"] > 0 and m["ag"] > 0)
+        win = bool(hot)  # on parie toujours le côté chaud (retournement)
+        gain = (e["cote_entree"] - 1.0) if win else -1.0
+        rec = {"ref_ts": e["ts_utc"], "fixture_id": e["fixture_id"], "div": div,
+               "match": f"{e['home']}–{e['away']}", "market": e["market"],
+               "score": f"{m['hg']}-{m['ag']}", "resultat": "GAGNÉ" if win else "PERDU",
+               "cote_entree": e["cote_entree"], "pnl_unites": round(gain, 3),
+               "clv": None, "clv_note": "CLV non câblé (pas de source de cote de clôture BTTS/OU fiable ici)",
+               "regle_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")}
+        with open(FWD_SETTLED, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        pnl.append(gain); settled += 1
+        print(f"  {rec['resultat']:6} {rec['match']} {rec['score']} | {e['market']} @ {e['cote_entree']} → {gain:+.2f} u", flush=True)
+    # cumul global (toutes lignes réglées)
+    allp = []
+    if FWD_SETTLED.exists():
+        for l in open(FWD_SETTLED, encoding="utf-8"):
+            try:
+                allp.append(json.loads(l)["pnl_unites"])
+            except Exception:
+                pass
+    print(f"\n{settled} nouvelle(s) ligne(s) réglée(s). Cumul forward-test : {len(allp)} paris · "
+          f"ROI {(np.mean(allp) if allp else 0):+.1%} · P&L {sum(allp):+.1f} u"
+          + (f" · IC95 {boot_ci(allp)}" if len(allp) >= 10 else " · (IC95 à ≥10 paris)"), flush=True)
+    print("Statut : forward-test prospectif (gel). Activation du signal (J26) seulement si ROI ET CLV "
+          "positifs stables sur échantillon suffisant.", flush=True)
+
+
 def main():
-    ap = argparse.ArgumentParser(description="APEX-STREAK — backtest signal contradiction-de-série (J26)")
+    ap = argparse.ArgumentParser(description="APEX-STREAK — signal contradiction-de-série (J26) : backtest + forward-test")
     sp = ap.add_subparsers(dest="cmd", required=True)
     b = sp.add_parser("backtest")
     b.add_argument("--divs", default=",".join(DIVS))
@@ -257,6 +446,12 @@ def main():
     b.add_argument("--N", type=lambda s: [int(x) for x in s.split(",")], default=None)
     b.add_argument("--C", type=lambda s: [float(x) for x in s.split(",")], default=None)
     b.set_defaults(func=backtest)
+    fw = sp.add_parser("forward", help="enregistrer les signaux du jour avec cote live (avant coup d'envoi)")
+    fw.add_argument("--date", help="YYYY-MM-DD (défaut aujourd'hui UTC) ; lit data/worm/snapshots/<date>.jsonl")
+    fw.add_argument("--market", default="btts", choices=["over25", "btts"])
+    fw.set_defaults(func=cmd_forward)
+    fs = sp.add_parser("forward-settle", help="régler les entrées forward jouées et cumuler le ROI")
+    fs.set_defaults(func=cmd_forward_settle)
     a = ap.parse_args()
     a.func(a)
 
