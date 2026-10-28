@@ -285,6 +285,23 @@ def arbitrate_day(day: str):
             verdict["gel_actif"] = True
             verdict["raison"] = (verdict.get("raison", "") +
                                  f" — GEL (matrice) : {manque}").strip(" —")
+        # CONTRAT DE SORTIE (Lot 3, mod #6) — bloc minimal présent sur CHAQUE verdict, pour qu'aucune
+        # décision (surtout une abstention) ne soit un silence : elle est toujours explicable par le
+        # contrôleur d'indépendance ORION (voix sourcées), le désaccord, et l'état du gel. Le gel
+        # interdit toute mise réelle quel que soit le verrou de la matrice.
+        verdict["contrat_sortie"] = {
+            "decision_orion": verdict["decision"],
+            "n_voix_independantes": verdict.get("n_independantes"),
+            "min_voix_requis": O.MIN_INDEP_VOICES,
+            "independance_ok": (verdict.get("n_independantes") or 0) >= O.MIN_INDEP_VOICES,
+            "couches_sourcees": [k for k, on in couches.items() if on],
+            "confiance": verdict.get("confiance"),
+            "desaccord": verdict.get("desaccord"),
+            "verrou_gel": verdict["gel"].get("verrou"),
+            "gel_actif": True,
+            "mise_reelle_autorisee": False,
+            "raison": verdict.get("raison"),
+        }
         out.append(verdict)
     return out
 
