@@ -1,0 +1,134 @@
+{
+  "_doc": "Garde-fou J27 — ROI/CLV du backtest de PARIS par ligue. Une ligue dont roi_ic95_haut < 0 (ROI significativement négatif, IC95 entièrement sous 0) force l'ABSTENTION dans apex_bsm.simulate, MÊME si le gate EV per-match passe. Comble le trou mesuré le 2026-10-26 : sur P1 (statut log-loss NON CONCLUANT) le gate per-match a laissé passer une sélection alors que le backtest de paris perdait 22 %. Append-only, mesuré, jamais inventé. Reproductible via `python3 tools/apex_bsm.py backtest --divs <DIV>`. [v1.1.0 2026-10-28] Étendu aux 9 ligues à model card, mesuré en un run walk-forward (bsm-20261028T155714Z, divs E0,E1,E2,E3,EC,SP1,I1,D1,F1). Nouveaux vetos J27 (IC95<0) : D1, E1, F1, SP1. P1/T1 inchangés (runs solo antérieurs). Reproductible ; jamais inventé.",
+  "version": "1.1.0",
+  "mesures": {
+    "P1": {
+      "roi": -0.2241,
+      "roi_ic95_bas": -0.3928,
+      "roi_ic95_haut": -0.0417,
+      "clv": -0.0653,
+      "n_paris": 232,
+      "mesure_utc": "2026-10-26",
+      "statut_logloss": "NON CONCLUANT",
+      "note": "Primeira Liga — log-loss non concluant mais paris value-destructeurs"
+    },
+    "T1": {
+      "roi": -0.2932,
+      "roi_ic95_bas": -0.4459,
+      "roi_ic95_haut": -0.1242,
+      "clv": -0.0437,
+      "n_paris": 220,
+      "mesure_utc": "2026-10-26",
+      "statut_logloss": "NON SUPÉRIEUR AU MARCHÉ",
+      "note": "Süper Lig — ROI franchement négatif"
+    },
+    "D1": {
+      "roi": -0.2327,
+      "roi_ic95_bas": -0.4094,
+      "roi_ic95_haut": -0.047,
+      "clv": -0.0515,
+      "n_paris": 243,
+      "mesure_utc": "2026-10-28",
+      "statut_logloss": "NON SUPÉRIEUR AU MARCHÉ",
+      "run_id": "bsm-20261028T155714Z",
+      "divs_basis": "E0,E1,E2,E3,EC,SP1,I1,D1,F1",
+      "note": "Bundesliga — ROI significativement négatif (IC95 entièrement < 0) → VETO J27"
+    },
+    "E0": {
+      "roi": -0.1402,
+      "roi_ic95_bas": -0.2996,
+      "roi_ic95_haut": 0.0186,
+      "clv": -0.0424,
+      "n_paris": 343,
+      "mesure_utc": "2026-10-28",
+      "statut_logloss": "NON CONCLUANT",
+      "run_id": "bsm-20261028T155714Z",
+      "divs_basis": "E0,E1,E2,E3,EC,SP1,I1,D1,F1",
+      "note": "Premier League — ROI négatif mais IC95 franchit 0 → mesuré, non vétoé"
+    },
+    "E1": {
+      "roi": -0.2035,
+      "roi_ic95_bas": -0.3232,
+      "roi_ic95_haut": -0.076,
+      "clv": -0.0613,
+      "n_paris": 445,
+      "mesure_utc": "2026-10-28",
+      "statut_logloss": "NON SUPÉRIEUR AU MARCHÉ",
+      "run_id": "bsm-20261028T155714Z",
+      "divs_basis": "E0,E1,E2,E3,EC,SP1,I1,D1,F1",
+      "note": "Championship — ROI significativement négatif (IC95 entièrement < 0) → VETO J27"
+    },
+    "E2": {
+      "roi": -0.0907,
+      "roi_ic95_bas": -0.2076,
+      "roi_ic95_haut": 0.0291,
+      "clv": -0.0616,
+      "n_paris": 442,
+      "mesure_utc": "2026-10-28",
+      "statut_logloss": "NON SUPÉRIEUR AU MARCHÉ",
+      "run_id": "bsm-20261028T155714Z",
+      "divs_basis": "E0,E1,E2,E3,EC,SP1,I1,D1,F1",
+      "note": "League One — ROI négatif mais IC95 franchit 0 → mesuré, non vétoé"
+    },
+    "E3": {
+      "roi": -0.092,
+      "roi_ic95_bas": -0.2132,
+      "roi_ic95_haut": 0.0399,
+      "clv": -0.0723,
+      "n_paris": 436,
+      "mesure_utc": "2026-10-28",
+      "statut_logloss": "NON SUPÉRIEUR AU MARCHÉ",
+      "run_id": "bsm-20261028T155714Z",
+      "divs_basis": "E0,E1,E2,E3,EC,SP1,I1,D1,F1",
+      "note": "League Two — ROI négatif mais IC95 franchit 0 → mesuré, non vétoé"
+    },
+    "EC": {
+      "roi": 0.0153,
+      "roi_ic95_bas": -0.1166,
+      "roi_ic95_haut": 0.1569,
+      "clv": -0.0787,
+      "n_paris": 375,
+      "mesure_utc": "2026-10-28",
+      "statut_logloss": "NON CONCLUANT",
+      "run_id": "bsm-20261028T155714Z",
+      "divs_basis": "E0,E1,E2,E3,EC,SP1,I1,D1,F1",
+      "note": "National League — ROI négatif mais IC95 franchit 0 → mesuré, non vétoé"
+    },
+    "F1": {
+      "roi": -0.1931,
+      "roi_ic95_bas": -0.3666,
+      "roi_ic95_haut": -0.0143,
+      "clv": -0.0573,
+      "n_paris": 259,
+      "mesure_utc": "2026-10-28",
+      "statut_logloss": "NON SUPÉRIEUR AU MARCHÉ",
+      "run_id": "bsm-20261028T155714Z",
+      "divs_basis": "E0,E1,E2,E3,EC,SP1,I1,D1,F1",
+      "note": "Ligue 1 — ROI significativement négatif (IC95 entièrement < 0) → VETO J27"
+    },
+    "I1": {
+      "roi": -0.0746,
+      "roi_ic95_bas": -0.2615,
+      "roi_ic95_haut": 0.1173,
+      "clv": -0.0576,
+      "n_paris": 324,
+      "mesure_utc": "2026-10-28",
+      "statut_logloss": "NON SUPÉRIEUR AU MARCHÉ",
+      "run_id": "bsm-20261028T155714Z",
+      "divs_basis": "E0,E1,E2,E3,EC,SP1,I1,D1,F1",
+      "note": "Serie A — ROI négatif mais IC95 franchit 0 → mesuré, non vétoé"
+    },
+    "SP1": {
+      "roi": -0.1995,
+      "roi_ic95_bas": -0.35,
+      "roi_ic95_haut": -0.0355,
+      "clv": -0.0585,
+      "n_paris": 319,
+      "mesure_utc": "2026-10-28",
+      "statut_logloss": "NON SUPÉRIEUR AU MARCHÉ",
+      "run_id": "bsm-20261028T155714Z",
+      "divs_basis": "E0,E1,E2,E3,EC,SP1,I1,D1,F1",
+      "note": "LaLiga — ROI significativement négatif (IC95 entièrement < 0) → VETO J27"
+    }
+  }
+}

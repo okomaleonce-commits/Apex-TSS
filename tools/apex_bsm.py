@@ -44,6 +44,151 @@ LEDGER_DIR = ROOT / "ledger"
 FD_URL = "https://www.football-data.co.uk/mmz4281/{season}/{div}.csv"
 N_GOALS = 11
 
+
+def load_roi_gate() -> dict:
+    """Garde-fou J27 : table ROI/CLV du backtest de paris par ligue
+    (tools/params/roi_gate.json → clé "mesures"). Fail-open : tout problème de
+    lecture renvoie une table vide, donc aucun changement de comportement."""
+    try:
+        import json as _json
+        p = ROOT / "tools" / "params" / "roi_gate.json"
+        return _json.loads(p.read_text(encoding="utf-8")).get("mesures", {})
+    except Exception:
+        return {}
+
+
+MODEL_CARDS_DIR = ROOT / "tools" / "params" / "model_cards"
+MC_CACHE_DIR = ROOT / "data" / "bsm_mc_cache"
+MC_CACHE_SCHEMA = 1
+
+
+def _config_hash(P: dict) -> str:
+    import hashlib as _h, json as _json
+    return _h.sha1(_json.dumps({k: P[k] for k in sorted(P)}, default=str).encode()).hexdigest()[:12]
+
+
+def _np_safe(o):
+    """Sérialisation JSON tolérante aux scalaires numpy (sécurité : tout doit déjà être du float Python)."""
+    import numpy as _np
+    if isinstance(o, _np.floating):
+        return float(o)
+    if isinstance(o, _np.integer):
+        return int(o)
+    raise TypeError(f"non sérialisable : {type(o)}")
+
+
+def mc_cache_key(fixture_id, div, home, away, asof, seasons, lh, la, rho, sigma, scen, seed, n0, nmax, tol):
+    """Clé de cache Monte-Carlo (mod #2) : fixture_id + model_version + hash du snapshot de données
+    (λ, ρ, σ, ligue, équipes, as-of, saisons) + hash des paramètres numériques (scénarios, seed, n0,
+    nmax, tol, grille de buts). Le MC étant déterministe (seed fixe), une même clé rend un résultat
+    identique au bit près → inutile de relancer 10k–640k tirages pour un match déjà price au même
+    snapshot. Les COTES ne sont PAS dans la clé : l'EV se recalcule après, pour quelques microsecondes."""
+    import hashlib as _h, json as _json
+    snap = {"div": div, "home": home, "away": away, "asof": str(asof), "seasons": seasons,
+            "lh": round(float(lh), 6), "la": round(float(la), 6),
+            "rho": round(float(rho), 6), "sigma": round(float(sigma), 6)}
+    par = {"scen": [[float(x) for x in s] for s in scen], "seed": seed, "n0": n0, "nmax": nmax,
+           "tol": tol, "n_goals": N_GOALS, "schema": MC_CACHE_SCHEMA}
+    dh = _h.sha1(_json.dumps(snap, sort_keys=True).encode()).hexdigest()[:16]
+    ph = _h.sha1(_json.dumps(par, sort_keys=True).encode()).hexdigest()[:12]
+    return f"{fixture_id or 'adhoc'}__{MODEL_VERSION}__{dh}__{ph}", dh, ph
+
+
+def _mc_price(lh, la, rho, sigma, scen, hist, asof, home, away, seed, n0, nmax, tol):
+    """Cœur Monte-Carlo (coûteux) : boucle adaptative de simulation, sensibilité λ ±10 %, marchés
+    mi-temps et périphériques. Renvoie UNIQUEMENT des sorties dérivées JSON-sérialisables (aucun
+    tableau brut, ils ne servent plus en aval) pour être mises en cache. N'ajoute aucune note :
+    les notes sont reconstruites à l'identique par l'appelant (hit comme miss)."""
+    rng = np.random.default_rng(seed)
+    n = n0
+    while True:
+        hg, ag = simulate_scores(lh, la, rho, sigma, scen, n, rng)
+        M = markets_from_sims(hg, ag)
+        keys = ["1", "X", "2", "Over1.5", "Over2.5", "Over3.5", "BTTS_oui"]
+        half = max(1.96 * math.sqrt(M[k] * (1 - M[k]) / n) for k in keys)
+        if half <= tol or n >= nmax:
+            break
+        n *= 2
+    sens = {}
+    for lab, fh, fa in (("λ dom −10 %", .9, 1), ("λ dom +10 %", 1.1, 1), ("λ ext −10 %", 1, .9),
+                        ("λ ext +10 %", 1, 1.1), ("sans scénarios subjectifs", None, None)):
+        if fh is None:
+            if len(scen) == 1:
+                continue
+            h2, a2 = simulate_scores(lh, la, rho, sigma, [(1, 1, 1)], n, rng)
+        else:
+            h2, a2 = simulate_scores(lh * fh, la * fa, rho, sigma, scen, n, rng)
+        m2 = markets_from_sims(h2, a2)
+        sens[lab] = {k: round(m2[k], 3) for k in ("1", "X", "2", "Over2.5", "BTTS_oui")}
+    HM, periph, half_note, f1h, f1a, nhalf = None, None, None, None, None, 0
+    if hist:
+        f1h, f1a, nhalf = half_shares(hist)
+        if f1h is not None:
+            HM = half_markets(hg, ag, f1h, f1a, rng)
+        else:
+            half_note = "Marchés mi-temps ABSENTS : HTHG/HTAG non fournis par la source (non fabriqués)."
+        periph = peripheral_markets(hist, home, away, asof, rng)
+    else:
+        half_note = "Marchés mi-temps & périphériques indisponibles : pas d'historique de ligue (λ externes)."
+    return {"M": M, "sens": sens, "HM": HM, "periph": periph, "f1h": f1h, "f1a": f1a,
+            "nhalf": nhalf, "half_note": half_note, "n": n, "half": half}
+
+
+def load_model_card(div: str):
+    """Model card signée/versionnée d'une ligue (tools/params/model_cards/<div>.json).
+    Le MATCH vérifie cette carte au lieu de relancer le backtest (backtest hors chemin
+    critique, structural mod #1). Lecture par ligue → un backtest ad hoc d'une autre
+    ligue ne peut plus polluer le statut de celle-ci. Fail-open : None si absente/illisible."""
+    try:
+        import json as _json
+        p = MODEL_CARDS_DIR / f"{div}.json"
+        return _json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+    except Exception:
+        return None
+
+
+def card_eligible(card: dict, as_of: dt.date) -> bool:
+    """Habilitée pour une décision OFFICIELLE ? Supérieure au marché (IC95 haut < 0),
+    J27 OK, échantillon suffisant, carte non expirée. Sinon → SHADOW_ONLY."""
+    if not card:
+        return False
+    try:
+        if card.get("valid_until") and dt.date.fromisoformat(card["valid_until"]) < as_of:
+            return False
+    except Exception:
+        return False
+    return bool(card.get("beats_market")) and card.get("j27_status") == "OK" \
+        and (card.get("sample_size") or 0) >= 200
+
+
+def build_card(div, stab_entry, betting_div, P, run_id, periods, roi_gate) -> dict:
+    """Construit une model card per-ligue à partir d'un run de backtest réel (jamais inventée)."""
+    ic = (stab_entry or {}).get("IC95")
+    beats = bool(ic and ic[1] < 0)          # delta_ll négatif = modèle meilleur ; IC95 haut < 0 = significatif
+    if beats:
+        statut = "VALIDÉ (meilleur que le marché hors échantillon)"
+    elif ic and ic[0] > 0:
+        statut = "NON SUPÉRIEUR AU MARCHÉ — EV contre le marché présumée illusoire"
+    else:
+        statut = "NON CONCLUANT — pas de différence significative avec le marché"
+    rg = (roi_gate or {}).get(div)
+    j27 = "ROI_NEGATIF" if (rg and rg.get("roi_ic95_haut") is not None and rg["roi_ic95_haut"] < 0) else "OK"
+    card = {
+        "model_version": MODEL_VERSION, "league": div, "markets_validated": BET_RULES["markets"],
+        "sample_size": (stab_entry or {}).get("n"),
+        "delta_ll_vs_marche": (stab_entry or {}).get("delta_ll_vs_marche"), "delta_ll_IC95": ic,
+        "roi": (betting_div or {}).get("rendement"), "roi_IC95": (betting_div or {}).get("IC95"),
+        "clv": (betting_div or {}).get("clv"), "n_paris": (betting_div or {}).get("n"),
+        "brier": None, "calibration": None, "statut": statut,
+        "beats_market": beats, "j27_status": j27,
+        "backtest_period": periods.get("backtest_period") if periods else None,
+        "source_run": run_id, "configuration_hash": _config_hash(P),
+        "valid_until": (dt.date.today() + dt.timedelta(days=90)).isoformat(),
+        "signed_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+    }
+    card["eligible_officiel"] = card_eligible(card, dt.date.today())
+    return card
+
 # Règles de pari fixées AVANT le backtest (ne pas modifier après avoir vu le test final).
 BET_RULES = {
     "markets": ["1X2", "OU2.5"],
@@ -502,6 +647,26 @@ def cmd_backtest(a):
     params = {"run_id": run_id, "model_version": MODEL_VERSION, **P, "divs": divs,
               "statut_validation": status, "stabilite_par_ligue": stab}
     (BT_DIR / "latest_params.json").write_text(json.dumps(params, ensure_ascii=False, indent=1))
+    # Model cards signées per-ligue (structural mod #1) : sortent le backtest du chemin critique.
+    # Écrites par ligue → un backtest ad hoc d'une ligue ne touche QUE sa carte (fin du clobber de latest_params).
+    MODEL_CARDS_DIR.mkdir(parents=True, exist_ok=True)
+    rg = load_roi_gate()
+    bets_by_div = {}
+    for _b in bets:
+        bets_by_div.setdefault(_b["div"], []).append(_b)
+
+    def _div_betting(bl):
+        if not bl:
+            return None
+        pr = np.array([x["pnl"] for x in bl]); clvs = [x["clv"] for x in bl if x["clv"] is not None]
+        return {"n": len(bl), "rendement": round(float(pr.mean()), 4), "IC95": boot_ci(pr),
+                "clv": round(float(np.mean(clvs)), 4) if clvs else None}
+
+    periods = {"backtest_period": f"apprentissage {train} · validation {val} · test {test}"}
+    stabmap = {s["div"]: s for s in stab}
+    for d in divs:
+        card = build_card(d, stabmap.get(d), _div_betting(bets_by_div.get(d)), P, run_id, periods, rg)
+        (MODEL_CARDS_DIR / f"{d}.json").write_text(json.dumps(card, ensure_ascii=False, indent=1))
     print(render_report(report))
 
 
@@ -726,6 +891,7 @@ def cmd_simulate(a):
         sigma = params["sigma"] if params else 0.0
         source = a.lambda_source or "λ fournis directement (hors périmètre du backtest : non validé)"
         status = a.status_note or "NON VALIDÉ — λ externes"
+        shadow, shadow_reason = True, "λ externes hors périmètre backtesté — jamais officiel"
     else:
         if not params:
             sys.exit("Aucun backtest disponible : lancer d'abord `backtest`, ou fournir --lh/--la (statut NON VALIDÉ).")
@@ -743,9 +909,20 @@ def cmd_simulate(a):
             if t not in R["teams"]:
                 sys.exit(f"Équipe inconnue dans l'historique : {t}. Noms disponibles : {sorted(R['teams'])}")
         lh, la = lambdas(R, a.home, a.away); rho, sigma = params["rho"], params["sigma"]
-        stab = {s["div"]: s for s in params.get("stabilite_par_ligue", [])}.get(a.div)
         source = f"forces estimées au {asof} sur {R['n']} matchs antérieurs (backtest {params['run_id']})"
-        status = params["statut_validation"] + (f" · {a.div} : Δ={stab['delta_ll_vs_marche']:+.4f} IC95 {stab['IC95']}" if stab else " · ligue hors backtest")
+        # Statut lu depuis la MODEL CARD de la ligue (mod #1) — plus depuis latest_params (fin du clobber).
+        card = load_model_card(a.div)
+        if card:
+            status = (card.get("statut", params["statut_validation"])
+                      + f" · carte {a.div} Δ={card.get('delta_ll_vs_marche')} IC95 {card.get('delta_ll_IC95')}"
+                      + f" · valid_until {card.get('valid_until')}")
+            shadow = not card_eligible(card, asof)
+            shadow_reason = (None if not shadow else
+                             "model card non éligible (modèle non supérieur au marché / J27 / échantillon / expirée)")
+        else:
+            stab = {s["div"]: s for s in params.get("stabilite_par_ligue", [])}.get(a.div)
+            status = params["statut_validation"] + (f" · {a.div} : Δ={stab['delta_ll_vs_marche']:+.4f} IC95 {stab['IC95']}" if stab else " · ligue hors backtest")
+            shadow, shadow_reason = True, "aucune model card approuvée pour cette ligue → non officiel"
     scen = [(1.0, 1.0, 1.0)]
     if a.scenario:
         scen = [tuple(float(v) for v in s.split(":")) for s in a.scenario]
@@ -756,46 +933,53 @@ def cmd_simulate(a):
             scen.append((rest, 1.0, 1.0))
         notes.append("Scénarios de composition = correction SUBJECTIVE, testée en sensibilité ci-dessous.")
 
-    # précision numérique fixée à l'avance : demi-largeur IC95 MC ≤ tol sur tous les marchés binaires clés
-    n = a.n0
-    while True:
-        hg, ag = simulate_scores(lh, la, rho, sigma, scen, n, rng)
-        M = markets_from_sims(hg, ag)
-        keys = ["1", "X", "2", "Over1.5", "Over2.5", "Over3.5", "BTTS_oui"]
-        half = max(1.96 * math.sqrt(M[k] * (1 - M[k]) / n) for k in keys)
-        if half <= a.tol or n >= a.nmax:
-            break
-        n *= 2
+    # ── Cache Monte-Carlo (mod #2). Le pricing lourd (10k–640k tirages + sensibilité + mi-temps +
+    # périphériques) est déterministe au snapshot (seed fixe) : on le sert depuis le cache si la clé
+    # existe, sinon on calcule et on écrit. Fail-open : toute erreur de cache retombe sur le calcul.
+    ckey, data_hash, params_hash = mc_cache_key(a.fixture_id, a.div, a.home, a.away, asof, a.seasons,
+                                                lh, la, rho, sigma, scen, a.seed, a.n0, a.nmax, a.tol)
+    cache_path = MC_CACHE_DIR / f"{ckey}.json"
+    no_cache = getattr(a, "no_cache", False)
+    payload, cache_hit = None, False
+    if not a.refresh and not no_cache:
+        try:
+            if cache_path.exists():
+                cached = json.loads(cache_path.read_text(encoding="utf-8"))
+                if cached.get("schema") == MC_CACHE_SCHEMA and cached.get("key") == ckey:
+                    payload = cached["payload"]; cache_hit = True
+        except Exception:
+            payload = None
+    if payload is None:
+        payload = _mc_price(lh, la, rho, sigma, scen, hist, asof, a.home, a.away, a.seed, a.n0, a.nmax, a.tol)
+        if not no_cache:
+            try:
+                MC_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                cache_path.write_text(json.dumps(
+                    {"schema": MC_CACHE_SCHEMA, "key": ckey, "fixture_id": a.fixture_id,
+                     "model_version": MODEL_VERSION, "data_snapshot_hash": data_hash,
+                     "parameters_hash": params_hash,
+                     "cree_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+                     "lh": round(lh, 6), "la": round(la, 6), "rho": rho, "sigma": sigma,
+                     "payload": payload}, ensure_ascii=False, default=_np_safe), encoding="utf-8")
+            except Exception:
+                pass
+    M, sens, HM, periph = payload["M"], payload["sens"], payload["HM"], payload["periph"]
+    f1h, f1a, n, half = payload["f1h"], payload["f1a"], payload["n"], payload["half"]
+    # exact = loi analytique Dixon-Coles (déterministe, pas de MC) — recalculée hors cache.
     exact = probs_from_matrix(score_matrix(lh, la, rho, sigma)) if len(scen) == 1 else None
 
-    # sensibilité (≠ intervalle de confiance) : λ ±10 %, sans scénarios subjectifs
-    sens = {}
-    for lab, fh, fa in (("λ dom −10 %", .9, 1), ("λ dom +10 %", 1.1, 1), ("λ ext −10 %", 1, .9), ("λ ext +10 %", 1, 1.1),
-                        ("sans scénarios subjectifs", None, None)):
-        if fh is None:
-            if len(scen) == 1:
-                continue
-            h2, a2 = simulate_scores(lh, la, rho, sigma, [(1, 1, 1)], n, rng)
-        else:
-            h2, a2 = simulate_scores(lh * fh, la * fa, rho, sigma, scen, n, rng)
-        m2 = markets_from_sims(h2, a2)
-        sens[lab] = {k: round(m2[k], 3) for k in ("1", "X", "2", "Over2.5", "BTTS_oui")}
-
-    # marchés mi-temps (calibrés sur HTHG/HTAG réels) + périphériques (indicatifs), si historique dispo
-    HM, periph, half_note, f1h, f1a = None, None, None, None, None
-    if hist:
-        f1h, f1a, nhalf = half_shares(hist)
-        if f1h is not None:
-            HM = half_markets(hg, ag, f1h, f1a, rng)
-            notes.append(f"Mi-temps calibrée sur {nhalf} matchs réels (part 1re période : dom {f1h:.0%}, ext {f1a:.0%}) ; "
-                         "minutage du but supposé indépendant du score (approximation).")
-        else:
-            half_note = "Marchés mi-temps ABSENTS : HTHG/HTAG non fournis par la source (non fabriqués)."
-            notes.append(half_note)
-        periph = peripheral_markets(hist, a.home, a.away, asof, rng)
+    # notes mi-temps / périphériques — reconstruites à l'identique (hit comme miss)
+    if f1h is not None:
+        half_note = None
+        notes.append(f"Mi-temps calibrée sur {payload['nhalf']} matchs réels (part 1re période : dom {f1h:.0%}, ext {f1a:.0%}) ; "
+                     "minutage du but supposé indépendant du score (approximation).")
     else:
-        half_note = "Marchés mi-temps & périphériques indisponibles : pas d'historique de ligue (λ externes)."
-        notes.append(half_note)
+        half_note = payload["half_note"]
+        if half_note:
+            notes.append(half_note)
+    if cache_hit:
+        notes.append(f"Monte-Carlo servi depuis le cache (snapshot {data_hash}, params {params_hash}) — "
+                     "tirages non relancés, résultat identique au pricing d'origine.")
 
     offers = {}
     for lab, vals in (("1X2", parse_odds_arg(a.odds_1x2)), ("OU2.5", parse_odds_arg(a.odds_ou25)),
@@ -826,12 +1010,23 @@ def cmd_simulate(a):
         evs.append({"marche": f"DNB {side}", "p": st["gain"], "cote": o, "ev": st["gain"] * (o - 1) - st["perte"],
                     "etats": {k: round(v, 4) for k, v in st.items()}, "sens": []})
 
-    # sélection : au plus UN marché officiel ; veto si modèle non supérieur au marché ou EV instable
+    # sélection : au plus UN marché officiel ; veto si modèle non supérieur au marché ou EV instable.
+    # Chaque veto porte un CODE typé (mod #5) : VETO_DATA (donnée manquante/non vérifiée),
+    # VETO_MODEL (modèle non habilité), VETO_MARKET (edge marché détruit), VETO_CONTEXT, VETO_RISK.
     veto = []
+    def add_veto(code, raison):
+        veto.append({"code": code, "raison": raison})
     if "NON SUPÉRIEUR" in status:
-        veto.append("backtest : modèle significativement moins précis que le marché → EV présumée illusoire")
+        add_veto("VETO_MODEL", "backtest : modèle significativement moins précis que le marché → EV présumée illusoire")
     if a.missing_lineup:
-        veto.append("composition déterminante manquante")
+        add_veto("VETO_DATA", "composition déterminante manquante")
+    # J27 : une ligue dont le backtest de PARIS a un ROI significativement négatif
+    # (IC95 entièrement < 0) ne parie pas, même si le gate EV per-match passe.
+    _rg = load_roi_gate().get(a.div)
+    if _rg and _rg.get("roi_ic95_haut") is not None and _rg["roi_ic95_haut"] < 0:
+        add_veto("VETO_MARKET", f"J27 : ROI backtest {a.div} significativement négatif "
+                 f"(ROI {_rg['roi']:+.1%} IC95 [{_rg['roi_ic95_bas']:+.1%} ; {_rg['roi_ic95_haut']:+.1%}]"
+                 f", CLV {_rg.get('clv', 0):+.1%}) → pas de pari sur cette ligue")
     # écart suspect : > 10 points de probabilité implicite avec le marché démarginé → erreur de modèle probable.
     # Marchés à règlement partiel (AH) comparés via leurs cotes justes (EV = 0).
     def fair_prob(e):
@@ -859,22 +1054,48 @@ def cmd_simulate(a):
                 e["ecart_marche"] = fair_prob(e) - mkt[e["marche"]]
                 if abs(e["ecart_marche"]) > 0.10:
                     e["suspect"] = True
-    ok = [e for e in evs if e["ev"] >= 0.03 and (not e["sens"] or min(e["sens"]) >= 0) and not e.get("suspect")]
-    if any(e.get("suspect") and e["ev"] >= 0.03 for e in evs):
+    # EV_robuste (mod #3) : on NE sélectionne PAS sur la plus forte EV nominale.
+    # EV_robuste = min(EV_nominale, pire EV sous sensibilité λ, EV sous cote dégradée).
+    # DEG = stress de cote (pas une donnée : paramètre de robustesse, du même ordre
+    # que la sensibilité λ ±10 % déjà appliquée). On classe ET on gate sur EV_robuste.
+    DEG = 0.02
+    for e in evs:
+        cands = [e["ev"]] + list(e["sens"] or []) + [e["ev"] - (e["ev"] + 1.0) * DEG]
+        e["ev_robuste"] = round(min(cands), 4)
+    ok = [e for e in evs if e["ev_robuste"] >= 0.03 and not e.get("suspect")]
+    if any(e.get("suspect") and e["ev_robuste"] >= 0.03 for e in evs):
         notes.append("EV ≥ 3 % écartée : écart > 10 pts avec le marché sur un modèle non validé (erreur de modèle probable).")
-    fragile = [e for e in evs if e["ev"] >= 0.03 and e["sens"] and min(e["sens"]) < 0]
+    # Marché robuste nominalement mais qui tombe sous 3 % en pire cas (λ ou cote dégradée) : surveillance.
+    fragile = [e for e in evs if e["ev"] >= 0.03 and e["ev_robuste"] < 0.03 and not e.get("suspect")]
+    veto_codes = [v["code"] for v in veto]
+    veto_txt = " ; ".join(f"[{v['code']}] {v['raison']}" for v in veto)
+
+    # DÉCISION MODÈLE (mod #6) : ce que le pricing recommande sur le papier, à partir du SEUL
+    # gate EV_robuste ≥ 3 %. Indépendante des veto et du gel — c'est l'avis brut du modèle.
+    best_model = max(ok, key=lambda e: e["ev_robuste"]) if ok else None
+    if not offers and not a.odds_ah and not a.odds_dnb:
+        decision_modele = "SANS COTE VÉRIFIÉE — aucune sélection possible"
+    elif best_model:
+        decision_modele = (f"SÉLECTION MODÈLE : {best_model['marche']} @ {best_model['cote']} "
+                           f"(EV {best_model['ev']:+.1%}, EV_robuste {best_model['ev_robuste']:+.1%})")
+    else:
+        decision_modele = "ABSTENTION MODÈLE — aucune EV_robuste ≥ 3 %" + (" (EV qui disparaît en pire cas : surveillance)" if fragile else "")
+
+    # DÉCISION EXÉCUTION : ce qui est réellement exécutable, après veto typés, SHADOW_ONLY et gel.
+    # Sous gel, aucune sélection ne devient une mise réelle, quelle que soit la décision modèle.
     if not offers and not a.odds_ah and not a.odds_dnb:
         decision = "SANS COTE VÉRIFIÉE — aucune sélection possible"
         official = None
     elif veto:
-        official = None; decision = "SURVEILLANCE / ABSTENTION — " + " ; ".join(veto)
+        official = None; decision = "SURVEILLANCE / ABSTENTION — " + veto_txt
     elif ok:
-        official = max(ok, key=lambda e: e["ev"])
+        official = best_model
         tag = "SÉLECTION" if status.startswith("VALIDÉ") or status.startswith("NON CONCLUANT") else "SÉLECTION INDICATIVE (modèle non validé, mise ≤ ½)"
-        decision = f"{tag} : {official['marche']} @ {official['cote']}"
+        decision = f"{tag} : {official['marche']} @ {official['cote']} (EV {official['ev']:+.1%}, EV_robuste {official['ev_robuste']:+.1%})"
     else:
         official = None
         decision = "ABSTENTION — aucune EV ≥ 3 % stable" + (" (EV qui disparaît en sensibilité : surveillance)" if fragile else "")
+    decision_execution = decision
 
     # Sélection officielle STRUCTURÉE (audit 2026-10-05) : SYNC ne doit pas reconstruire une
     # sélection depuis la liste d'EV brute ; il consomme ce champ exact (marché, p, cote, EV, borne
@@ -883,8 +1104,9 @@ def cmd_simulate(a):
     if official:
         official_selection = {"marche": official["marche"], "p": official.get("p"),
                               "cote": official.get("cote"), "ev": official.get("ev"),
+                              "ev_robuste": official.get("ev_robuste"),
                               "sensibilite_min": (min(official["sens"]) if official.get("sens") else None),
-                              "veto": False}
+                              "veto": bool(veto)}
 
     # Preuve de validation STRUCTURÉE (audit 2026-10-05, défaut D1) : la validation ne repose plus sur
     # le texte libre `statut_modele`, mais sur ce bloc rattaché à un backtest. `validated` n'est vrai
@@ -899,6 +1121,7 @@ def cmd_simulate(a):
            "coup_envoi": a.kickoff, "fixture_id": a.fixture_id, "div": a.div, "home": a.home, "away": a.away, "model_version": MODEL_VERSION,
            "source_lambdas": source, "statut_modele": status, "lh": round(lh, 3), "la": round(la, 3), "rho": rho, "sigma": sigma,
            "scenarios": scen, "n_simulations": n, "demi_largeur_IC95_MC": round(half, 4),
+           "mc_cache": {"hit": cache_hit, "snapshot_hash": data_hash, "params_hash": params_hash, "key": ckey},
            "marches": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in M.items()
                        if k in ("1", "X", "2", "1X", "X2", "12", "BTTS_oui", "Over1.5", "Over2.5", "Over3.5",
                                 "total_pair", "total_impair", "scores")},
@@ -907,7 +1130,28 @@ def cmd_simulate(a):
            "marches_peripheriques": periph,
            "cotes": offers, "cotes_source": a.odds_source, "cotes_relevees_utc": a.odds_time,
            "ev": [{k: (round(v, 4) if isinstance(v, float) else v) for k, v in e.items() if k != "sens"} for e in evs],
-           "sensibilite": sens, "decision": decision, "statut_mise": "PROPOSÉE" if official else "AUCUNE", "notes": notes}
+           "sensibilite": sens, "decision": decision, "statut_mise": "PROPOSÉE" if official else "AUCUNE",
+           "shadow": shadow,
+           "statut_execution": ("SHADOW_ONLY — " + (shadow_reason or "modèle non habilité")) if shadow
+                               else "ÉLIGIBLE (exécution réelle suspendue par le gel)",
+           # mod #6 : deux décisions séparées. decision_modele = avis pricing (gate EV_robuste seul) ;
+           # decision_execution = ce qui est exécutable après veto typés + SHADOW_ONLY + gel.
+           "decision_modele": decision_modele, "decision_execution": decision_execution,
+           "veto_codes": veto_codes,
+           # Contrat de sortie minimal (mod #6) — présent sur CHAQUE verdict, abstention comprise :
+           # toute abstention est explicable par au moins un code (veto typé, EV_robuste insuffisante,
+           # cote absente ou SHADOW_ONLY), jamais un silence.
+           "contrat_sortie": {
+               "decision_modele": decision_modele,
+               "decision_execution": decision_execution,
+               "selection": (official["marche"] if official else None),
+               "ev_robuste": (official.get("ev_robuste") if official else None),
+               "shadow": shadow,
+               "veto_codes": veto_codes,
+               "gel_actif": True,
+               "mise_reelle_autorisee": False,
+           },
+           "notes": notes}
     if a.record:
         LEDGER_DIR.mkdir(exist_ok=True)
         with open(LEDGER_DIR / "forecasts.jsonl", "a", encoding="utf-8") as f:
@@ -917,7 +1161,8 @@ def cmd_simulate(a):
     print(f"# {a.home} – {a.away}  ({a.div}, {a.kickoff or 'coup d envoi non renseigné'})")
     print(f"Modèle {MODEL_VERSION} · {source}\nStatut : {status}")
     print(f"Buts attendus : {a.home} {lh:.2f} · {a.away} {la:.2f}  (moyenne, ≠ score le plus probable)")
-    print(f"Simulations exécutées : {n:,} (demi-largeur IC95 Monte-Carlo max {half:.4f}) · ρ={rho} · rythme σ={sigma}")
+    print(f"Simulations exécutées : {n:,} (demi-largeur IC95 Monte-Carlo max {half:.4f}) · ρ={rho} · rythme σ={sigma}"
+          + ("  [CACHE]" if cache_hit else ""))
     print(f"1X2 : {M['1']:.1%} / {M['X']:.1%} / {M['2']:.1%}" + (f"   (exact : {exact['1X2'][0]:.1%} / {exact['1X2'][1]:.1%} / {exact['1X2'][2]:.1%})" if exact else ""))
     print(f"DC 1X {M['1X']:.1%} · X2 {M['X2']:.1%} · 12 {M['12']:.1%} · DNB dom gain {M['DNB_1']['gain']:.1%} remb. {M['DNB_1']['rembourse']:.1%}")
     print(f"Over 1.5 {M['Over1.5']:.1%} · Over 2.5 {M['Over2.5']:.1%} · Over 3.5 {M['Over3.5']:.1%} · BTTS {M['BTTS_oui']:.1%}")
@@ -947,11 +1192,17 @@ def cmd_simulate(a):
         print(f"  {k:28s} {v}")
     for e in evs:
         print(f"  EV {e['marche']:14s} p={e['p']:.3f} cote={e['cote']} → EV {e['ev']:+.1%}" +
+              f"  (EV_robuste {e['ev_robuste']:+.1%})" +
               (f"  (min sensibilité {min(e['sens']):+.1%})" if e["sens"] else "") + (f"  états {e.get('etats')}" if e.get("etats") else "") +
               (f"  ⚠ écart marché {e['ecart_marche']:+.1%}" if e.get("suspect") else ""))
     for n_ in notes:
         print("Note :", n_)
-    print(f"DÉCISION : {decision}")
+    print(f"DÉCISION MODÈLE   : {decision_modele}")
+    print(f"DÉCISION EXÉCUTION : {('[SHADOW_ONLY] ' if shadow else '') + decision_execution}")
+    if veto_codes:
+        print(f"CODES VETO : {', '.join(veto_codes)}")
+    if shadow:
+        print(f"EXÉCUTION : SHADOW_ONLY — {shadow_reason or 'modèle non habilité'} (décision modèle conservée, aucune mise officielle)")
     print(f"forecast_id : {fid}" + (" (enregistré dans ledger/forecasts.jsonl)" if a.record else " (non enregistré : ajouter --record)"))
 
 
@@ -1015,6 +1266,7 @@ def main():
     s.add_argument("--n0", type=int, default=10_000); s.add_argument("--nmax", type=int, default=640_000)
     s.add_argument("--tol", type=float, default=0.005); s.add_argument("--seed", type=int, default=2026)
     s.add_argument("--record", action="store_true"); s.add_argument("--refresh", action="store_true")
+    s.add_argument("--no-cache", action="store_true", help="ignore et n'écrit pas le cache Monte-Carlo (recalcul complet)")
     s.add_argument("--fixture-id", type=int, help="identifiant API-Football (règlement automatique)")
     st = sp.add_parser("settle")
     st.add_argument("--forecast-id", required=True)

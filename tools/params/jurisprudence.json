@@ -1,0 +1,201 @@
+{
+  "_doc": "Jurisprudence APEX — règles dérivées des cas réels d'ÉCHEC et d'ABSTENTION des moteurs d'analyse de paris sportifs. Chaque règle est tirée d'un cas observé (backtests/, ledger/, gates des skills/outils). À charger avant toute analyse ; une règle 'bloquante' ferme la décision, une règle 'plafond' limite le palier atteignable. Append-only : on n'efface pas une règle, on en ajoute une plus précise. Ne jamais inventer une donnée : donnée absente = écrite absente.",
+  "version": "1.0.0",
+  "etabli_utc": "2026-10-26",
+  "source_audit": {
+    "backtests": ["backtests/latest_params.json", "backtests/market_params.json", "backtests/intl_latest_params.json", "backtests/bsm-20260928T153332Z/REPORT.md", "backtests/intl-20260929T011108Z/REPORT.md"],
+    "ledger": {"forecasts": 234, "settlements": 214},
+    "gates_grep": "skills + tools"
+  },
+  "regles": [
+    {
+      "id": "J01", "domaine": "football", "type": "STATISTIQUE", "code": "EV_SEUIL",
+      "declencheur": "EV < 3 % sur le meilleur marché, OU EV ≥ 3 % mais non stable sous sensibilité λ ±10 %",
+      "verdict": "ABSTENTION",
+      "regle": "Un marché officiel ne passe que si EV ≥ 3 % ET l'EV reste positive aux quatre chocs de sensibilité (λ dom/ext ±10 %). Sinon abstention.",
+      "preuve": "43 prévisions 'ABSTENTION — aucune EV ≥ 3 % stable' au journal (Belgium-France, Türkiye-Italy, etc.)."
+    },
+    {
+      "id": "J02", "domaine": "football", "type": "STATISTIQUE", "code": "NON_SUPERIEUR_MARCHE",
+      "declencheur": "Backtest : Δlog-vraisemblance du modèle vs marché dont l'IC95 franchit 0, ou poids de mélange optimal w*≈0",
+      "verdict": "EV_ILLUSOIRE",
+      "regle": "Si le backtest ne prouve pas que le modèle bat le marché (IC95 du Δlog-loss chevauche 0, ou w*≈0), toute 'EV contre le marché' est présumée illusoire : ne pas la présenter comme une value, ne pas miser dessus.",
+      "preuve": "backtests/market_params.json : statut 'NON SUPÉRIEUR AU MARCHÉ', market_blend_w=0.0, 'le modèle n'apporte rien, le mélange = marché'. E0 et EC : IC95 du delta_ll chevauchent 0."
+    },
+    {
+      "id": "J03", "domaine": "football", "type": "STRUCTUREL", "code": "NON_COMPARE_MARCHE",
+      "declencheur": "Modèle validé contre H0 et référence simple mais sans cotes historiques (ex. APEX-INTL Elo→λ)",
+      "verdict": "NON_COMPARE_AU_MARCHE",
+      "regle": "Un modèle validé hors-marché (pas de cotes historiques) ne démontre aucun edge marché. Marquer NON COMPARÉ AU MARCHÉ ; jamais présenter comme value exploitable.",
+      "preuve": "backtests/intl-*/REPORT.md : 'H1 VALIDÉE contre H0 … NON COMPARÉE AU MARCHÉ' ; 113 prévisions 'NON COMPARÉ AU MARCHÉ' au journal."
+    },
+    {
+      "id": "J04", "domaine": "football", "type": "STRUCTUREL", "code": "MODELE_NON_VALIDE_LAMBDAS_EXTERNES",
+      "declencheur": "λ fournis directement / hors du périmètre backtesté (ligue sans moteur calibré)",
+      "verdict": "SELECTION_INDICATIVE_PLAFOND_DEMI",
+      "regle": "Avec des λ hors périmètre backtest, le modèle est NON VALIDÉ : au mieux une sélection INDICATIVE à mise ≤ ½, jamais un pari plein. La conversion Elo→λ doit venir de la table backtestée (apex_intl lambdas), pas d'une heuristique.",
+      "preuve": "98 prévisions 'NON VALIDÉ — λ externes', 123 'SÉLECTION INDICATIVE (modèle non validé, mise ≤ ½)' au journal."
+    },
+    {
+      "id": "J05", "domaine": "football", "type": "STRUCTUREL", "code": "SANS_COTE_VERIFIEE",
+      "declencheur": "Pas de cote vérifiée et horodatée au moment de la prévision",
+      "verdict": "SANS_COTE_VERIFIEE",
+      "regle": "Sans cote vérifiée et horodatée, l'EV n'est pas calculable : aucune sélection officielle. Relever la cote (snapshot) avant de pricer ; à défaut, rester indicatif.",
+      "preuve": "15 prévisions 'SANS COTE VÉRIFIÉE' au journal."
+    },
+    {
+      "id": "J06", "domaine": "football", "type": "STRUCTUREL", "code": "ERREUR_CONVENTION_AH",
+      "declencheur": "Signe des handicaps asiatiques extérieurs lu à l'envers (convention API-Football)",
+      "verdict": "PREVISION_INVALIDEE_REJOUER",
+      "regle": "Vérifier systématiquement la convention de signe des handicaps asiatiques de la source (API-Football) avant de pricer. Au moindre doute, invalider la prévision avant le coup d'envoi et rejouer sur un relevé corrigé. C'est la première cause d'exclusion du journal.",
+      "preuve": "42 règlements EXCLUS : 'signe des handicaps asiatiques extérieurs mal lu (convention API-Football)'."
+    },
+    {
+      "id": "J07", "domaine": "football", "type": "STATISTIQUE", "code": "ELO_LAMBDA_HEURISTIQUE",
+      "declencheur": "Conversion Elo→λ par heuristique (H0) au lieu de la régression gelée backtestée (H1)",
+      "verdict": "PREVISION_REMPLACEE",
+      "regle": "Utiliser la conversion Elo→λ backtestée (H1, régression gelée), jamais l'heuristique H0 : le backtest montre H1 strictement meilleure (log-loss, Brier) sur 3837 matchs test.",
+      "preuve": "32 règlements remplacés 'conversion Elo→λ H0 (heuristique)' ; REPORT intl : H1−H0 Δlog-loss −0.0166 IC95 [−0.0232, −0.0103]."
+    },
+    {
+      "id": "J08", "domaine": "transverse", "type": "STRUCTUREL", "code": "DCS_GATE",
+      "declencheur": "Data Reliability Score (DCS) sous le seuil de la ligue (ex. 58 Ligue 2, 62 Segunda/Roumanie, 63 Superligaen, 65 Allsvenskan)",
+      "verdict": "NO_BET",
+      "regle": "Aucun signal sous le gate DCS de la ligue détectée. Fallback générique sans moteur dédié : DCS −5 et Kelly ×0,70.",
+      "preuve": "Gates G0/G1 des moteurs apex-engine-* ; NO_BET apparaît 49× dans skills+tools."
+    },
+    {
+      "id": "J09", "domaine": "transverse", "type": "STATISTIQUE", "code": "PREFLIGHT_BRIER",
+      "declencheur": "Le modèle ne bat pas la baseline naïve au test de Brier, ou cote à marge nulle/aberrante",
+      "verdict": "SIGNAL_BLOQUE",
+      "regle": "Avant publication, le signal doit battre la baseline au test de Brier et s'appuyer sur une cote à marge plausible. Marge nulle/aberrante ⇒ bloqué.",
+      "preuve": "apex-preflight-gate / apex-*-preflight (G6/G7) ; 'Brier' 14×, 'marge nulle' dans le preflight."
+    },
+    {
+      "id": "J10", "domaine": "transverse", "type": "STATISTIQUE", "code": "ECHANTILLON_DEBUT_SAISON",
+      "declencheur": "Échantillon de début de saison / trop court",
+      "verdict": "NO_BET",
+      "regle": "Pas de BET sur échantillon insuffisant (début de saison, historique court) : l'estimation n'est pas fiable.",
+      "preuve": "apex-preflight-gate ; 'échantillon' 23× dans skills+tools."
+    },
+    {
+      "id": "J11", "domaine": "transverse", "type": "STATISTIQUE", "code": "VOLATILITE",
+      "declencheur": "Volatility Score au-dessus du seuil",
+      "verdict": "NO_BET_OU_MARCHES_RESTREINTS",
+      "regle": "Au-delà du seuil de volatilité, NO_BET ou restriction des marchés autorisés (gate G3/G4). La volatilité réduit la portée, pas seulement la mise.",
+      "preuve": "apex-risk-officer / apex-hockey-risk / apex-turf-risk (G3/G4)."
+    },
+    {
+      "id": "J12", "domaine": "turf", "type": "STATISTIQUE", "code": "ROI_BACKTEST_NEGATIF",
+      "declencheur": "Backtest de la discipline à ROI négatif (IC95 incluant de larges pertes)",
+      "verdict": "PLAFOND_SURVEILLER",
+      "regle": "Une discipline dont le backtest ROI est négatif ne dépasse jamais SURVEILLER (jamais JOUER). Les deux gates de pari turf sont fermées par le backtest.",
+      "preuve": "CLAUDE.md : trot ROI −4,58 % IC95 [−44,04 % ; +42,06 %] sur 118 ; obstacle −89,05 % sur 21. 'SURVEILLER' 26×."
+    },
+    {
+      "id": "J13", "domaine": "turf", "type": "STRUCTUREL", "code": "HORS_PERIMETRE_PLAT",
+      "declencheur": "Course de plat (aucun moteur calibré ; coefficients non transposables du trot/obstacle)",
+      "verdict": "HORS_PERIMETRE",
+      "regle": "Le plat sort HORS_PERIMETRE. Hors discipline calibrée le résultat n'est pas moins précis, il est de signe faux (cf=0,0 trot vs 0,4 obstacle) : refuser, ne pas dégrader. Idem pour les quantiles turf_worm.",
+      "preuve": "CLAUDE.md §turf ; 'HORS_PERIMETRE' 7×."
+    },
+    {
+      "id": "J14", "domaine": "turf", "type": "STRUCTUREL", "code": "UNAVAILABLE_STRUCTUREL_PMU",
+      "declencheur": "Signal de marché multi-book demandé en pari mutuel (une seule cote PMU)",
+      "verdict": "UNAVAILABLE_STRUCTUREL",
+      "regle": "SHARP_MOVE, STEAM_MOVE, RLM, BOOKMAKER_DIVERGENCE, LIQUIDITY_SPIKE n'existent pas en pari mutuel : sortir UNAVAILABLE_STRUCTUREL, ne pas enregistrer. Ne jamais fabriquer un signal absent de la structure du marché.",
+      "preuve": "CLAUDE.md §turf ; 'UNAVAILABLE_STRUCTUREL' 19×."
+    },
+    {
+      "id": "J15", "domaine": "turf", "type": "STRUCTUREL", "code": "ABSENT_SOURCE",
+      "declencheur": "Partants/cotes absents de la source (ex. Nationale 3 marocaine hors API française)",
+      "verdict": "ABSENT_SOURCE",
+      "regle": "Donnée absente de la source = écrite ABSENT_SOURCE, jamais comblée ni estimée. Ce n'est pas un refus de périmètre, c'est une absence de données.",
+      "preuve": "CLAUDE.md §LONACI ; 'ABSENT_SOURCE' 8×."
+    },
+    {
+      "id": "J16", "domaine": "turf", "type": "STRUCTUREL", "code": "LONACI_COTES_MASSE",
+      "declencheur": "Analyse LONACI utilisant la cote française comme offset de marché",
+      "verdict": "AVERTISSEMENT_MASSE",
+      "regle": "Ne jamais présenter une analyse LONACI comme fondée sur les cotes LONACI tant que la comparaison masse FR/LONACI n'est pas faite : cotes_origine=PMU_FRANCE, avertissement_masse obligatoire.",
+      "preuve": "CLAUDE.md §LONACI (question ouverte non tranchée)."
+    },
+    {
+      "id": "J17", "domaine": "transverse", "type": "STRUCTUREL", "code": "VETO_CONSEIL",
+      "declencheur": "Audit adversarial (S8 / council / red team) émet VETO",
+      "verdict": "VETO",
+      "regle": "Un VETO du conseil adversarial annule la décision de façon non négociable, quel que soit le reste de la chaîne.",
+      "preuve": "apex-s8-council / apex-council / orion-redteam ; 'VETO' 14×."
+    },
+    {
+      "id": "J18", "domaine": "football", "type": "STRUCTUREL", "code": "DEAD_RUBBER",
+      "declencheur": "Match sans enjeu réel (dead rubber, post-titre, qualification acquise)",
+      "verdict": "NO_BET",
+      "regle": "Un dead rubber bloque (gate S2) : l'enjeu théorique ne garantit pas la motivation ; ne pas pricer un match vidé de son enjeu.",
+      "preuve": "apex-s2-context-motivation / G2 ; 'DEAD_RUBBER' 7×."
+    },
+    {
+      "id": "J19", "domaine": "transverse", "type": "STRUCTUREL", "code": "WAIT_CONFIRMATIONS",
+      "declencheur": "Compositions / gardien partant / non-partants non confirmés",
+      "verdict": "WAIT_LINEUPS | WAIT_GOALIE | WAIT_DECLARATIONS",
+      "regle": "Suspendre la décision tant que les confirmations manquent (compos foot, gardien hockey, partants turf). Ne pas pricer dans le flou ; c'est l'étape la plus critique de chaque protocole.",
+      "preuve": "G3 hockey (WAIT_GOALIE 6×), G2 turf (WAIT_DECLARATIONS 6×), S5 foot (WAIT_LINEUPS 2×)."
+    },
+    {
+      "id": "J20", "domaine": "transverse", "type": "STATISTIQUE", "code": "VOIX_INDEPENDANTES",
+      "declencheur": "Moins de 3 voix sourcées indépendantes (W structure, M marché, C comportemental, S forecast, K sharp)",
+      "verdict": "COLLECTER",
+      "regle": "ACCEPTER exige ≥ 3 voix indépendantes. Plusieurs agents citant la même donnée ne sont pas un consensus (corrélation des erreurs, META). WORM seul peut dire JOUER : ORION refuse sans confirmation indépendante.",
+      "preuve": "CLAUDE.md §FUSION/ORION ; 'COLLECTER' 15×."
+    },
+    {
+      "id": "J21", "domaine": "transverse", "type": "STRUCTUREL", "code": "BRUIT_SANS_AUTORITE",
+      "declencheur": "Cellule de bruit (APEX-MI / APEX-BI / TURF-MI) seule",
+      "verdict": "WATCH",
+      "regle": "Les cellules de bruit ont bet_authority=false : BEHAVIORAL seul → WATCH ; + MARKET → CANDIDATE ; + DATA → CONFIRMED. Le bruit n'émet jamais un pari seul et ne remplace pas le module BSM.",
+      "preuve": "CLAUDE.md §APEX-MI et §TURF-MI."
+    },
+    {
+      "id": "J22", "domaine": "transverse", "type": "PROCESS", "code": "GEL_ACTIF",
+      "declencheur": "Moteur de fusion / ORION en gel",
+      "verdict": "ATTENDRE",
+      "regle": "Sous gel actif, aucune mise réelle n'est émise : tout ACCEPTER est rétrogradé en ATTENDRE. La sortie se limite à la recherche (digest, email, journal append-only).",
+      "preuve": "CLAUDE.md §FUSION ; tools/gel_matrix.py ; orion-executor."
+    },
+    {
+      "id": "J23", "domaine": "process", "type": "PROCESS", "code": "DOUBLON_FIXTURE",
+      "declencheur": "Deux prévisions sur la même fixture (relance de script)",
+      "verdict": "EXCLU",
+      "regle": "Dédupliquer par identifiant de fixture avant d'enregistrer ; exclure le doublon de l'audit de performance (ne pas le régler comme pari).",
+      "preuve": "Règlements EXCLUS 'Doublon de … même fixture, relancé par erreur'."
+    },
+    {
+      "id": "J24", "domaine": "process", "type": "PROCESS", "code": "MATCH_ANNULE",
+      "declencheur": "Match annulé/reporté (statut officiel CANC/POSTPONED)",
+      "verdict": "ANNULE",
+      "regle": "Régler ANNULE et exclure de l'audit de performance (ni gain ni perte). Ne jamais compter un match non joué comme un échec du modèle.",
+      "preuve": "1 règlement ANNULE 'statut officiel CANC'."
+    },
+    {
+      "id": "J25", "domaine": "transverse", "type": "PROCESS", "code": "ANTI_INVENTION",
+      "declencheur": "Backtest, cote historique, statistique, volume, % public ou simulation manquants",
+      "verdict": "ECRIRE_ABSENT",
+      "regle": "Ne jamais inventer un backtest, une cote, une statistique, un volume ou une simulation. Donnée manquante = écrite manquante. Hiérarchie des sources honnête (déplacement Pinnacle ≠ post Telegram). Le RLM n'est pas calculable sans % public.",
+      "preuve": "CLAUDE.md (règle anti-invention répétée dans BSM, MI, turf, FUSION, SOURCES)."
+    },
+    {
+      "id": "J26", "domaine": "football", "type": "STATISTIQUE", "code": "CONTRADICTION_DE_SERIE",
+      "declencheur": "Retournement de série invoqué comme signal (ex. fin d'une série d'unders → over) sur un marché (favori, outsider, nul, O/U 2.5, total équipe O1.5/O2.5, O3.5, O4.5, BTTS oui/non)",
+      "verdict": "WATCH_TANT_QUE_NON_BACKTESTE",
+      "regle": "Une série seule n'est pas un signal (sophisme du joueur : matchs quasi-indépendants). Le retournement n'est un CANDIDATE que si les quatre conditions tiennent : (1) série de N occurrences, (2) CONTRADICTION mesurée à l'attente du modèle (écart cumulé réalisé − attendu), (3) la longueur courante atteint le plafond historique empirique de l'équipe pour ce marché, (4) la forme récente s'aligne sur le retournement. Et il ne devient un pari qu'après un backtest walk-forward par marché ET par ligue à ROI et CLV positifs stables, seuils gelés avant test. Sans backtest : WATCH, jamais JOUER. Les facteurs latents (visibles en prématch, révélés en post-match) se versent à la couche observationnelle (MI/BI, context, character), bet_authority=false.",
+      "preuve": "docs/signal-contradiction-serie.md ; demande utilisateur 2026-10-26 ; garde-fou cohérent avec J01 (EV stable), J02 (supériorité au marché), J10 (échantillon) et J25 (anti-invention)."
+    },
+    {
+      "id": "J27", "domaine": "transverse", "type": "STATISTIQUE", "code": "ROI_LIGUE_NEGATIF",
+      "declencheur": "Ligue dont le backtest de PARIS a un ROI (ou CLV) significativement négatif — IC95 entièrement sous 0 — même si le statut log-loss n'est pas 'significativement pire' et que le gate EV per-match passe",
+      "verdict": "ABSTENTION",
+      "regle": "Une ligue au ROI/CLV backtest significativement négatif ne parie pas, point. Le gate EV per-match (EV≥3 % stable, écart au marché <10 pts) ne regarde PAS le ROI de la ligue — il faut un garde-fou séparé. Mécanisé dans apex_bsm.simulate via tools/params/roi_gate.json (fail-open : table absente/illisible → aucun changement). Toute ligue ajoutée à roi_gate.json avec roi_ic95_haut < 0 force l'ABSTENTION.",
+      "preuve": "Révélé le 2026-10-26 : sur P1 (log-loss NON CONCLUANT) le moteur a proposé 'SÉLECTION Santa Clara @9.0 (+63 % EV)' alors que le backtest de paris P1 perdait 22 %. Mesures : P1 ROI −22,4 % IC95 [−39,3 % ; −4,2 %] CLV −6,5 % (n=232) ; T1 ROI −29,3 % IC95 [−44,6 % ; −12,4 %] CLV −4,4 % (n=220). Avant/après vérifié : la même simulation Santa Clara-Benfica passe de SÉLECTION @9.0 à ABSTENTION. Reproductible via `apex_bsm backtest --divs <DIV>`."
+    }
+  ]
+}

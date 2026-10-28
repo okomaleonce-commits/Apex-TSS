@@ -1,0 +1,29 @@
+{
+ "model_version": "apex-bsm-1.0.0",
+ "league": "E1",
+ "markets_validated": [
+  "1X2",
+  "OU2.5"
+ ],
+ "sample_size": 540,
+ "delta_ll_vs_marche": 0.0222,
+ "delta_ll_IC95": [
+  0.0105,
+  0.0347
+ ],
+ "roi": null,
+ "roi_IC95": null,
+ "clv": null,
+ "n_paris": null,
+ "brier": null,
+ "calibration": null,
+ "statut": "NON SUPÉRIEUR AU MARCHÉ — EV contre le marché présumée illusoire",
+ "beats_market": false,
+ "j27_status": "ROI_NEGATIF",
+ "backtest_period": "run gelé bsm-20260929T010237Z (seed depuis latest_params)",
+ "source_run": "bsm-20260929T010237Z",
+ "configuration_hash": "4e9a0dbb94ec",
+ "valid_until": "2027-01-26",
+ "signed_utc": "2026-10-28T15:09:58+00:00",
+ "eligible_officiel": false
+}

@@ -1,0 +1,241 @@
+<title>APEX-DIGEST</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* Layout : une colonne — bandeau gel, formulaire de requête, commande générée, puis ce que produit chaque moteur. */
+  :root{
+    --bg:#f4f6f9; --panel:#ffffff; --ink:#15213099; --fg:#141b26; --muted:#5a6675;
+    --line:#d9e0ea; --accent:#1f6f8b; --accent-ink:#0e4f66;
+    --gel:#9a6a00; --gel-bg:#fdf3d8; --foot:#1f6f8b; --turf:#4a7a34; --hock:#7a4ea8;
+    --code-bg:#0f1722; --code-fg:#d7e3f0; --code-tok:#7fd6c0;
+    --radius:12px;
+    --sans:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --bg:#0e141c; --panel:#161f2b; --fg:#e6edf5; --muted:#92a1b4; --line:#273341;
+    --accent:#5fb6cf; --accent-ink:#9bd6e6; --gel:#e8c069; --gel-bg:#2b2410;
+    --foot:#5fb6cf; --turf:#8cc06a; --hock:#c3a0e6; --code-bg:#0a0f16; --code-fg:#d7e3f0;
+    color-scheme:dark;
+  }}
+  :root[data-theme="dark"]{
+    --bg:#0e141c; --panel:#161f2b; --fg:#e6edf5; --muted:#92a1b4; --line:#273341;
+    --accent:#5fb6cf; --accent-ink:#9bd6e6; --gel:#e8c069; --gel-bg:#2b2410;
+    --foot:#5fb6cf; --turf:#8cc06a; --hock:#c3a0e6; --code-bg:#0a0f16; --code-fg:#d7e3f0;
+    color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.5}
+  .wrap{max-width:860px;margin:0 auto;padding-block:28px 48px;
+    padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+    display:flex;flex-direction:column;gap:22px}
+  h1{font-size:1.55rem;margin:0;letter-spacing:-.01em;text-wrap:balance}
+  h2{font-size:1.02rem;margin:0 0 2px;letter-spacing:-.01em}
+  .sub{color:var(--muted);font-size:.9rem;margin:4px 0 0}
+  .gel{display:flex;gap:10px;align-items:baseline;background:var(--gel-bg);color:var(--gel);
+    border:1px solid color-mix(in srgb,var(--gel) 35%,transparent);border-radius:var(--radius);
+    padding:10px 14px;font-size:.86rem}
+  .gel b{font-weight:700}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+  .panel>h2+.hint{margin-top:0}
+  .hint{color:var(--muted);font-size:.82rem;margin:2px 0 14px}
+  fieldset{border:0;margin:0;padding:0;min-width:0}
+  legend{font-size:.72rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);padding:0;margin-bottom:8px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{position:relative}
+  .chip input{position:absolute;opacity:0;inset:0;cursor:pointer}
+  .chip span{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:7px 14px;
+    font-size:.86rem;color:var(--fg);background:transparent;transition:.12s}
+  .chip input:checked+span{background:color-mix(in srgb,var(--accent) 16%,transparent);
+    border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+  .chip input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
+  .fields{display:flex;flex-direction:column;gap:14px;margin-top:16px}
+  .row{display:flex;flex-wrap:wrap;gap:12px}
+  .field{display:flex;flex-direction:column;gap:5px;flex:1 1 160px;min-width:0}
+  label.lbl{font-size:.74rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+  input[type=text],input[type=date]{font:inherit;font-size:.92rem;color:var(--fg);background:var(--bg);
+    border:1px solid var(--line);border-radius:8px;padding:9px 11px;width:100%;min-width:0}
+  input:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+  .cmd{background:var(--code-bg);border-radius:var(--radius);padding:16px;overflow-x:auto}
+  .cmd code{font-family:var(--mono);font-size:.86rem;color:var(--code-fg);white-space:pre;display:block;line-height:1.7}
+  .cmd .flag{color:var(--code-tok)}
+  .cmdbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+  button.copy{font:inherit;font-size:.82rem;font-weight:600;cursor:pointer;border:1px solid var(--accent);
+    background:transparent;color:var(--accent-ink);border-radius:8px;padding:7px 14px}
+  button.copy:hover{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+  button.copy:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .engines{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+  .eng{border:1px solid var(--line);border-radius:var(--radius);padding:14px;background:var(--panel);min-width:0}
+  .eng h3{margin:0 0 6px;font-size:.95rem;display:flex;align-items:center;gap:8px}
+  .dot{width:9px;height:9px;border-radius:999px;flex:none}
+  .eng p{margin:0;color:var(--muted);font-size:.85rem}
+  .eng.foot .dot{background:var(--foot)} .eng.turf .dot{background:var(--turf)} .eng.hock .dot{background:var(--hock)}
+  .chain{font-family:var(--mono);font-size:.78rem;color:var(--muted);margin:8px 0 0;white-space:normal}
+  .steps{list-style:none;padding:0;margin:10px 0 0;display:flex;flex-direction:column;gap:7px}
+  .steps li{display:flex;gap:9px;font-size:.86rem;color:var(--fg)}
+  .steps .n{font-family:var(--mono);color:var(--accent-ink);font-weight:700;flex:none}
+  .foot-note{color:var(--muted);font-size:.78rem;border-top:1px solid var(--line);padding-top:14px}
+  code.inline{font-family:var(--mono);font-size:.84em;background:color-mix(in srgb,var(--accent) 12%,transparent);
+    padding:1px 5px;border-radius:5px}
+  @media (max-width:430px){h1{font-size:1.3rem}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>APEX-DIGEST</h1>
+    <p class="sub">Une requête — une date, une période, un match, une ligue, une liste — traversée par tous les moteurs, en un seul digest. Cette page compose la commande ; l'analyse tourne en session.</p>
+  </header>
+
+  <div class="gel"><b>Gel actif.</b><span>Aucune mise réelle n'est émise. Donnée absente d'un jour = écrite absente, jamais simulée.</span></div>
+
+  <section class="panel" aria-labelledby="q">
+    <h2 id="q">Composer la requête</h2>
+    <p class="hint">Choisir le type de requête, le(s) sport(s), puis remplir les champs. La commande se met à jour en continu.</p>
+
+    <fieldset>
+      <legend>Type de requête</legend>
+      <div class="chips" id="qtype" role="radiogroup" aria-label="Type de requête">
+        <label class="chip"><input type="radio" name="qt" value="date" checked><span>Date</span></label>
+        <label class="chip"><input type="radio" name="qt" value="periode"><span>Période</span></label>
+        <label class="chip"><input type="radio" name="qt" value="match"><span>Match</span></label>
+        <label class="chip"><input type="radio" name="qt" value="ligue"><span>Ligue</span></label>
+        <label class="chip"><input type="radio" name="qt" value="liste"><span>Liste de matchs</span></label>
+      </div>
+    </fieldset>
+
+    <div class="fields">
+      <div class="row" id="f-date"><div class="field"><label class="lbl" for="d1">Date</label><input type="date" id="d1"></div></div>
+      <div class="row" id="f-periode" hidden>
+        <div class="field"><label class="lbl" for="pa">Du</label><input type="date" id="pa"></div>
+        <div class="field"><label class="lbl" for="pb">Au</label><input type="date" id="pb"></div>
+      </div>
+      <div class="row" id="f-match" hidden>
+        <div class="field"><label class="lbl" for="mt">Match (Domicile - Extérieur)</label><input type="text" id="mt" placeholder="Paris Saint Germain - Lyon"></div>
+      </div>
+      <div class="row" id="f-ligue" hidden>
+        <div class="field"><label class="lbl" for="lg">Ligue (nom ou code)</label><input type="text" id="lg" placeholder="Serie A"></div>
+      </div>
+      <div class="row" id="f-liste" hidden>
+        <div class="field"><label class="lbl" for="fx">Identifiants de match (séparés par des virgules)</label><input type="text" id="fx" placeholder="1552800,1550174"></div>
+      </div>
+    </div>
+
+    <fieldset style="margin-top:18px">
+      <legend>Sports (chaîne par sport)</legend>
+      <div class="chips" id="sports">
+        <label class="chip"><input type="checkbox" value="football" checked><span>Football</span></label>
+        <label class="chip"><input type="checkbox" value="turf"><span>Turf</span></label>
+        <label class="chip"><input type="checkbox" value="hockey"><span>Hockey</span></label>
+      </div>
+    </fieldset>
+  </section>
+
+  <section class="panel" aria-labelledby="c">
+    <div class="cmdbar"><h2 id="c">Commande à lancer en session</h2><button class="copy" id="copy" type="button">Copier</button></div>
+    <div class="cmd"><code id="out"></code></div>
+    <p class="hint" style="margin:12px 0 0">Lancer dans le dépôt, puis envoyer le digest par email (connecteur Gmail) — un passage APEX sans email est incomplet. Sorties dans <code class="inline">reports/digest/</code>.</p>
+  </section>
+
+  <section aria-labelledby="e">
+    <h2 id="e" style="margin-bottom:12px">Ce que produit chaque moteur</h2>
+    <div class="engines">
+      <article class="eng foot">
+        <h3><span class="dot"></span>Football</h3>
+        <p>Mécanisé de bout en bout. Jour entier → digest FUSION canonique ; match / ligue / liste / période → carte ORION focalisée ; un match nommé reçoit le détail BSM (simulation Monte-Carlo cachée).</p>
+        <p class="chain">WORM → MI → BSM → FUSION/ORION → sources sharp</p>
+      </article>
+      <article class="eng turf">
+        <h3><span class="dot"></span>Turf</h3>
+        <p>Digest APEX-TURF-WORM du jour, lu depuis le snapshot. Palier maximal <b>SURVEILLER</b> (gates de pari fermées par le backtest). Sans passage exploitable : la commande de scan est indiquée, rien n'est simulé.</p>
+        <p class="chain">TURF-WORM → TURF-MI (bruit) · périmètre LONACI</p>
+      </article>
+      <article class="eng hock">
+        <h3><span class="dot"></span>Hockey</h3>
+        <p>La chaîne hockey est pilotée par <code class="inline">apex_hockey_lead</code> depuis un fichier d'entrée. Le dispatcher résout la requête en un <b>scaffold d'input</b> prêt à lancer — aucune analyse n'est fabriquée.</p>
+        <p class="chain">DISCOVERY → G0…G7 (init → check → finalize)</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="w">
+    <h2 id="w">Après la commande</h2>
+    <ol class="steps">
+      <li><span class="n">1</span><span>Lancer la commande dans le dépôt (lecture seule ; relancer un scan si le snapshot du jour manque).</span></li>
+      <li><span class="n">2</span><span>Le digest unifié s'écrit dans <code class="inline">reports/digest/&lt;slug&gt;.html</code> (+ <code class="inline">.txt</code>, <code class="inline">.subject.txt</code>).</span></li>
+      <li><span class="n">3</span><span>Envoyer ce digest par email via le connecteur Gmail à <code class="inline">okoma.leonce@gmail.com</code>.</span></li>
+      <li><span class="n">4</span><span>Après les matchs : <code class="inline">apex_postmatch.py run</code> boucle settle → CLV → calibration.</span></li>
+    </ol>
+    <p class="foot-note">Tous les gates restent en vigueur : EV robuste ≥ 3 %, sensibilité, veto J27 (ROI de ligue négatif), moins de 3 voix indépendantes → COLLECTER. ORION peut toujours décider de ne rien faire.</p>
+  </section>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var $=function(s){return document.querySelector(s)};
+  var today=new Date().toISOString().slice(0,10);
+  try{var saved=JSON.parse(localStorage.getItem("apex-digest")||"{}")}catch(e){saved={}}
+
+  $("#d1").value=saved.d1||today;
+  $("#pa").value=saved.pa||today;
+  $("#pb").value=saved.pb||today;
+  if(saved.mt)$("#mt").value=saved.mt;
+  if(saved.lg)$("#lg").value=saved.lg;
+  if(saved.fx)$("#fx").value=saved.fx;
+
+  var panels={date:"#f-date",periode:"#f-periode",match:"#f-match",ligue:"#f-ligue",liste:"#f-liste"};
+
+  function qtype(){var el=document.querySelector('input[name=qt]:checked');return el?el.value:"date"}
+  function sports(){
+    var s=[].slice.call(document.querySelectorAll('#sports input:checked')).map(function(i){return i.value});
+    return s.length?s:["football"];
+  }
+  function q(v){return '"'+String(v).replace(/"/g,'\\"')+'"'}
+
+  function build(){
+    var t=qtype();
+    for(var k in panels){$(panels[k]).hidden=(k!==t)}
+    // ligue et liste sont ancrées sur une date (localisation du snapshot)
+    var needDate=(t==="match"||t==="ligue"||t==="liste");
+    var parts=["python3 tools/apex_digest.py"];
+    if(t==="date")parts.push('--date '+($("#d1").value||today));
+    else if(t==="periode")parts.push('--periode '+($("#pa").value||today)+':'+($("#pb").value||today));
+    else if(t==="match"){parts.push('--match '+q($("#mt").value||"Domicile - Extérieur"));parts.push('--date '+($("#d1").value||today))}
+    else if(t==="ligue"){parts.push('--ligue '+q($("#lg").value||"Serie A"));parts.push('--date '+($("#d1").value||today))}
+    else if(t==="liste"){parts.push('--fixtures '+($("#fx").value||"ID1,ID2"));parts.push('--date '+($("#d1").value||today))}
+    parts.push('--sport '+sports().join(","));
+    // date input visible aussi pour match/ligue/liste
+    $("#f-date").hidden=!(t==="date"||needDate);
+
+    var html=parts.map(function(p,i){
+      var esc=p.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+      if(i===0)return esc;
+      return '  <span class="flag">'+esc+'</span>';
+    }).join(" \\\n");
+    $("#out").innerHTML=html;
+
+    try{localStorage.setItem("apex-digest",JSON.stringify({
+      d1:$("#d1").value,pa:$("#pa").value,pb:$("#pb").value,
+      mt:$("#mt").value,lg:$("#lg").value,fx:$("#fx").value
+    }))}catch(e){}
+  }
+
+  document.addEventListener("input",build);
+  document.addEventListener("change",build);
+
+  $("#copy").addEventListener("click",function(){
+    var txt=$("#out").innerText.replace(/ /g," ");
+    var done=function(){var b=$("#copy");var o=b.textContent;b.textContent="Copié ✓";setTimeout(function(){b.textContent=o},1400)};
+    try{
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(txt).then(done,select);
+      }else select();
+    }catch(e){select()}
+    function select(){
+      var r=document.createRange();r.selectNodeContents($("#out"));
+      var s=window.getSelection();s.removeAllRanges();s.addRange(r);
+    }
+  });
+
+  build();
+})();
+</script>

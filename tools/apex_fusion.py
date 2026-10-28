@@ -285,6 +285,23 @@ def arbitrate_day(day: str):
             verdict["gel_actif"] = True
             verdict["raison"] = (verdict.get("raison", "") +
                                  f" — GEL (matrice) : {manque}").strip(" —")
+        # CONTRAT DE SORTIE (Lot 3, mod #6) — bloc minimal présent sur CHAQUE verdict, pour qu'aucune
+        # décision (surtout une abstention) ne soit un silence : elle est toujours explicable par le
+        # contrôleur d'indépendance ORION (voix sourcées), le désaccord, et l'état du gel. Le gel
+        # interdit toute mise réelle quel que soit le verrou de la matrice.
+        verdict["contrat_sortie"] = {
+            "decision_orion": verdict["decision"],
+            "n_voix_independantes": verdict.get("n_independantes"),
+            "min_voix_requis": O.MIN_INDEP_VOICES,
+            "independance_ok": (verdict.get("n_independantes") or 0) >= O.MIN_INDEP_VOICES,
+            "couches_sourcees": [k for k, on in couches.items() if on],
+            "confiance": verdict.get("confiance"),
+            "desaccord": verdict.get("desaccord"),
+            "verrou_gel": verdict["gel"].get("verrou"),
+            "gel_actif": True,
+            "mise_reelle_autorisee": False,
+            "raison": verdict.get("raison"),
+        }
         out.append(verdict)
     return out
 
@@ -493,11 +510,26 @@ def _extended_markets_html(day: str, verdicts: list) -> str:
     return "\n".join(H)
 
 
+def _digest_id(day: str, verdicts: list) -> str:
+    """Identifiant idempotent du digest (mod #2) : fonction STABLE du jour et du contenu décisif
+    (match, décision ORION, couches sourcées, voix indépendantes, confiance). Deux exécutions sur le
+    même snapshot rendent le même id → on détecte un digest inchangé sans le re-générer à l'aveugle.
+    N'inclut rien d'horodaté."""
+    import hashlib as _h, json as _json
+    basis = {"day": day, "verdicts": sorted(
+        [{"m": v.get("match"), "d": v.get("decision"),
+          "couches": "".join(k for k, on in (v.get("couches") or {}).items() if on),
+          "voix": v.get("n_independantes"), "conf": v.get("confiance")} for v in verdicts],
+        key=lambda x: (x["m"] or ""))}
+    return _h.sha1(_json.dumps(basis, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
+
+
 def build_fusion_digest(day: str):
-    """(sujet, html, verdicts). Réutilise le corps WORM et greffe la carte ORION en tête."""
+    """(sujet, html, verdicts, digest_id). Réutilise le corps WORM et greffe la carte ORION en tête."""
     d = dt.date.fromisoformat(day)
     worm_subject, worm_html = W.build_email_html(d)
     verdicts = arbitrate_day(day)
+    digest_id = _digest_id(day, verdicts)
     card = _orion_card_html(day, verdicts)
     matrix = _gel_matrix_html(day, verdicts)       # matrice du gel, juste sous la carte ORION
     extended = _extended_markets_html(day, verdicts)   # marchés étendus (structure WORM, non BSM)
@@ -507,12 +539,16 @@ def build_fusion_digest(day: str):
         html = worm_html.replace("<body>", "<body>\n" + head, 1)
     else:
         html = head + worm_html
+    # digest_id visible + en commentaire machine (idempotence vérifiable sans parser le HTML).
+    html = html.replace("</body>", f"<!-- apex-fusion-digest-id: {digest_id} -->\n"
+                        f"<div style='color:#888;font-size:11px;margin:12px 0'>digest_id {digest_id} "
+                        f"· identifiant idempotent (stable au snapshot)</div>\n</body>", 1)
     from collections import Counter
     c = Counter(v["decision"] for v in verdicts)
     n_act = sum(1 for v in verdicts if v["decision"] in ("ACCEPTER", "REJETER", "ATTENDRE"))
     subject = (f"APEX-FUSION {day} · ORION {n_act}/{len(verdicts)} arbitrages · "
-               f"{c.get('ATTENDRE', 0)} ATTENDRE · {c.get('COLLECTER', 0)} COLLECTER · gel")
-    return subject, html, verdicts
+               f"{c.get('ATTENDRE', 0)} ATTENDRE · {c.get('COLLECTER', 0)} COLLECTER · gel · id {digest_id}")
+    return subject, html, verdicts, digest_id
 
 
 def _plain_text(day: str, verdicts: list) -> str:
@@ -543,14 +579,23 @@ def cmd_run(a):
         except Exception as e:                      # le scan peut échouer (quota) : on continue sur le snapshot existant
             print(f"⚠ scan interrompu ({str(e)[:100]}) — fusion sur le dernier snapshot disponible.")
 
-    subject, html, verdicts = build_fusion_digest(day)
+    subject, html, verdicts, digest_id = build_fusion_digest(day)
     outdir = ROOT / "reports" / "fusion"
     outdir.mkdir(parents=True, exist_ok=True)
+    # Idempotence (mod #2) : si le digest_id est identique au dernier, le contenu décisif n'a pas
+    # changé depuis le passage précédent. On réécrit quand même (write idempotent) et on le signale.
+    id_path = outdir / f"{day}.digest_id.txt"
+    prev_id = id_path.read_text(encoding="utf-8").strip() if id_path.exists() else None
     (outdir / f"{day}.email.html").write_text(html, encoding="utf-8")
     (outdir / f"{day}.email.subject.txt").write_text(subject, encoding="utf-8")
     (outdir / f"{day}.email.txt").write_text(_plain_text(day, verdicts), encoding="utf-8")
+    id_path.write_text(digest_id, encoding="utf-8")
 
     print(_plain_text(day, verdicts))
+    if prev_id == digest_id:
+        print(f"\n(idempotent) digest_id {digest_id} INCHANGÉ depuis le dernier passage — contenu décisif identique.")
+    else:
+        print(f"\ndigest_id {digest_id}" + (f" (précédent {prev_id})" if prev_id else " (premier passage du jour)"))
     print("\n" + "=" * 72)
     print("⚠ ENVOI EMAIL OBLIGATOIRE — un seul digest, un seul email (règle APEX).")
     print(f"  to      = okoma.leonce@gmail.com")

@@ -20,6 +20,7 @@ runs_mi/*
 data/history/*
 !data/history/intl_supplement.csv
 data/apifootball/history/
+data/apifootball/snapshots/
 data/footystats/
 data/tsbase/
 data/worm/
@@ -42,6 +43,17 @@ data/fusion/
 
 # APEX-SOURCES (cache CSV football-data, retéléchargeable)
 data/sources/
+
+# Cache Monte-Carlo BSM (mod #2) — déterministe au snapshot, reconstructible, éphémère
+data/bsm_mc_cache/
+
+# APEX-POSTMATCH (rapports générés, éphémères ; les observations vont au ledger append-only)
+reports/postmatch/
+
+# APEX-DIGEST (interface unifiée — digests générés + scaffolds d'input, éphémères)
+reports/digest/*
+# … sauf la source de la page web (versionnée)
+!reports/digest/apex_digest_interface.html
 
 # APEX NEWSDESK (actualité week-end générée, append-only, non versionnée)
 data/newsdesk/
