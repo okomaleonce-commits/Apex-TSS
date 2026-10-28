@@ -19,7 +19,7 @@
  "calibration": null,
  "statut": "NON SUPÉRIEUR AU MARCHÉ — EV contre le marché présumée illusoire",
  "beats_market": false,
- "j27_status": "OK",
+ "j27_status": "ROI_NEGATIF",
  "backtest_period": "run gelé bsm-20260929T010237Z (seed depuis latest_params)",
  "source_run": "bsm-20260929T010237Z",
  "configuration_hash": "4e9a0dbb94ec",
