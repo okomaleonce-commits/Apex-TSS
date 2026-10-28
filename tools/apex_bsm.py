@@ -974,19 +974,28 @@ def cmd_simulate(a):
                 e["ecart_marche"] = fair_prob(e) - mkt[e["marche"]]
                 if abs(e["ecart_marche"]) > 0.10:
                     e["suspect"] = True
-    ok = [e for e in evs if e["ev"] >= 0.03 and (not e["sens"] or min(e["sens"]) >= 0) and not e.get("suspect")]
-    if any(e.get("suspect") and e["ev"] >= 0.03 for e in evs):
+    # EV_robuste (mod #3) : on NE sélectionne PAS sur la plus forte EV nominale.
+    # EV_robuste = min(EV_nominale, pire EV sous sensibilité λ, EV sous cote dégradée).
+    # DEG = stress de cote (pas une donnée : paramètre de robustesse, du même ordre
+    # que la sensibilité λ ±10 % déjà appliquée). On classe ET on gate sur EV_robuste.
+    DEG = 0.02
+    for e in evs:
+        cands = [e["ev"]] + list(e["sens"] or []) + [e["ev"] - (e["ev"] + 1.0) * DEG]
+        e["ev_robuste"] = round(min(cands), 4)
+    ok = [e for e in evs if e["ev_robuste"] >= 0.03 and not e.get("suspect")]
+    if any(e.get("suspect") and e["ev_robuste"] >= 0.03 for e in evs):
         notes.append("EV ≥ 3 % écartée : écart > 10 pts avec le marché sur un modèle non validé (erreur de modèle probable).")
-    fragile = [e for e in evs if e["ev"] >= 0.03 and e["sens"] and min(e["sens"]) < 0]
+    # Marché robuste nominalement mais qui tombe sous 3 % en pire cas (λ ou cote dégradée) : surveillance.
+    fragile = [e for e in evs if e["ev"] >= 0.03 and e["ev_robuste"] < 0.03 and not e.get("suspect")]
     if not offers and not a.odds_ah and not a.odds_dnb:
         decision = "SANS COTE VÉRIFIÉE — aucune sélection possible"
         official = None
     elif veto:
         official = None; decision = "SURVEILLANCE / ABSTENTION — " + " ; ".join(veto)
     elif ok:
-        official = max(ok, key=lambda e: e["ev"])
+        official = max(ok, key=lambda e: e["ev_robuste"])
         tag = "SÉLECTION" if status.startswith("VALIDÉ") or status.startswith("NON CONCLUANT") else "SÉLECTION INDICATIVE (modèle non validé, mise ≤ ½)"
-        decision = f"{tag} : {official['marche']} @ {official['cote']}"
+        decision = f"{tag} : {official['marche']} @ {official['cote']} (EV {official['ev']:+.1%}, EV_robuste {official['ev_robuste']:+.1%})"
     else:
         official = None
         decision = "ABSTENTION — aucune EV ≥ 3 % stable" + (" (EV qui disparaît en sensibilité : surveillance)" if fragile else "")
@@ -998,6 +1007,7 @@ def cmd_simulate(a):
     if official:
         official_selection = {"marche": official["marche"], "p": official.get("p"),
                               "cote": official.get("cote"), "ev": official.get("ev"),
+                              "ev_robuste": official.get("ev_robuste"),
                               "sensibilite_min": (min(official["sens"]) if official.get("sens") else None),
                               "veto": False}
 
@@ -1066,6 +1076,7 @@ def cmd_simulate(a):
         print(f"  {k:28s} {v}")
     for e in evs:
         print(f"  EV {e['marche']:14s} p={e['p']:.3f} cote={e['cote']} → EV {e['ev']:+.1%}" +
+              f"  (EV_robuste {e['ev_robuste']:+.1%})" +
               (f"  (min sensibilité {min(e['sens']):+.1%})" if e["sens"] else "") + (f"  états {e.get('etats')}" if e.get("etats") else "") +
               (f"  ⚠ écart marché {e['ecart_marche']:+.1%}" if e.get("suspect") else ""))
     for n_ in notes:
