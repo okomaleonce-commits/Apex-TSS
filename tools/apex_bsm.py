@@ -934,19 +934,23 @@ def cmd_simulate(a):
         evs.append({"marche": f"DNB {side}", "p": st["gain"], "cote": o, "ev": st["gain"] * (o - 1) - st["perte"],
                     "etats": {k: round(v, 4) for k, v in st.items()}, "sens": []})
 
-    # sélection : au plus UN marché officiel ; veto si modèle non supérieur au marché ou EV instable
+    # sélection : au plus UN marché officiel ; veto si modèle non supérieur au marché ou EV instable.
+    # Chaque veto porte un CODE typé (mod #5) : VETO_DATA (donnée manquante/non vérifiée),
+    # VETO_MODEL (modèle non habilité), VETO_MARKET (edge marché détruit), VETO_CONTEXT, VETO_RISK.
     veto = []
+    def add_veto(code, raison):
+        veto.append({"code": code, "raison": raison})
     if "NON SUPÉRIEUR" in status:
-        veto.append("backtest : modèle significativement moins précis que le marché → EV présumée illusoire")
+        add_veto("VETO_MODEL", "backtest : modèle significativement moins précis que le marché → EV présumée illusoire")
     if a.missing_lineup:
-        veto.append("composition déterminante manquante")
+        add_veto("VETO_DATA", "composition déterminante manquante")
     # J27 : une ligue dont le backtest de PARIS a un ROI significativement négatif
     # (IC95 entièrement < 0) ne parie pas, même si le gate EV per-match passe.
     _rg = load_roi_gate().get(a.div)
     if _rg and _rg.get("roi_ic95_haut") is not None and _rg["roi_ic95_haut"] < 0:
-        veto.append(f"J27 : ROI backtest {a.div} significativement négatif "
-                    f"(ROI {_rg['roi']:+.1%} IC95 [{_rg['roi_ic95_bas']:+.1%} ; {_rg['roi_ic95_haut']:+.1%}]"
-                    f", CLV {_rg.get('clv', 0):+.1%}) → pas de pari sur cette ligue")
+        add_veto("VETO_MARKET", f"J27 : ROI backtest {a.div} significativement négatif "
+                 f"(ROI {_rg['roi']:+.1%} IC95 [{_rg['roi_ic95_bas']:+.1%} ; {_rg['roi_ic95_haut']:+.1%}]"
+                 f", CLV {_rg.get('clv', 0):+.1%}) → pas de pari sur cette ligue")
     # écart suspect : > 10 points de probabilité implicite avec le marché démarginé → erreur de modèle probable.
     # Marchés à règlement partiel (AH) comparés via leurs cotes justes (EV = 0).
     def fair_prob(e):
@@ -987,18 +991,35 @@ def cmd_simulate(a):
         notes.append("EV ≥ 3 % écartée : écart > 10 pts avec le marché sur un modèle non validé (erreur de modèle probable).")
     # Marché robuste nominalement mais qui tombe sous 3 % en pire cas (λ ou cote dégradée) : surveillance.
     fragile = [e for e in evs if e["ev"] >= 0.03 and e["ev_robuste"] < 0.03 and not e.get("suspect")]
+    veto_codes = [v["code"] for v in veto]
+    veto_txt = " ; ".join(f"[{v['code']}] {v['raison']}" for v in veto)
+
+    # DÉCISION MODÈLE (mod #6) : ce que le pricing recommande sur le papier, à partir du SEUL
+    # gate EV_robuste ≥ 3 %. Indépendante des veto et du gel — c'est l'avis brut du modèle.
+    best_model = max(ok, key=lambda e: e["ev_robuste"]) if ok else None
+    if not offers and not a.odds_ah and not a.odds_dnb:
+        decision_modele = "SANS COTE VÉRIFIÉE — aucune sélection possible"
+    elif best_model:
+        decision_modele = (f"SÉLECTION MODÈLE : {best_model['marche']} @ {best_model['cote']} "
+                           f"(EV {best_model['ev']:+.1%}, EV_robuste {best_model['ev_robuste']:+.1%})")
+    else:
+        decision_modele = "ABSTENTION MODÈLE — aucune EV_robuste ≥ 3 %" + (" (EV qui disparaît en pire cas : surveillance)" if fragile else "")
+
+    # DÉCISION EXÉCUTION : ce qui est réellement exécutable, après veto typés, SHADOW_ONLY et gel.
+    # Sous gel, aucune sélection ne devient une mise réelle, quelle que soit la décision modèle.
     if not offers and not a.odds_ah and not a.odds_dnb:
         decision = "SANS COTE VÉRIFIÉE — aucune sélection possible"
         official = None
     elif veto:
-        official = None; decision = "SURVEILLANCE / ABSTENTION — " + " ; ".join(veto)
+        official = None; decision = "SURVEILLANCE / ABSTENTION — " + veto_txt
     elif ok:
-        official = max(ok, key=lambda e: e["ev_robuste"])
+        official = best_model
         tag = "SÉLECTION" if status.startswith("VALIDÉ") or status.startswith("NON CONCLUANT") else "SÉLECTION INDICATIVE (modèle non validé, mise ≤ ½)"
         decision = f"{tag} : {official['marche']} @ {official['cote']} (EV {official['ev']:+.1%}, EV_robuste {official['ev_robuste']:+.1%})"
     else:
         official = None
         decision = "ABSTENTION — aucune EV ≥ 3 % stable" + (" (EV qui disparaît en sensibilité : surveillance)" if fragile else "")
+    decision_execution = decision
 
     # Sélection officielle STRUCTURÉE (audit 2026-10-05) : SYNC ne doit pas reconstruire une
     # sélection depuis la liste d'EV brute ; il consomme ce champ exact (marché, p, cote, EV, borne
@@ -1009,7 +1030,7 @@ def cmd_simulate(a):
                               "cote": official.get("cote"), "ev": official.get("ev"),
                               "ev_robuste": official.get("ev_robuste"),
                               "sensibilite_min": (min(official["sens"]) if official.get("sens") else None),
-                              "veto": False}
+                              "veto": bool(veto)}
 
     # Preuve de validation STRUCTURÉE (audit 2026-10-05, défaut D1) : la validation ne repose plus sur
     # le texte libre `statut_modele`, mais sur ce bloc rattaché à un backtest. `validated` n'est vrai
@@ -1036,6 +1057,23 @@ def cmd_simulate(a):
            "shadow": shadow,
            "statut_execution": ("SHADOW_ONLY — " + (shadow_reason or "modèle non habilité")) if shadow
                                else "ÉLIGIBLE (exécution réelle suspendue par le gel)",
+           # mod #6 : deux décisions séparées. decision_modele = avis pricing (gate EV_robuste seul) ;
+           # decision_execution = ce qui est exécutable après veto typés + SHADOW_ONLY + gel.
+           "decision_modele": decision_modele, "decision_execution": decision_execution,
+           "veto_codes": veto_codes,
+           # Contrat de sortie minimal (mod #6) — présent sur CHAQUE verdict, abstention comprise :
+           # toute abstention est explicable par au moins un code (veto typé, EV_robuste insuffisante,
+           # cote absente ou SHADOW_ONLY), jamais un silence.
+           "contrat_sortie": {
+               "decision_modele": decision_modele,
+               "decision_execution": decision_execution,
+               "selection": (official["marche"] if official else None),
+               "ev_robuste": (official.get("ev_robuste") if official else None),
+               "shadow": shadow,
+               "veto_codes": veto_codes,
+               "gel_actif": True,
+               "mise_reelle_autorisee": False,
+           },
            "notes": notes}
     if a.record:
         LEDGER_DIR.mkdir(exist_ok=True)
@@ -1081,7 +1119,10 @@ def cmd_simulate(a):
               (f"  ⚠ écart marché {e['ecart_marche']:+.1%}" if e.get("suspect") else ""))
     for n_ in notes:
         print("Note :", n_)
-    print(f"DÉCISION : {('[SHADOW_ONLY] ' if shadow else '') + decision}")
+    print(f"DÉCISION MODÈLE   : {decision_modele}")
+    print(f"DÉCISION EXÉCUTION : {('[SHADOW_ONLY] ' if shadow else '') + decision_execution}")
+    if veto_codes:
+        print(f"CODES VETO : {', '.join(veto_codes)}")
     if shadow:
         print(f"EXÉCUTION : SHADOW_ONLY — {shadow_reason or 'modèle non habilité'} (décision modèle conservée, aucune mise officielle)")
     print(f"forecast_id : {fid}" + (" (enregistré dans ledger/forecasts.jsonl)" if a.record else " (non enregistré : ajouter --record)"))
