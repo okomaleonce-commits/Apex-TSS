@@ -282,18 +282,43 @@ def _match_team(name, candidates):
     return best if score >= 0.6 else None
 
 
-def _live_odds(fixture_odds, market):
-    """(cote du côté chaud, source) depuis le bloc odds multi-books du snapshot."""
+def _hot_odd_in(fixture_odds, market, prefer_book=None):
+    """(cote du côté chaud, book) depuis un bloc odds multi-books. Si prefer_book est fourni et porte
+    le marché, on le prend EN PRIORITÉ (CLV comparable book à book), sinon le premier book disponible."""
     if not isinstance(fixture_odds, dict):
         return None, None
-    for book, v in fixture_odds.items():
-        if book == "_update" or not isinstance(v, dict):
+    order = ([prefer_book] if prefer_book else []) + \
+            [b for b in fixture_odds if b != "_update" and b != prefer_book]
+    for book in order:
+        v = fixture_odds.get(book)
+        if not isinstance(v, dict):
             continue
         if market == "btts" and v.get("BTTS"):
             return v["BTTS"][0], book           # BTTS oui
         if market == "over25" and v.get("OU", {}).get("2.5"):
             return v["OU"]["2.5"][0], book       # Over 2.5
     return None, None
+
+
+def _live_odds(fixture_odds, market):
+    """(cote du côté chaud, source) depuis le bloc odds multi-books du snapshot (1er book qui l'a)."""
+    return _hot_odd_in(fixture_odds, market)
+
+
+def _closing_odds(day, fixture_id, market, prefer_book=None):
+    """Cote de CLÔTURE du côté chaud = cote au DERNIER passage PRÉMATCH du snapshot du jour (même book
+    que l'entrée si possible). (cote, book) ou (None, None) si introuvable — JAMAIS estimée (J05)."""
+    try:
+        import apex_clv as CLV
+    except Exception:
+        return None, None
+    passes = CLV._passes_by_fixture(day).get(fixture_id)
+    if not passes:
+        return None, None
+    prematch = [p for p in passes if p.get("phase") == "PREMATCH"]
+    if not prematch:
+        return None, None
+    return _hot_odd_in(prematch[-1].get("odds"), market, prefer_book)
 
 
 def _season_code(d: dt.date) -> str:
@@ -411,27 +436,47 @@ def cmd_forward_settle(a):
         hot = (tot > 2.5) if e["market"] == "over25" else (m["hg"] > 0 and m["ag"] > 0)
         win = bool(hot)  # on parie toujours le côté chaud (retournement)
         gain = (e["cote_entree"] - 1.0) if win else -1.0
+        # CLV câblé (tâche ouverte) : cote de clôture = dernier passage prématch du snapshot, même
+        # book que l'entrée si possible. CLV = cote_entrée / cote_clôture − 1 (positif = on a pris
+        # mieux que la clôture). Cote de clôture absente → CLV null, jamais estimé (J05/anti-invention).
+        close_odd, close_book = _closing_odds(e.get("day"), e["fixture_id"], e["market"], e.get("cote_source"))
+        if close_odd and close_odd > 1.0:
+            clv = round(e["cote_entree"] / close_odd - 1.0, 4)
+            clv_note = f"cote clôture {close_odd} ({close_book}) au dernier passage prématch du snapshot"
+        else:
+            clv, clv_note = None, "cote de clôture absente du snapshot (CLV non calculable, non fabriqué)"
         rec = {"ref_ts": e["ts_utc"], "fixture_id": e["fixture_id"], "div": div,
                "match": f"{e['home']}–{e['away']}", "market": e["market"],
                "score": f"{m['hg']}-{m['ag']}", "resultat": "GAGNÉ" if win else "PERDU",
-               "cote_entree": e["cote_entree"], "pnl_unites": round(gain, 3),
-               "clv": None, "clv_note": "CLV non câblé (pas de source de cote de clôture BTTS/OU fiable ici)",
+               "cote_entree": e["cote_entree"], "cote_cloture": close_odd, "pnl_unites": round(gain, 3),
+               "clv": clv, "clv_note": clv_note,
                "regle_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")}
         with open(FWD_SETTLED, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         pnl.append(gain); settled += 1
-        print(f"  {rec['resultat']:6} {rec['match']} {rec['score']} | {e['market']} @ {e['cote_entree']} → {gain:+.2f} u", flush=True)
+        clv_txt = (f" · CLV {clv:+.1%}" if clv is not None else " · CLV n/d")
+        print(f"  {rec['resultat']:6} {rec['match']} {rec['score']} | {e['market']} @ {e['cote_entree']}"
+              f" → {gain:+.2f} u{clv_txt}", flush=True)
     # cumul global (toutes lignes réglées)
-    allp = []
+    allp, allclv = [], []
     if FWD_SETTLED.exists():
         for l in open(FWD_SETTLED, encoding="utf-8"):
             try:
-                allp.append(json.loads(l)["pnl_unites"])
+                rr = json.loads(l)
+                allp.append(rr["pnl_unites"])
+                if rr.get("clv") is not None:
+                    allclv.append(rr["clv"])
             except Exception:
                 pass
+    beat = sum(1 for c in allclv if c > 0)
     print(f"\n{settled} nouvelle(s) ligne(s) réglée(s). Cumul forward-test : {len(allp)} paris · "
           f"ROI {(np.mean(allp) if allp else 0):+.1%} · P&L {sum(allp):+.1f} u"
           + (f" · IC95 {boot_ci(allp)}" if len(allp) >= 10 else " · (IC95 à ≥10 paris)"), flush=True)
+    if allclv:
+        print(f"CLV : moyen {np.mean(allclv):+.1%} sur {len(allclv)} paris cotés · bat la clôture "
+              f"{100*beat/len(allclv):.0f} % (le CLV est le juge, J26/J01).", flush=True)
+    else:
+        print("CLV : aucun pari avec cote de clôture relevée (CLV non calculable).", flush=True)
     print("Statut : forward-test prospectif (gel). Activation du signal (J26) seulement si ROI ET CLV "
           "positifs stables sur échantillon suffisant.", flush=True)
 
