@@ -58,11 +58,80 @@ def load_roi_gate() -> dict:
 
 
 MODEL_CARDS_DIR = ROOT / "tools" / "params" / "model_cards"
+MC_CACHE_DIR = ROOT / "data" / "bsm_mc_cache"
+MC_CACHE_SCHEMA = 1
 
 
 def _config_hash(P: dict) -> str:
     import hashlib as _h, json as _json
     return _h.sha1(_json.dumps({k: P[k] for k in sorted(P)}, default=str).encode()).hexdigest()[:12]
+
+
+def _np_safe(o):
+    """Sérialisation JSON tolérante aux scalaires numpy (sécurité : tout doit déjà être du float Python)."""
+    import numpy as _np
+    if isinstance(o, _np.floating):
+        return float(o)
+    if isinstance(o, _np.integer):
+        return int(o)
+    raise TypeError(f"non sérialisable : {type(o)}")
+
+
+def mc_cache_key(fixture_id, div, home, away, asof, seasons, lh, la, rho, sigma, scen, seed, n0, nmax, tol):
+    """Clé de cache Monte-Carlo (mod #2) : fixture_id + model_version + hash du snapshot de données
+    (λ, ρ, σ, ligue, équipes, as-of, saisons) + hash des paramètres numériques (scénarios, seed, n0,
+    nmax, tol, grille de buts). Le MC étant déterministe (seed fixe), une même clé rend un résultat
+    identique au bit près → inutile de relancer 10k–640k tirages pour un match déjà price au même
+    snapshot. Les COTES ne sont PAS dans la clé : l'EV se recalcule après, pour quelques microsecondes."""
+    import hashlib as _h, json as _json
+    snap = {"div": div, "home": home, "away": away, "asof": str(asof), "seasons": seasons,
+            "lh": round(float(lh), 6), "la": round(float(la), 6),
+            "rho": round(float(rho), 6), "sigma": round(float(sigma), 6)}
+    par = {"scen": [[float(x) for x in s] for s in scen], "seed": seed, "n0": n0, "nmax": nmax,
+           "tol": tol, "n_goals": N_GOALS, "schema": MC_CACHE_SCHEMA}
+    dh = _h.sha1(_json.dumps(snap, sort_keys=True).encode()).hexdigest()[:16]
+    ph = _h.sha1(_json.dumps(par, sort_keys=True).encode()).hexdigest()[:12]
+    return f"{fixture_id or 'adhoc'}__{MODEL_VERSION}__{dh}__{ph}", dh, ph
+
+
+def _mc_price(lh, la, rho, sigma, scen, hist, asof, home, away, seed, n0, nmax, tol):
+    """Cœur Monte-Carlo (coûteux) : boucle adaptative de simulation, sensibilité λ ±10 %, marchés
+    mi-temps et périphériques. Renvoie UNIQUEMENT des sorties dérivées JSON-sérialisables (aucun
+    tableau brut, ils ne servent plus en aval) pour être mises en cache. N'ajoute aucune note :
+    les notes sont reconstruites à l'identique par l'appelant (hit comme miss)."""
+    rng = np.random.default_rng(seed)
+    n = n0
+    while True:
+        hg, ag = simulate_scores(lh, la, rho, sigma, scen, n, rng)
+        M = markets_from_sims(hg, ag)
+        keys = ["1", "X", "2", "Over1.5", "Over2.5", "Over3.5", "BTTS_oui"]
+        half = max(1.96 * math.sqrt(M[k] * (1 - M[k]) / n) for k in keys)
+        if half <= tol or n >= nmax:
+            break
+        n *= 2
+    sens = {}
+    for lab, fh, fa in (("λ dom −10 %", .9, 1), ("λ dom +10 %", 1.1, 1), ("λ ext −10 %", 1, .9),
+                        ("λ ext +10 %", 1, 1.1), ("sans scénarios subjectifs", None, None)):
+        if fh is None:
+            if len(scen) == 1:
+                continue
+            h2, a2 = simulate_scores(lh, la, rho, sigma, [(1, 1, 1)], n, rng)
+        else:
+            h2, a2 = simulate_scores(lh * fh, la * fa, rho, sigma, scen, n, rng)
+        m2 = markets_from_sims(h2, a2)
+        sens[lab] = {k: round(m2[k], 3) for k in ("1", "X", "2", "Over2.5", "BTTS_oui")}
+    HM, periph, half_note, f1h, f1a, nhalf = None, None, None, None, None, 0
+    if hist:
+        f1h, f1a, nhalf = half_shares(hist)
+        if f1h is not None:
+            HM = half_markets(hg, ag, f1h, f1a, rng)
+        else:
+            half_note = "Marchés mi-temps ABSENTS : HTHG/HTAG non fournis par la source (non fabriqués)."
+        periph = peripheral_markets(hist, home, away, asof, rng)
+    else:
+        half_note = "Marchés mi-temps & périphériques indisponibles : pas d'historique de ligue (λ externes)."
+    return {"M": M, "sens": sens, "HM": HM, "periph": periph, "f1h": f1h, "f1a": f1a,
+            "nhalf": nhalf, "half_note": half_note, "n": n, "half": half}
 
 
 def load_model_card(div: str):
@@ -864,46 +933,53 @@ def cmd_simulate(a):
             scen.append((rest, 1.0, 1.0))
         notes.append("Scénarios de composition = correction SUBJECTIVE, testée en sensibilité ci-dessous.")
 
-    # précision numérique fixée à l'avance : demi-largeur IC95 MC ≤ tol sur tous les marchés binaires clés
-    n = a.n0
-    while True:
-        hg, ag = simulate_scores(lh, la, rho, sigma, scen, n, rng)
-        M = markets_from_sims(hg, ag)
-        keys = ["1", "X", "2", "Over1.5", "Over2.5", "Over3.5", "BTTS_oui"]
-        half = max(1.96 * math.sqrt(M[k] * (1 - M[k]) / n) for k in keys)
-        if half <= a.tol or n >= a.nmax:
-            break
-        n *= 2
+    # ── Cache Monte-Carlo (mod #2). Le pricing lourd (10k–640k tirages + sensibilité + mi-temps +
+    # périphériques) est déterministe au snapshot (seed fixe) : on le sert depuis le cache si la clé
+    # existe, sinon on calcule et on écrit. Fail-open : toute erreur de cache retombe sur le calcul.
+    ckey, data_hash, params_hash = mc_cache_key(a.fixture_id, a.div, a.home, a.away, asof, a.seasons,
+                                                lh, la, rho, sigma, scen, a.seed, a.n0, a.nmax, a.tol)
+    cache_path = MC_CACHE_DIR / f"{ckey}.json"
+    no_cache = getattr(a, "no_cache", False)
+    payload, cache_hit = None, False
+    if not a.refresh and not no_cache:
+        try:
+            if cache_path.exists():
+                cached = json.loads(cache_path.read_text(encoding="utf-8"))
+                if cached.get("schema") == MC_CACHE_SCHEMA and cached.get("key") == ckey:
+                    payload = cached["payload"]; cache_hit = True
+        except Exception:
+            payload = None
+    if payload is None:
+        payload = _mc_price(lh, la, rho, sigma, scen, hist, asof, a.home, a.away, a.seed, a.n0, a.nmax, a.tol)
+        if not no_cache:
+            try:
+                MC_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                cache_path.write_text(json.dumps(
+                    {"schema": MC_CACHE_SCHEMA, "key": ckey, "fixture_id": a.fixture_id,
+                     "model_version": MODEL_VERSION, "data_snapshot_hash": data_hash,
+                     "parameters_hash": params_hash,
+                     "cree_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+                     "lh": round(lh, 6), "la": round(la, 6), "rho": rho, "sigma": sigma,
+                     "payload": payload}, ensure_ascii=False, default=_np_safe), encoding="utf-8")
+            except Exception:
+                pass
+    M, sens, HM, periph = payload["M"], payload["sens"], payload["HM"], payload["periph"]
+    f1h, f1a, n, half = payload["f1h"], payload["f1a"], payload["n"], payload["half"]
+    # exact = loi analytique Dixon-Coles (déterministe, pas de MC) — recalculée hors cache.
     exact = probs_from_matrix(score_matrix(lh, la, rho, sigma)) if len(scen) == 1 else None
 
-    # sensibilité (≠ intervalle de confiance) : λ ±10 %, sans scénarios subjectifs
-    sens = {}
-    for lab, fh, fa in (("λ dom −10 %", .9, 1), ("λ dom +10 %", 1.1, 1), ("λ ext −10 %", 1, .9), ("λ ext +10 %", 1, 1.1),
-                        ("sans scénarios subjectifs", None, None)):
-        if fh is None:
-            if len(scen) == 1:
-                continue
-            h2, a2 = simulate_scores(lh, la, rho, sigma, [(1, 1, 1)], n, rng)
-        else:
-            h2, a2 = simulate_scores(lh * fh, la * fa, rho, sigma, scen, n, rng)
-        m2 = markets_from_sims(h2, a2)
-        sens[lab] = {k: round(m2[k], 3) for k in ("1", "X", "2", "Over2.5", "BTTS_oui")}
-
-    # marchés mi-temps (calibrés sur HTHG/HTAG réels) + périphériques (indicatifs), si historique dispo
-    HM, periph, half_note, f1h, f1a = None, None, None, None, None
-    if hist:
-        f1h, f1a, nhalf = half_shares(hist)
-        if f1h is not None:
-            HM = half_markets(hg, ag, f1h, f1a, rng)
-            notes.append(f"Mi-temps calibrée sur {nhalf} matchs réels (part 1re période : dom {f1h:.0%}, ext {f1a:.0%}) ; "
-                         "minutage du but supposé indépendant du score (approximation).")
-        else:
-            half_note = "Marchés mi-temps ABSENTS : HTHG/HTAG non fournis par la source (non fabriqués)."
-            notes.append(half_note)
-        periph = peripheral_markets(hist, a.home, a.away, asof, rng)
+    # notes mi-temps / périphériques — reconstruites à l'identique (hit comme miss)
+    if f1h is not None:
+        half_note = None
+        notes.append(f"Mi-temps calibrée sur {payload['nhalf']} matchs réels (part 1re période : dom {f1h:.0%}, ext {f1a:.0%}) ; "
+                     "minutage du but supposé indépendant du score (approximation).")
     else:
-        half_note = "Marchés mi-temps & périphériques indisponibles : pas d'historique de ligue (λ externes)."
-        notes.append(half_note)
+        half_note = payload["half_note"]
+        if half_note:
+            notes.append(half_note)
+    if cache_hit:
+        notes.append(f"Monte-Carlo servi depuis le cache (snapshot {data_hash}, params {params_hash}) — "
+                     "tirages non relancés, résultat identique au pricing d'origine.")
 
     offers = {}
     for lab, vals in (("1X2", parse_odds_arg(a.odds_1x2)), ("OU2.5", parse_odds_arg(a.odds_ou25)),
@@ -1045,6 +1121,7 @@ def cmd_simulate(a):
            "coup_envoi": a.kickoff, "fixture_id": a.fixture_id, "div": a.div, "home": a.home, "away": a.away, "model_version": MODEL_VERSION,
            "source_lambdas": source, "statut_modele": status, "lh": round(lh, 3), "la": round(la, 3), "rho": rho, "sigma": sigma,
            "scenarios": scen, "n_simulations": n, "demi_largeur_IC95_MC": round(half, 4),
+           "mc_cache": {"hit": cache_hit, "snapshot_hash": data_hash, "params_hash": params_hash, "key": ckey},
            "marches": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in M.items()
                        if k in ("1", "X", "2", "1X", "X2", "12", "BTTS_oui", "Over1.5", "Over2.5", "Over3.5",
                                 "total_pair", "total_impair", "scores")},
@@ -1084,7 +1161,8 @@ def cmd_simulate(a):
     print(f"# {a.home} – {a.away}  ({a.div}, {a.kickoff or 'coup d envoi non renseigné'})")
     print(f"Modèle {MODEL_VERSION} · {source}\nStatut : {status}")
     print(f"Buts attendus : {a.home} {lh:.2f} · {a.away} {la:.2f}  (moyenne, ≠ score le plus probable)")
-    print(f"Simulations exécutées : {n:,} (demi-largeur IC95 Monte-Carlo max {half:.4f}) · ρ={rho} · rythme σ={sigma}")
+    print(f"Simulations exécutées : {n:,} (demi-largeur IC95 Monte-Carlo max {half:.4f}) · ρ={rho} · rythme σ={sigma}"
+          + ("  [CACHE]" if cache_hit else ""))
     print(f"1X2 : {M['1']:.1%} / {M['X']:.1%} / {M['2']:.1%}" + (f"   (exact : {exact['1X2'][0]:.1%} / {exact['1X2'][1]:.1%} / {exact['1X2'][2]:.1%})" if exact else ""))
     print(f"DC 1X {M['1X']:.1%} · X2 {M['X2']:.1%} · 12 {M['12']:.1%} · DNB dom gain {M['DNB_1']['gain']:.1%} remb. {M['DNB_1']['rembourse']:.1%}")
     print(f"Over 1.5 {M['Over1.5']:.1%} · Over 2.5 {M['Over2.5']:.1%} · Over 3.5 {M['Over3.5']:.1%} · BTTS {M['BTTS_oui']:.1%}")
@@ -1188,6 +1266,7 @@ def main():
     s.add_argument("--n0", type=int, default=10_000); s.add_argument("--nmax", type=int, default=640_000)
     s.add_argument("--tol", type=float, default=0.005); s.add_argument("--seed", type=int, default=2026)
     s.add_argument("--record", action="store_true"); s.add_argument("--refresh", action="store_true")
+    s.add_argument("--no-cache", action="store_true", help="ignore et n'écrit pas le cache Monte-Carlo (recalcul complet)")
     s.add_argument("--fixture-id", type=int, help="identifiant API-Football (règlement automatique)")
     st = sp.add_parser("settle")
     st.add_argument("--forecast-id", required=True)

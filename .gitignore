@@ -44,6 +44,9 @@ data/fusion/
 # APEX-SOURCES (cache CSV football-data, retéléchargeable)
 data/sources/
 
+# Cache Monte-Carlo BSM (mod #2) — déterministe au snapshot, reconstructible, éphémère
+data/bsm_mc_cache/
+
 # APEX NEWSDESK (actualité week-end générée, append-only, non versionnée)
 data/newsdesk/
 
