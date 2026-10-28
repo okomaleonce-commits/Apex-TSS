@@ -51,7 +51,9 @@ data/bsm_mc_cache/
 reports/postmatch/
 
 # APEX-DIGEST (interface unifiée — digests générés + scaffolds d'input, éphémères)
-reports/digest/
+reports/digest/*
+# … sauf la source de la page web (versionnée)
+!reports/digest/apex_digest_interface.html
 
 # APEX NEWSDESK (actualité week-end générée, append-only, non versionnée)
 data/newsdesk/
