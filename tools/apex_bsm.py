@@ -56,6 +56,70 @@ def load_roi_gate() -> dict:
     except Exception:
         return {}
 
+
+MODEL_CARDS_DIR = ROOT / "tools" / "params" / "model_cards"
+
+
+def _config_hash(P: dict) -> str:
+    import hashlib as _h, json as _json
+    return _h.sha1(_json.dumps({k: P[k] for k in sorted(P)}, default=str).encode()).hexdigest()[:12]
+
+
+def load_model_card(div: str):
+    """Model card signée/versionnée d'une ligue (tools/params/model_cards/<div>.json).
+    Le MATCH vérifie cette carte au lieu de relancer le backtest (backtest hors chemin
+    critique, structural mod #1). Lecture par ligue → un backtest ad hoc d'une autre
+    ligue ne peut plus polluer le statut de celle-ci. Fail-open : None si absente/illisible."""
+    try:
+        import json as _json
+        p = MODEL_CARDS_DIR / f"{div}.json"
+        return _json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+    except Exception:
+        return None
+
+
+def card_eligible(card: dict, as_of: dt.date) -> bool:
+    """Habilitée pour une décision OFFICIELLE ? Supérieure au marché (IC95 haut < 0),
+    J27 OK, échantillon suffisant, carte non expirée. Sinon → SHADOW_ONLY."""
+    if not card:
+        return False
+    try:
+        if card.get("valid_until") and dt.date.fromisoformat(card["valid_until"]) < as_of:
+            return False
+    except Exception:
+        return False
+    return bool(card.get("beats_market")) and card.get("j27_status") == "OK" \
+        and (card.get("sample_size") or 0) >= 200
+
+
+def build_card(div, stab_entry, betting_div, P, run_id, periods, roi_gate) -> dict:
+    """Construit une model card per-ligue à partir d'un run de backtest réel (jamais inventée)."""
+    ic = (stab_entry or {}).get("IC95")
+    beats = bool(ic and ic[1] < 0)          # delta_ll négatif = modèle meilleur ; IC95 haut < 0 = significatif
+    if beats:
+        statut = "VALIDÉ (meilleur que le marché hors échantillon)"
+    elif ic and ic[0] > 0:
+        statut = "NON SUPÉRIEUR AU MARCHÉ — EV contre le marché présumée illusoire"
+    else:
+        statut = "NON CONCLUANT — pas de différence significative avec le marché"
+    rg = (roi_gate or {}).get(div)
+    j27 = "ROI_NEGATIF" if (rg and rg.get("roi_ic95_haut") is not None and rg["roi_ic95_haut"] < 0) else "OK"
+    card = {
+        "model_version": MODEL_VERSION, "league": div, "markets_validated": BET_RULES["markets"],
+        "sample_size": (stab_entry or {}).get("n"),
+        "delta_ll_vs_marche": (stab_entry or {}).get("delta_ll_vs_marche"), "delta_ll_IC95": ic,
+        "roi": (betting_div or {}).get("rendement"), "roi_IC95": (betting_div or {}).get("IC95"),
+        "clv": (betting_div or {}).get("clv"), "n_paris": (betting_div or {}).get("n"),
+        "brier": None, "calibration": None, "statut": statut,
+        "beats_market": beats, "j27_status": j27,
+        "backtest_period": periods.get("backtest_period") if periods else None,
+        "source_run": run_id, "configuration_hash": _config_hash(P),
+        "valid_until": (dt.date.today() + dt.timedelta(days=90)).isoformat(),
+        "signed_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+    }
+    card["eligible_officiel"] = card_eligible(card, dt.date.today())
+    return card
+
 # Règles de pari fixées AVANT le backtest (ne pas modifier après avoir vu le test final).
 BET_RULES = {
     "markets": ["1X2", "OU2.5"],
@@ -514,6 +578,26 @@ def cmd_backtest(a):
     params = {"run_id": run_id, "model_version": MODEL_VERSION, **P, "divs": divs,
               "statut_validation": status, "stabilite_par_ligue": stab}
     (BT_DIR / "latest_params.json").write_text(json.dumps(params, ensure_ascii=False, indent=1))
+    # Model cards signées per-ligue (structural mod #1) : sortent le backtest du chemin critique.
+    # Écrites par ligue → un backtest ad hoc d'une ligue ne touche QUE sa carte (fin du clobber de latest_params).
+    MODEL_CARDS_DIR.mkdir(parents=True, exist_ok=True)
+    rg = load_roi_gate()
+    bets_by_div = {}
+    for _b in bets:
+        bets_by_div.setdefault(_b["div"], []).append(_b)
+
+    def _div_betting(bl):
+        if not bl:
+            return None
+        pr = np.array([x["pnl"] for x in bl]); clvs = [x["clv"] for x in bl if x["clv"] is not None]
+        return {"n": len(bl), "rendement": round(float(pr.mean()), 4), "IC95": boot_ci(pr),
+                "clv": round(float(np.mean(clvs)), 4) if clvs else None}
+
+    periods = {"backtest_period": f"apprentissage {train} · validation {val} · test {test}"}
+    stabmap = {s["div"]: s for s in stab}
+    for d in divs:
+        card = build_card(d, stabmap.get(d), _div_betting(bets_by_div.get(d)), P, run_id, periods, rg)
+        (MODEL_CARDS_DIR / f"{d}.json").write_text(json.dumps(card, ensure_ascii=False, indent=1))
     print(render_report(report))
 
 
@@ -738,6 +822,7 @@ def cmd_simulate(a):
         sigma = params["sigma"] if params else 0.0
         source = a.lambda_source or "λ fournis directement (hors périmètre du backtest : non validé)"
         status = a.status_note or "NON VALIDÉ — λ externes"
+        shadow, shadow_reason = True, "λ externes hors périmètre backtesté — jamais officiel"
     else:
         if not params:
             sys.exit("Aucun backtest disponible : lancer d'abord `backtest`, ou fournir --lh/--la (statut NON VALIDÉ).")
@@ -755,9 +840,20 @@ def cmd_simulate(a):
             if t not in R["teams"]:
                 sys.exit(f"Équipe inconnue dans l'historique : {t}. Noms disponibles : {sorted(R['teams'])}")
         lh, la = lambdas(R, a.home, a.away); rho, sigma = params["rho"], params["sigma"]
-        stab = {s["div"]: s for s in params.get("stabilite_par_ligue", [])}.get(a.div)
         source = f"forces estimées au {asof} sur {R['n']} matchs antérieurs (backtest {params['run_id']})"
-        status = params["statut_validation"] + (f" · {a.div} : Δ={stab['delta_ll_vs_marche']:+.4f} IC95 {stab['IC95']}" if stab else " · ligue hors backtest")
+        # Statut lu depuis la MODEL CARD de la ligue (mod #1) — plus depuis latest_params (fin du clobber).
+        card = load_model_card(a.div)
+        if card:
+            status = (card.get("statut", params["statut_validation"])
+                      + f" · carte {a.div} Δ={card.get('delta_ll_vs_marche')} IC95 {card.get('delta_ll_IC95')}"
+                      + f" · valid_until {card.get('valid_until')}")
+            shadow = not card_eligible(card, asof)
+            shadow_reason = (None if not shadow else
+                             "model card non éligible (modèle non supérieur au marché / J27 / échantillon / expirée)")
+        else:
+            stab = {s["div"]: s for s in params.get("stabilite_par_ligue", [])}.get(a.div)
+            status = params["statut_validation"] + (f" · {a.div} : Δ={stab['delta_ll_vs_marche']:+.4f} IC95 {stab['IC95']}" if stab else " · ligue hors backtest")
+            shadow, shadow_reason = True, "aucune model card approuvée pour cette ligue → non officiel"
     scen = [(1.0, 1.0, 1.0)]
     if a.scenario:
         scen = [tuple(float(v) for v in s.split(":")) for s in a.scenario]
@@ -926,7 +1022,11 @@ def cmd_simulate(a):
            "marches_peripheriques": periph,
            "cotes": offers, "cotes_source": a.odds_source, "cotes_relevees_utc": a.odds_time,
            "ev": [{k: (round(v, 4) if isinstance(v, float) else v) for k, v in e.items() if k != "sens"} for e in evs],
-           "sensibilite": sens, "decision": decision, "statut_mise": "PROPOSÉE" if official else "AUCUNE", "notes": notes}
+           "sensibilite": sens, "decision": decision, "statut_mise": "PROPOSÉE" if official else "AUCUNE",
+           "shadow": shadow,
+           "statut_execution": ("SHADOW_ONLY — " + (shadow_reason or "modèle non habilité")) if shadow
+                               else "ÉLIGIBLE (exécution réelle suspendue par le gel)",
+           "notes": notes}
     if a.record:
         LEDGER_DIR.mkdir(exist_ok=True)
         with open(LEDGER_DIR / "forecasts.jsonl", "a", encoding="utf-8") as f:
@@ -970,7 +1070,9 @@ def cmd_simulate(a):
               (f"  ⚠ écart marché {e['ecart_marche']:+.1%}" if e.get("suspect") else ""))
     for n_ in notes:
         print("Note :", n_)
-    print(f"DÉCISION : {decision}")
+    print(f"DÉCISION : {('[SHADOW_ONLY] ' if shadow else '') + decision}")
+    if shadow:
+        print(f"EXÉCUTION : SHADOW_ONLY — {shadow_reason or 'modèle non habilité'} (décision modèle conservée, aucune mise officielle)")
     print(f"forecast_id : {fid}" + (" (enregistré dans ledger/forecasts.jsonl)" if a.record else " (non enregistré : ajouter --record)"))
 
 
