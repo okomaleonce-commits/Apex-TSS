@@ -288,7 +288,44 @@ def build_protocol_command(rec: dict, cfg: dict) -> dict:
     argv += ["--odds-source", "APEX-WORM snapshot", "--odds-time", rec.get("scan_time_utc", "")]
     if not rec.get("compositions"):
         argv += ["--missing-lineup"]   # honnêteté : compositions absentes → PROTOCOL posera un veto WAIT
-    return {"argv": argv, "runnable": runnable, "reason": reason}
+    # Présence d'au moins une cote vérifiée : sans elle, le MC ne peut rendre qu'« aucune sélection ».
+    has_odds = bool(o1 or (ou and ou.get("2.5") and all(ou["2.5"])) or (bt and all(bt)))
+    # Hash d'entrées SUBSTANTIELLES (mod #2, dédoublonnage du scan) : λ + cotes + kickoff + compo.
+    # Exclut odds-time/odds-source (l'horodatage change à chaque scan sans que le pricing change),
+    # de sorte qu'un snapshot au contenu identique ne relance pas le MC coûteux.
+    import hashlib as _h, json as _json
+    sig = {"home": rec.get("home", ""), "away": rec.get("away", ""),
+           "lam": [round(float(x), 4) for x in lam] if (lam and len(lam) == 2 and all(lam)) else None,
+           "o1": [round(float(x), 2) for x in o1] if o1 else None,
+           "ou25": [round(float(x), 2) for x in ou["2.5"]] if (ou and ou.get("2.5") and all(ou["2.5"])) else None,
+           "btts": [round(float(x), 2) for x in bt] if (bt and all(bt)) else None,
+           "kickoff": rec.get("kickoff", ""), "compo": bool(rec.get("compositions"))}
+    input_hash = _h.sha1(_json.dumps(sig, sort_keys=True).encode()).hexdigest()[:16]
+    return {"argv": argv, "runnable": runnable, "reason": reason,
+            "has_odds": has_odds, "input_hash": input_hash}
+
+
+def last_decisions_by_fixture(day) -> dict:
+    """Dernière entrée de décision SYNC par fixture_id dans le journal du jour (append-only).
+    Sert au dédoublonnage (mod #2) : si l'input_hash d'un match n'a pas bougé depuis sa dernière
+    exécution PROTOCOL réussie, on ne relance pas le MC. Fail-open : {} si journal absent/illisible."""
+    path = DEC_DIR / f"{day.isoformat()}.jsonl"
+    out = {}
+    try:
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                fid = e.get("fixture_id")
+                if fid is not None:
+                    out[fid] = e          # append-only → la dernière vue gagne
+    except OSError:
+        return {}
+    return out
 
 
 def run_protocol(argv: list[str], home: str, away: str, kickoff: str) -> dict:
@@ -647,6 +684,11 @@ def cmd_sync(a):
     pnl_week = a.pnl_week or 0.0
     decisions = []
     counts = {GREEN: 0, ORANGE: 0, RED: 0}
+    # Dédoublonnage du scan (mod #2) : dernière décision connue par fixture, pour ne relancer le MC
+    # que si l'input_hash a changé. `--force` relance tout.
+    prev_dec = last_decisions_by_fixture(day)
+    REUSABLE = {"selection", "abstention", "wait", "unvalidated"}
+    n_reused = n_skip_no_odds = 0
 
     for c in sel["queued"]:
         rec = rec_by_id.get(c["fixture_id"], {})
@@ -655,11 +697,30 @@ def cmd_sync(a):
                  "home": c["home"], "away": c["away"], "league": c["league"],
                  "kickoff": c["kickoff"], "priority": c["priority"], "tags": c["tags"],
                  "worm_market": c["worm_market"], "worm_tier": c["worm_tier"],
+                 "input_hash": cmd.get("input_hash"),
                  "protocol_command": " ".join(cmd["argv"]), "protocol": None, "risk": None}
         protocol = None
         risk = None
-        if a.run_protocol and cmd["runnable"]:
-            protocol = run_protocol(cmd["argv"], c["home"], c["away"], c["kickoff"] or "")
+        if a.run_protocol and cmd["runnable"] and not cmd.get("has_odds"):
+            # GATE PAS CHER AVANT MC : sans cote vérifiée, le MC ne rendrait qu'« aucune sélection ».
+            protocol = {"status": "skip_no_odds",
+                        "reason": "aucune cote vérifiée au snapshot — MC non lancé (gate avant MC)"}
+            entry["protocol"] = protocol
+            n_skip_no_odds += 1
+        elif a.run_protocol and cmd["runnable"]:
+            prev = prev_dec.get(c["fixture_id"])
+            prev_proto = prev.get("protocol") if isinstance(prev, dict) else None
+            reuse = (not getattr(a, "force", False) and isinstance(prev_proto, dict)
+                     and prev.get("input_hash") == cmd.get("input_hash")
+                     and prev_proto.get("status") in REUSABLE)
+            if reuse:
+                # RECALCULE SEULEMENT CE QUI A CHANGÉ : snapshot identique → on réutilise le verdict MC.
+                protocol = dict(prev_proto)
+                entry["reused"] = True
+                entry["reused_from"] = prev.get("sync_run_utc")
+                n_reused += 1
+            else:
+                protocol = run_protocol(cmd["argv"], c["home"], c["away"], c["kickoff"] or "")
             entry["protocol"] = protocol
             if protocol.get("status") == "selection":
                 off = protocol["official"]
@@ -710,6 +771,10 @@ def cmd_sync(a):
             fh.write(json.dumps({**e, "sync_run_utc": run_at}, ensure_ascii=False) + "\n")
 
     _print_sync_report(day, cfg, sel, decisions, counts, a.run_protocol)
+    if a.run_protocol and (n_reused or n_skip_no_odds):
+        print(f"Économie de calcul (mod #2) : {n_reused} match(s) réutilisé(s) sans relancer le MC "
+              f"(snapshot inchangé), {n_skip_no_odds} ignoré(s) avant MC (aucune cote vérifiée)."
+              + (" Utiliser --force pour tout relancer." if n_reused else ""))
     print(f"\nJournal : {dec_path.relative_to(ROOT)} (append-only)")
 
 
@@ -844,6 +909,8 @@ def main():
     common(s)
     s.add_argument("--run-protocol", action="store_true", dest="run_protocol",
                    help="exécute réellement bsm simulate (sinon dry-run : commandes émises)")
+    s.add_argument("--force", action="store_true",
+                   help="relance le MC même si l'input_hash d'un match n'a pas changé (ignore le dédoublonnage)")
     s.add_argument("--pnl-day", type=float, dest="pnl_day", help="P/L réalisé du jour (stop-loss)")
     s.add_argument("--pnl-week", type=float, dest="pnl_week", help="P/L réalisé de la semaine (stop-loss)")
 
